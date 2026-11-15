@@ -29,7 +29,7 @@
 - [Programmatic API](#programmatic-api)
 - [Gateway REST & SSE Endpoints](#gateway-rest--sse-endpoints)
 - [Project Layout](#project-layout)
-- [Testing](#testing)
+- [Testing & Autonomous Benchmarking](#testing--autonomous-benchmarking)
 - [License](#license)
 
 ---
@@ -48,16 +48,16 @@ Modern agentic frameworks often require complex runtime dependencies, external d
 ## Key Features
 
 - **Autonomous ReAct Loop**: Multi-step reasoning and tool execution engine with configurable step budgets, error recovery, and safety guardrails.
-- **Smarter Multi-Model Routing & Failover**: Automatic retry and seamless handoff (`ModelRouter`) from local models (Ollama, LM Studio, vLLM) to cloud providers (Gemini, OpenAI, Anthropic) when a local model fails or hits context window limits.
-- **Universal Model Abstraction**: Unified interface across Google Gemini, OpenAI (GPT-4o, o-series), Anthropic Claude, Ollama, LM Studio, vLLM, and Mock engines.
-- **Dynamic Skill Registry**: Automatic hot-discovery of custom JavaScript tools (`./skills/*.js`) and structured agent workflows (`./skills/*/SKILL.md`).
-- **Comprehensive Built-in Tools**: Shell command execution, file manipulation, surgical patching, directory inspection, web fetching with HTML-to-Markdown conversion, and system telemetry.
+- **Smarter Multi-Model Routing & Failover**: Automatic retry, rate-limit cooldown, and seamless handoff (`ModelRouter`) across local models (Ollama, LM Studio, vLLM) and cloud providers (Gemini, OpenAI, Anthropic, DeepSeek, Kimi, Qwen, GLM) with complexity-based routing and token/cost budgets.
+- **Universal Model Abstraction**: Unified interface across Google Gemini, OpenAI, Anthropic Claude, DeepSeek, Kimi (Moonshot), Qwen (DashScope), GLM (Zhipu), Ollama, LM Studio, vLLM, and built-in Mock/OM engines.
+- **Dynamic Skill Registry & Subagents**: Automatic hot-discovery of custom JavaScript tools (`./skills/*.js`), structured agent workflows (`./skills/*/SKILL.md`), MCP Streamable HTTP tools, and isolated subagents (`spawn_subagent` with optional git worktree isolation).
+- **Comprehensive Built-in Tools**: Shell command execution, file manipulation, surgical patching, directory inspection, git operations (`git_status`, `git_diff`, `git_branch`), web fetching with HTML-to-Markdown conversion, and system telemetry.
 - **Enhanced Memory with Local Vector Search**:
   - `memory/MEMORY.md`: Curated, long-term project knowledge and user preferences.
   - `memory/daily/YYYY-MM-DD.md`: Timestamped daily activity ledgers.
-  - `memory/sessions/session_<id>.json`: Full execution traces and replay trajectories.
-  - `memory/vectors.json`: Lightweight 256-dimensional local vector embeddings enabling semantic search across past sessions, journals, and project knowledge bases (`semantic_search_memory` & `index_knowledge`).
-- **Polished Web Dashboard & Live Visibility**: Real-time SSE event streaming, collapsible tool-execution traces with arguments/outputs, failover banners, semantic vector search UI, and live visual activity logs.
+  - `memory/sessions/session_<id>.json`: Full execution traces, session forking, and deterministic replay trajectories.
+  - `memory/vectors.json` & `node:sqlite` Vector Store: Local vector embeddings (or HTTP `/v1/embeddings` / Ollama `/api/embed`) enabling semantic search across past sessions, journals, and project knowledge bases (`semantic_search_memory` & `index_knowledge`).
+- **Polished Web Dashboard & Agent Console**: Real-time SSE event streaming, collapsible tool-execution traces, failover banners, semantic vector search UI, HITL tool/shell approvals, workspace snapshots/rollback, and one-off/persistent Agent Management (`/api/agents`).
 - **Community-Ready CLI Quickstart (`npx omega-agent init`)**: One-command project scaffolder generating template tool/workflow skills, config, and `.gitignore`-protected `.env` files.
 
 ---
@@ -79,15 +79,17 @@ Modern agentic frameworks often require complex runtime dependencies, external d
         ┌────────────────────────┴─┐         ┌─┴────────────────────────┐
         ▼                          ▼         ▼                          ▼
 ┌──────────────┐         ┌───────────────┐ ┌──────────────┐    ┌───────────────┐
-│ Model Engine │         │ SkillRegistry │ │ MemoryEngine │    │ Gateway Server│
+│ ModelRouter  │         │ SkillRegistry │ │ MemoryEngine │    │ Gateway Server│
 ├──────────────┤         ├───────────────┤ ├──────────────┤    ├───────────────┤
-│ • Mock       │         │ • Shell       │ │ • MEMORY.md  │    │ • HTTP REST   │
+│ • Mock / OM  │         │ • Shell / Git │ │ • MEMORY.md  │    │ • HTTP REST   │
 │ • Gemini     │         │ • Filesystem  │ │ • Daily Logs │    │ • SSE Stream  │
-│ • OpenAI     │         │ • Web Fetcher │ │ • Sessions   │    │ • Web UI      │
-│ • Anthropic  │         │ • System Info │ └──────────────┘    └───────────────┘
-│ • Ollama     │         │ • ./skills/*  │
-│ • LM Studio  │         │ • SKILL.md    │
-└──────────────┘         └───────────────┘
+│ • OpenAI     │         │ • Web Fetcher │ │ • Sessions   │    │ • Agents UI   │
+│ • Anthropic  │         │ • Subagents   │ │ • VectorStore│    │ • Approvals   │
+│ • DeepSeek   │         │ • MCP Client  │ │   (JSON/SQL) │    │ • Snapshots   │
+│ • Kimi/Qwen  │         │ • ./skills/*  │ └──────────────┘    └───────────────┘
+│ • GLM/Ollama │         │ • SKILL.md    │
+│ • LMStu/vLLM │         └───────────────┘
+└──────────────┘
 ```
 
 ---
@@ -146,24 +148,35 @@ Navigate to **`http://localhost:3000`** in your browser to access the visual age
 
 ### Environment Variables (`.env`)
 
-Create a `.env` file in the project root to configure your preferred providers:
+Create a `.env` file in the project root (or copy `.env.example`) to configure your preferred providers:
 
 ```ini
-# Default provider: mock, gemini, openai, anthropic, ollama, lmstudio, vllm
-OM_PROVIDER=mock
+# Active provider: auto | gemini | openai | anthropic | deepseek | kimi | qwen | glm | ollama | lmstudio | vllm | om
+OM_PROVIDER=auto
 
-# Optional model override
-OM_MODEL=om-mock-turbo
+# Optional default model override
+# OM_MODEL=gemini-3.5-flash
 
 # Cloud Provider API Keys
 GEMINI_API_KEY=AIzaSy...
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
+DEEPSEEK_API_KEY=sk-...
+KIMI_API_KEY=sk-...
+QWEN_API_KEY=sk-...
+GLM_API_KEY=...
 
 # Local Inference Server URLs
 OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=llama3.2:latest
 LMSTUDIO_BASE_URL=http://127.0.0.1:1234/v1
+VLLM_BASE_URL=http://127.0.0.1:8000/v1
+
+# Web Gateway & Optional Embeddings / Compaction
+OM_GATEWAY_PORT=3000
+# OM_EMBEDDING_URL=http://127.0.0.1:11434/api/embed
+# OM_EMBEDDING_MODEL=nomic-embed-text
+# OM_LLM_COMPACTION=true
 ```
 
 ### Application Settings (`om.config.json`)
