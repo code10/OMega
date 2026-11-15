@@ -279,4 +279,139 @@ test('OM Gateway Server API endpoints', async (t) => {
     assert.equal(updatedCfg.temperature, 0.7);
     assert.equal(updatedCfg.model, 'om-reasoning');
   });
+
+  await t.test('Agents category UI and /api/agents endpoints support one-off and persistent agents', async () => {
+    // 1. UI serves Agents category rail button and pane
+    const htmlRes = await fetch(`${url}/`);
+    assert.equal(htmlRes.status, 200);
+    const html = await htmlRes.text();
+    assert.ok(html.includes('data-tab="agents"'));
+    assert.ok(html.includes('id="paneAgents"'));
+
+    // 2. Run a one-off agent
+    const runRes = await fetch(`${url}/api/agents/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Quick Worker', prompt: 'What is the current time?' })
+    });
+    assert.equal(runRes.status, 202);
+    const runData = await runRes.json();
+    assert.equal(runData.success, true);
+    assert.ok(runData.run.runId);
+
+    // Wait briefly for mock agent run to complete
+    let completedRun = null;
+    for (let i = 0; i < 30; i++) {
+      const stateRes = await fetch(`${url}/api/agents`);
+      const stateData = await stateRes.json();
+      completedRun = stateData.runs.find((r) => r.runId === runData.run.runId);
+      if (completedRun && completedRun.status !== 'running') break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(completedRun);
+    assert.equal(completedRun.status, 'completed');
+
+    // 3. Create, run, pause, resume, and delete a persistent agent
+    const createRes = await fetch(`${url}/api/agents/persistent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Persistent Helper',
+        description: 'Handles recurring checks',
+        taskPrompt: 'Check system status',
+        mode: 'manual',
+        keepHistory: true
+      })
+    });
+    assert.equal(createRes.status, 201);
+    const createData = await createRes.json();
+    assert.equal(createData.success, true);
+    assert.equal(createData.agent.sessionId, 'persistent_1');
+    const agentId = createData.agent.id;
+
+    const pRunRes = await fetch(`${url}/api/agents/persistent/${encodeURIComponent(agentId)}/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    assert.equal(pRunRes.status, 202);
+    const pRunData = await pRunRes.json();
+    assert.equal(pRunData.success, true);
+
+    let pAgent = null;
+    for (let i = 0; i < 30; i++) {
+      const stateRes = await fetch(`${url}/api/agents`);
+      const stateData = await stateRes.json();
+      pAgent = stateData.persistentAgents.find((a) => a.id === agentId);
+      if (pAgent && pAgent.status !== 'running' && pAgent.runCount >= 1) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(pAgent);
+    assert.equal(pAgent.runCount, 1);
+    assert.equal(pAgent.sessionId, 'persistent_1');
+
+    const sessListRes = await fetch(`${url}/api/sessions`);
+    assert.equal(sessListRes.status, 200);
+    const sessListData = await sessListRes.json();
+    const sessionIds = (sessListData.sessions || []).map((s) => s.sessionId);
+    assert.ok(sessionIds.includes('persistent_1'), `Expected persistent_1 in sessions, got: ${sessionIds.join(', ')}`);
+    assert.ok(!sessionIds.includes('session_2'), `Did not expect agents to create session_2, got: ${sessionIds.join(', ')}`);
+
+    const stopRes = await fetch(`${url}/api/agents/persistent/${encodeURIComponent(agentId)}/stop`, { method: 'POST' });
+    assert.equal(stopRes.status, 200);
+    const stopData = await stopRes.json();
+    assert.equal(stopData.agent.enabled, false);
+    assert.equal(stopData.agent.status, 'paused');
+
+    const startRes = await fetch(`${url}/api/agents/persistent/${encodeURIComponent(agentId)}/start`, { method: 'POST' });
+    assert.equal(startRes.status, 200);
+    const startData = await startRes.json();
+    assert.equal(startData.agent.enabled, true);
+    assert.equal(startData.agent.status, 'idle');
+
+    // PATCH update persistent agent
+    const patchRes = await fetch(`${url}/api/agents/persistent/${encodeURIComponent(agentId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ maxSteps: 30, dailyTokenBudget: 50000 })
+    });
+    assert.equal(patchRes.status, 200);
+    const patchData = await patchRes.json();
+    assert.equal(patchData.agent.maxSteps, 30);
+    assert.equal(patchData.agent.dailyTokenBudget, 50000);
+
+    // Webhook trigger + Diff check
+    const whRes = await fetch(`${url}/api/agents/persistent/${encodeURIComponent(agentId)}/webhook`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'ci_failed', branch: 'main' })
+    });
+    assert.equal(whRes.status, 202);
+    const whData = await whRes.json();
+    for (let i = 0; i < 30; i++) {
+      const stateRes = await fetch(`${url}/api/agents`);
+      const stateData = await stateRes.json();
+      const found = stateData.runs.find((r) => r.runId === whData.run.runId);
+      if (found && found.status !== 'running') break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
+    const diffRes = await fetch(`${url}/api/agents/runs/${encodeURIComponent(whData.run.runId)}/diff`);
+    assert.equal(diffRes.status, 200);
+    const diffData = await diffRes.json();
+    assert.equal(diffData.success, true);
+
+    const delRes = await fetch(`${url}/api/agents/persistent/${encodeURIComponent(agentId)}`, { method: 'DELETE' });
+    assert.equal(delRes.status, 200);
+    const delData = await delRes.json();
+    assert.equal(delData.deleted, true);
+
+    // Reset all agents & runs
+    const resetAgentsRes = await fetch(`${url}/api/agents/reset`, { method: 'POST' });
+    assert.equal(resetAgentsRes.status, 200);
+    const resetAgentsData = await resetAgentsRes.json();
+    assert.equal(resetAgentsData.success, true);
+    assert.equal(resetAgentsData.persistentAgents.length, 0);
+    assert.equal(resetAgentsData.runs.length, 0);
+  });
 });

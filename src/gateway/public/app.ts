@@ -11,11 +11,13 @@ import { initParametersPanel } from './parameters.js';
 import { initModels } from './models.js';
 import { initSessions } from './sessions.js';
 import { initTraceRenderer } from './traceRenderer.js';
+import { initAgents } from './agents.js';
 
 document.addEventListener('DOMContentLoaded', () => {
   const { appendActivityLogEntry, loadActivityHistory, loadMemory } = initTelemetry();
   const { openRefViewer, closeRefViewer, closeSkillCreator } = initModals({ loadSkills: () => loadSkills() });
   const { refreshRouting } = initRoutingModal();
+  const { loadAgents, handleAgentUpdate } = initAgents();
 
   function autoResizePromptInput() {
     promptInput.style.height = 'auto';
@@ -46,6 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Chat layout elements
   const sessionsSidebar = byId('sessionsSidebar');
+  const agentsSidebar = document.getElementById('agentsSidebar');
   const toggleSessionsBtn = byId<HTMLButtonElement>('toggleSessionsBtn');
   const resetSessionsCounterBtn = byId<HTMLButtonElement>('resetSessionsCounterBtn');
   const sessionsListContainer = byId('sessionsListContainer');
@@ -130,6 +133,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const TAB_NAMES: Record<string, string> = {
     chat: 'Chat',
+    agents: 'Agents',
     models: 'Models',
     skills: 'Skills',
     memory: 'Memory',
@@ -149,6 +153,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let targetPane = null;
     if (tab === 'chat') targetPane = document.getElementById('paneChat');
+    else if (tab === 'agents') targetPane = document.getElementById('paneAgents');
     else if (tab === 'models') targetPane = document.getElementById('paneModels');
     else if (tab === 'skills') targetPane = document.getElementById('paneSkills');
     else if (tab === 'memory') targetPane = document.getElementById('paneMemory');
@@ -158,6 +163,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (viewTitle) viewTitle.textContent = TAB_NAMES[tab] || 'OM Agent Studio';
 
     if (tab === 'chat') loadSessions();
+    if (tab === 'agents') loadAgents();
     if (tab === 'models') loadModels();
     if (tab === 'skills') loadSkills();
     if (tab === 'memory') loadMemory();
@@ -166,6 +172,15 @@ document.addEventListener('DOMContentLoaded', () => {
       loadModels();
       loadActivityHistory();
     }
+    syncLeftSidebarToggle();
+  }
+
+  function syncLeftSidebarToggle() {
+    if (!toggleSessionsBtn) return;
+    const sidebar = activeTab === 'agents' ? agentsSidebar : sessionsSidebar;
+    if (!sidebar) return;
+    toggleSessionsBtn.classList.toggle('active', !sidebar.classList.contains('hidden'));
+    toggleSessionsBtn.title = activeTab === 'agents' ? 'Toggle Agents Sidebar' : 'Toggle Sessions Sidebar';
   }
 
   railItems.forEach((btn) => {
@@ -237,11 +252,13 @@ document.addEventListener('DOMContentLoaded', () => {
     await resetSession();
   });
 
-  // Toggle Sessions Panel (Left Sidebar)
-  if (toggleSessionsBtn && sessionsSidebar) {
+  // Toggle Left Sidebar (Sessions in Chat, Runtime in Agents)
+  if (toggleSessionsBtn) {
     toggleSessionsBtn.addEventListener('click', () => {
-      sessionsSidebar.classList.toggle('hidden');
-      toggleSessionsBtn.classList.toggle('active', !sessionsSidebar.classList.contains('hidden'));
+      const sidebar = activeTab === 'agents' ? agentsSidebar : sessionsSidebar;
+      if (!sidebar) return;
+      sidebar.classList.toggle('hidden');
+      syncLeftSidebarToggle();
     });
   }
 
@@ -363,6 +380,12 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
           const entry = JSON.parse(ev.data);
           appendActivityLogEntry(entry);
+        } catch (_) { }
+      });
+      es.addEventListener('agent_update', (ev) => {
+        try {
+          const payload = JSON.parse(ev.data);
+          handleAgentUpdate(payload);
         } catch (_) { }
       });
       es.addEventListener('approval_required', (ev) => {

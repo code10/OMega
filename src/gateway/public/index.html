@@ -28,14 +28,25 @@
           <img src="favicon.svg?v=4" alt="OMega" class="om-rail-logo" width="26" height="26">
         </div>
         <nav class="rail-nav">
-          <button class="rail-item active" data-tab="chat" title="Chat & Agent Workspace">
+          <button class="rail-item active" data-tab="chat" aria-label="Chat">
             <svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
             </svg>
             <span class="rail-tooltip">Chat</span>
           </button>
 
-          <button class="rail-item" data-tab="models" title="Discover & Load Models">
+          <button class="rail-item" data-tab="agents" aria-label="Agents">
+            <svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="8" width="18" height="12" rx="2"></rect>
+              <path d="M12 2v6"></path>
+              <circle cx="12" cy="2" r="1"></circle>
+              <circle cx="9" cy="14" r="1"></circle>
+              <circle cx="15" cy="14" r="1"></circle>
+            </svg>
+            <span class="rail-tooltip">Agents</span>
+          </button>
+
+          <button class="rail-item" data-tab="models" aria-label="Models">
             <svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
               <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
@@ -43,14 +54,14 @@
             <span class="rail-tooltip">Models</span>
           </button>
 
-          <button class="rail-item" data-tab="skills" title="Skills & Capabilities">
+          <button class="rail-item" data-tab="skills" aria-label="Skills">
             <svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
             </svg>
             <span class="rail-tooltip">Skills</span>
           </button>
 
-          <button class="rail-item" data-tab="memory" title="Memory & Knowledge Bank">
+          <button class="rail-item" data-tab="memory" aria-label="Memory">
             <svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"></path>
               <path d="M12 6v6l4 2"></path>
@@ -58,7 +69,7 @@
             <span class="rail-tooltip">Memory</span>
           </button>
 
-          <button class="rail-item" data-tab="system" title="Developer & Local Server">
+          <button class="rail-item" data-tab="system" aria-label="Developer">
             <svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="16 18 22 12 16 6"></polyline>
               <polyline points="8 6 2 12 8 18"></polyline>
@@ -92,7 +103,8 @@
             <span class="view-tagline" id="viewTagline" style="display:none;">Reasoning, local tool execution, and
               persistent memory</span>
           </div>
-          <span class="topbar-session-badge" id="topbarSessionTag" title="Active conversation session" style="display: none;">session_1</span>
+          <span class="topbar-session-badge" id="topbarSessionTag" title="Active conversation session"
+            style="display: none;">session_1</span>
         </div>
 
         <!-- Center Topbar: handles kept for state sync -->
@@ -171,7 +183,7 @@
             <!-- LEFT SUB-SIDEBAR: Chat Sessions / History -->
             <aside class="chat-sessions-sidebar" id="sessionsSidebar">
               <div class="sessions-header">
-                <h3>Chats</h3>
+                <h3>Sessions</h3>
                 <div class="sessions-header-actions">
                   <button class="sessions-action-btn danger-hover" id="resetSessionsCounterBtn"
                     title="Reset all sessions" type="button">
@@ -191,7 +203,7 @@
                 </div>
               </div>
               <div class="sessions-search-box">
-                <input type="text" id="sessionSearchInput" placeholder="Search chats..." />
+                <input type="text" id="sessionSearchInput" placeholder="Search..." />
               </div>
               <div class="sessions-list" id="sessionsListContainer">
                 <!-- Dynamically loaded from /api/sessions -->
@@ -449,8 +461,10 @@
                     </div>
 
                     <div class="input-meta-right">
-                      <button id="voiceBtn" class="voice-circle-btn" title="Voice Input (Speech-to-Text)" type="button" aria-label="Voice input">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <button id="voiceBtn" class="voice-circle-btn" title="Voice Input (Speech-to-Text)" type="button"
+                        aria-label="Voice input">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                          stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                           <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
                           <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
                           <line x1="12" y1="19" x2="12" y2="23"></line>
@@ -530,7 +544,8 @@
                 <div class="param-section">
                   <div class="param-section-title">
                     <span>Live Activity Stream</span>
-                    <button class="btn-xs ghost-xs" id="clearActivityLogBtn" type="button" style="padding: 1px 6px; font-size: 0.65rem;">Clear</button>
+                    <button class="btn-xs ghost-xs" id="clearActivityLogBtn" type="button"
+                      style="padding: 1px 6px; font-size: 0.65rem;">Clear</button>
                   </div>
                   <div class="live-activity-feed" id="liveActivityFeed">
                     <div class="activity-empty">Listening for real-time agent events...</div>
@@ -539,6 +554,255 @@
               </div>
             </aside>
 
+          </div>
+        </section>
+
+        <!-- TAB 2: AGENTS & PERSISTENT WORKERS -->
+        <section class="tab-pane" id="paneAgents">
+          <div class="chat-layout">
+            <!-- LEFT SUB-SIDEBAR: Agents List -->
+            <aside class="chat-sessions-sidebar" id="agentsSidebar">
+              <div class="sessions-header">
+                <h3>Runtime</h3>
+                <div class="sessions-header-actions">
+                  <button class="sessions-action-btn danger-hover" id="refreshAgentsSidebarBtn" title="Clear all agents"
+                    type="button">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"
+                      stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                      <path d="M3 3v5h5"></path>
+                    </svg>
+                  </button>
+                  <div class="agents-add-dropdown-wrap" id="agentsAddWrap">
+                    <button class="sessions-add-btn" id="sidebarNewAgentBtn" title="New Agent" type="button">
+                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                        stroke-width="2.5">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                      </svg>
+                    </button>
+                    <div class="agents-add-menu" id="agentsAddMenu" style="display: none;">
+                      <button type="button" class="agents-add-menu-item" id="menuNewOneOffAgent">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                          stroke-width="2">
+                          <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                        </svg>
+                        <span>One-Off</span>
+                      </button>
+                      <button type="button" class="agents-add-menu-item" id="menuNewPersistentAgent">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                          stroke-width="2">
+                          <rect x="3" y="8" width="18" height="12" rx="2"></rect>
+                          <path d="M12 2v6"></path>
+                        </svg>
+                        <span>Persistent</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="sessions-search-box">
+                <input type="text" id="agentsSearchInput" placeholder="Search..." />
+              </div>
+              <div class="sessions-list" id="agentsSidebarList">
+                <!-- Dynamically populated -->
+              </div>
+              <div class="sessions-sidebar-footer">
+                <div class="sessions-footer-btn agents-sidebar-status-pill" id="agentsSidebarFooter">
+                  <span class="routing-pill-dot healthy" id="agentsSidebarDot"></span>
+                  <span class="routing-pill-label" id="agentsSidebarSummary">0 persistent</span>
+                  <span class="routing-pill-meta" id="agentsSidebarRunning">0 running</span>
+                </div>
+              </div>
+            </aside>
+
+            <!-- MAIN AGENTS WORKSPACE -->
+            <div class="agents-main-area">
+              <div class="pane-content-padded">
+                <div class="section-intro">
+                  <div>
+                    <h3>Agents</h3>
+                    <p>Run one-off or persistent agents.</p>
+                  </div>
+                </div>
+
+                <div class="agent-error-banner" id="agentsErrorBanner" style="display: none;"></div>
+
+                <!-- Quick One-Off Agent Runner Form -->
+                <div class="agent-form-card" id="runAgentFormCard" style="display: none;">
+                  <div class="agent-form-header">
+                    <h4>One-Off Agent</h4>
+                    <button type="button" class="btn-xs ghost-xs" id="closeRunAgentFormBtn">&times;</button>
+                  </div>
+                  <div class="agent-form-grid">
+                    <div class="agent-form-field">
+                      <label for="oneOffAgentName">Agent Name (optional)</label>
+                      <input type="text" id="oneOffAgentName" class="param-input" placeholder="e.g. Code Auditor" />
+                    </div>
+                    <div class="agent-form-field">
+                      <label for="oneOffAgentProvider">Provider</label>
+                      <select id="oneOffAgentProvider" class="param-select">
+                        <option value="">Use Active Chat Provider</option>
+                      </select>
+                    </div>
+                    <div class="agent-form-field">
+                      <label for="oneOffAgentModelSelect">Model</label>
+                      <select id="oneOffAgentModelSelect" class="param-select">
+                        <option value="">Use Provider / Active Default</option>
+                      </select>
+                      <input type="text" id="oneOffAgentModel" class="param-input" placeholder="Custom model ID..."
+                        style="display: none; margin-top: 6px;" />
+                    </div>
+                  </div>
+                  <div class="agent-form-field">
+                    <label for="oneOffAgentSystem">Role / System Instructions (optional)</label>
+                    <input type="text" id="oneOffAgentSystem" class="param-input"
+                      placeholder="e.g. You are a senior TypeScript reviewer..." />
+                  </div>
+                  <div class="agent-form-field">
+                    <label for="oneOffAgentPrompt">Prompt</label>
+                    <textarea id="oneOffAgentPrompt" class="param-textarea" rows="3"
+                      placeholder="Describe the task you want this agent to complete..."></textarea>
+                  </div>
+                  <div class="agent-form-footer">
+                    <div class="agent-form-inline">
+                      <label for="oneOffAgentMaxSteps">Max Steps</label>
+                      <input type="number" id="oneOffAgentMaxSteps" class="param-input" value="15" min="1" max="50"
+                        style="width: 80px;" />
+                    </div>
+                    <button type="button" class="btn-sm primary-sm" id="submitRunAgentBtn">Launch</button>
+                  </div>
+                </div>
+
+                <!-- Create / Edit Persistent Agent Form -->
+                <div class="agent-form-card" id="newPersistentAgentCard" style="display: none;">
+                  <div class="agent-form-header">
+                    <h4 id="persistFormTitle">Persistent Agent</h4>
+                    <button type="button" class="btn-xs ghost-xs" id="closeNewPersistentAgentBtn">&times;</button>
+                  </div>
+                  <div class="agent-form-grid">
+                    <div class="agent-form-field">
+                      <label for="persistAgentName">Agent Name</label>
+                      <input type="text" id="persistAgentName" class="param-input" placeholder="e.g. Repo Watchdog" />
+                    </div>
+                    <div class="agent-form-field">
+                      <label for="persistAgentDesc">Description (optional)</label>
+                      <input type="text" id="persistAgentDesc" class="param-input"
+                        placeholder="Monitors logs & summarizes issues" />
+                    </div>
+                  </div>
+                  <div class="agent-form-grid">
+                    <div class="agent-form-field">
+                      <label for="persistAgentProvider">Provider</label>
+                      <select id="persistAgentProvider" class="param-select">
+                        <option value="">Use Active Chat Provider</option>
+                      </select>
+                    </div>
+                    <div class="agent-form-field">
+                      <label for="persistAgentModelSelect">Model</label>
+                      <select id="persistAgentModelSelect" class="param-select">
+                        <option value="">Use Provider / Active Default</option>
+                      </select>
+                      <input type="text" id="persistAgentModel" class="param-input" placeholder="Custom model ID..."
+                        style="display: none; margin-top: 6px;" />
+                    </div>
+                    <div class="agent-form-field">
+                      <label for="persistAgentMaxSteps">Max Steps per Run</label>
+                      <input type="number" id="persistAgentMaxSteps" class="param-input" value="25" min="1" max="100" />
+                    </div>
+                  </div>
+                  <div class="agent-form-field">
+                    <label for="persistAgentSystem">Role / System Prompt</label>
+                    <input type="text" id="persistAgentSystem" class="param-input"
+                      placeholder="Persistent instructions for this agent..." />
+                  </div>
+                  <div class="agent-form-field">
+                    <label for="persistAgentTask">Prompt</label>
+                    <textarea id="persistAgentTask" class="param-textarea" rows="3"
+                      placeholder="What should this persistent agent do?"></textarea>
+                  </div>
+                  <div class="agent-form-grid">
+                    <div class="agent-form-field">
+                      <label for="persistAgentMode">Execution Mode</label>
+                      <select id="persistAgentMode" class="param-select">
+                        <option value="manual">Manual / On-Demand (Stateful)</option>
+                        <option value="continuous">Continuous Loop (Run → Cooldown → Repeat)</option>
+                        <option value="interval">Interval Schedule (Every N sec)</option>
+                        <option value="cron">Cron Schedule (5-field)</option>
+                        <option value="watch">File Watch Trigger</option>
+                      </select>
+                    </div>
+                    <div class="agent-form-field" id="persistIntervalWrap" style="display: none;">
+                      <label for="persistAgentInterval" id="persistIntervalLabel">Interval (seconds)</label>
+                      <input type="number" id="persistAgentInterval" class="param-input" value="60" min="2" />
+                    </div>
+                    <div class="agent-form-field" id="persistCronWrap" style="display: none;">
+                      <label for="persistAgentCron">Cron Expression</label>
+                      <input type="text" id="persistAgentCron" class="param-input" value="*/5 * * * *"
+                        placeholder="*/5 * * * *" />
+                    </div>
+                    <div class="agent-form-field" id="persistWatchWrap" style="display: none;">
+                      <label for="persistAgentWatchPath">Watch Path (relative to workspace)</label>
+                      <input type="text" id="persistAgentWatchPath" class="param-input" value="src" placeholder="src" />
+                    </div>
+                  </div>
+                  <div class="agent-form-grid">
+                    <div class="agent-form-field">
+                      <label for="persistAgentWorkspaceMode">Workspace Isolation</label>
+                      <select id="persistAgentWorkspaceMode" class="param-select">
+                        <option value="shared">Shared Workspace</option>
+                        <option value="worktree">Isolated Git Worktree</option>
+                      </select>
+                    </div>
+                    <div class="agent-form-field">
+                      <label for="persistAgentTokenBudget">Daily Token Budget (optional)</label>
+                      <input type="number" id="persistAgentTokenBudget" class="param-input"
+                        placeholder="Unlimited if blank" min="1000" />
+                    </div>
+                  </div>
+                  <div class="agent-form-footer">
+                    <label class="agent-checkbox-label">
+                      <input type="checkbox" id="persistAgentKeepHistory" checked />
+                      <span>Retain conversation memory across runs</span>
+                    </label>
+                    <button type="button" class="btn-sm primary-sm" id="submitCreatePersistentBtn">Launch</button>
+                  </div>
+                </div>
+
+                <!-- One-Off Agents Section -->
+                <div class="agents-section">
+                  <div class="agents-section-title">
+                    <h4>One-Off</h4>
+                    <span class="session-badge-count" id="oneOffAgentsCount">0</span>
+                  </div>
+                  <div class="agents-grid" id="oneOffAgentsList">
+                    <!-- Populated dynamically -->
+                  </div>
+                </div>
+
+                <!-- Persistent Agents Section -->
+                <div class="agents-section">
+                  <div class="agents-section-title">
+                    <h4>Persistent</h4>
+                    <span class="session-badge-count" id="persistentAgentsCount">0</span>
+                  </div>
+                  <div class="agents-grid" id="persistentAgentsList">
+                    <!-- Populated dynamically -->
+                  </div>
+                </div>
+
+                <!-- Recent Runs Section -->
+                <div class="agents-section">
+                  <div class="agents-section-title">
+                    <h4>Recent Runs</h4>
+                    <span class="session-badge-count" id="agentRunsCount">0</span>
+                  </div>
+                  <div class="agent-runs-list" id="agentRunsList">
+                    <!-- Populated dynamically -->
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -605,15 +869,18 @@
               <div class="vector-search-header">
                 <div>
                   <h4>Semantic Vector Memory Search</h4>
-                  <span class="mem-sub">Query 256-dim local vector embeddings across MEMORY.md, daily journals, and past sessions</span>
+                  <span class="mem-sub">Query 256-dim local vector embeddings across MEMORY.md, daily journals, and past
+                    sessions</span>
                 </div>
                 <div class="vector-stats-badges">
                   <span class="vector-stat-pill" id="vectorCountBadge">0 vectors indexed</span>
-                  <button class="btn-xs ghost-xs" id="reindexVectorsBtn" type="button" title="Rebuild vector embeddings index">Re-index</button>
+                  <button class="btn-xs ghost-xs" id="reindexVectorsBtn" type="button"
+                    title="Rebuild vector embeddings index">Re-index</button>
                 </div>
               </div>
               <div class="vector-search-bar-row">
-                <input type="text" id="vectorSearchInput" class="param-input vector-search-input" placeholder="Search concepts semantically (e.g. 'preferred coding language', 'API architecture')..." />
+                <input type="text" id="vectorSearchInput" class="param-input vector-search-input"
+                  placeholder="Search concepts semantically (e.g. 'preferred coding language', 'API architecture')..." />
                 <select id="vectorSearchMode" class="param-select" style="width: 140px;">
                   <option value="hybrid">Hybrid (Vector + Keyword)</option>
                   <option value="semantic">Pure Semantic Vector</option>

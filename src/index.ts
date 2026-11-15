@@ -15,3 +15,4 @@ export { OMDaemon } from './daemon.js';
 export { OMEvalRunner } from './eval.js';
 export { OMSelfImprover } from './selfImprove.js';
 export { OMTrainingPipeline } from './training.js';
+export { AgentManager } from './gateway/agentManager.js';

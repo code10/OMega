@@ -6,6 +6,7 @@ import { startGateway } from '../dist/gateway/server.js';
 import { runInitCommand } from '../dist/cli/init.js';
 import { SessionReplay } from '../dist/replay.js';
 import { OMDaemon } from '../dist/daemon.js';
+import { AgentManager } from '../dist/gateway/agentManager.js';
 import { OMEvalRunner } from '../dist/eval.js';
 import { OMSelfImprover } from '../dist/selfImprove.js';
 import { OMTrainingPipeline } from '../dist/training.js';
@@ -262,7 +263,20 @@ Usage:
       console.error(`${C.red}[Daemon] Trigger '${rec.triggerId}' failed: ${rec.error}${C.reset}`);
     });
     await daemon.start();
-    console.log(`${C.skyBlue}[OMega Daemon] Running with ${daemon.triggers.size} trigger(s). Press Ctrl+C to stop.${C.reset}`);
+    const agentManager = new AgentManager(daemonAgent, {
+      onUpdate: (ev) => {
+        if (ev.type === 'run_finished') {
+          console.log(`${C.green}[Persistent Agent] Run '${ev.runId}' finished (${ev.status})${C.reset}`);
+        }
+      }
+    });
+    const enabledAgents = Array.from(agentManager.persistentAgents.values()).filter((a) => a.enabled);
+    console.log(`${C.skyBlue}[OMega Daemon] Running with ${daemon.triggers.size} trigger(s) and ${enabledAgents.length} persistent agent(s). Press Ctrl+C to stop.${C.reset}`);
+    process.on('SIGINT', () => {
+      agentManager.dispose();
+      daemon.stop();
+      process.exit(0);
+    });
     return;
   }
 

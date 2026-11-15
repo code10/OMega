@@ -13,6 +13,8 @@ import { handleMemoryRoutes } from './routes/memory.js';
 import { handleSessionRoutes } from './routes/sessions.js';
 import { handleGitRoutes } from './routes/git.js';
 import { handleConfigRoutes } from './routes/config.js';
+import { AgentManager } from './agentManager.js';
+import { handleAgentsRoutes } from './routes/agents.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -61,6 +63,10 @@ export async function startGateway(options: Record<string, any> = {}) {
 
   agent.on('activity', (entry) => {
     broadcastSSE('activity', entry);
+  });
+
+  const agentManager = new AgentManager(agent, {
+    onUpdate: (payload) => broadcastSSE('agent_update', payload)
   });
 
   // Bridge interactive tool/shell confirmation into SSE + POST /api/approvals/:id
@@ -188,6 +194,9 @@ export async function startGateway(options: Record<string, any> = {}) {
 
     // 3b. Git Routes (/api/git/status, /api/git/diff)
     if (handleGitRoutes({ req, res, pathname, url, agent })) return;
+
+    // 3c. Agents Routes (/api/agents*)
+    if (await handleAgentsRoutes({ req, res, pathname, agentManager })) return;
 
     // 3d. GET /api/activity (Live activity trace history & router stats)
     if (pathname === '/api/activity' && req.method === 'GET') {
@@ -509,11 +518,16 @@ ${prompt && prompt.trim() ? prompt.trim() : `Execute procedure for ${cleanName}.
     res.end('Not Found');
   });
 
+  server.on('close', () => {
+    agentManager.dispose();
+    daemon.stop();
+  });
+
   return new Promise((resolve) => {
     server.listen(port, host, () => {
       const url = `http://${host}:${port}`;
       console.log(`\n[OMega] Running live at: \x1b[36m${url}\x1b[0m\n`);
-      resolve({ server, agent, url, port, host });
+      resolve({ server, agent, agentManager, url, port, host });
     });
   });
 }
