@@ -1,0 +1,106 @@
+{
+  "name": "OM Agent",
+  "version": "1.0.0",
+  "provider": "glm",
+  "model": "glm-4.5-flash",
+  "systemPrompt": "You are OMega, a local-first autonomous engineering and operations agent.\n\nCore Rules:\n1. Grounding: Only state file paths, symbol names, code behavior, and command/test outputs you directly observed via tools. Never guess unread file contents or claim checks passed without running them.\n\n2. Surgical Changes: Inspect relevant files before editing. Prefer minimal, targeted edits (e.g. patch_file) over rewriting whole files, and preserve existing comments/style.\n\n3. Safety: Never run destructive commands (deleting files, resetting git history, exposing secrets/.env) without explicit user confirmation.\n\n4. Verification: After code or config changes, run the relevant build, type-check, or test command and report the exact outcome.\n\n5. Clarity: Answer directly and concisely. If blocked or unsure of intent, state the exact gap and ask a focused question.",
+  "maxSteps": 15,
+  "temperature": 0.2,
+  "memoryDir": "./memory",
+  "skillsDir": "./skills",
+  "workspaceDir": ".",
+  "routing": {
+    "enabled": true,
+    "maxRetries": 1,
+    "autoHandoffOnContextLimit": true,
+    "fallbackChain": [
+      {
+        "provider": "gemini",
+        "model": "gemini-3-flash-preview"
+      },
+      {
+        "provider": "gemini",
+        "model": "gemini-3.1-flash-lite"
+      },
+      {
+        "provider": "openai",
+        "model": "gpt-4o"
+      },
+      {
+        "provider": "anthropic",
+        "model": "claude-3-5-sonnet-20241022"
+      },
+      {
+        "provider": "om",
+        "model": "om-reasoning"
+      }
+    ]
+  },
+  "security": {
+    "requireConfirmationForShell": true,
+    "requireConfirmationForTools": [
+      "exec_command",
+      "http_request"
+    ],
+    "allowedCommands": [
+      "node",
+      "git",
+      "python",
+      "python3"
+    ],
+    "deniedCommands": [
+      "format",
+      "rm -rf /",
+      "del /f /s /q C:\\*"
+    ]
+  },
+  "gateway": {
+    "port": 3000,
+    "host": "127.0.0.1",
+    "openBrowser": false
+  },
+  "providers": {
+    "openai": {
+      "apiKeyEnv": "OPENAI_API_KEY",
+      "model": "gpt-5-mini-2025-08-07",
+      "baseUrl": "https://api.openai.com/v1"
+    },
+    "anthropic": {
+      "apiKeyEnv": "ANTHROPIC_API_KEY",
+      "model": "claude-3-5-sonnet-20241022",
+      "baseUrl": "https://api.anthropic.com/v1"
+    },
+    "gemini": {
+      "apiKeyEnv": "GEMINI_API_KEY",
+      "model": "gemini-3.5-flash",
+      "baseUrl": "https://generativelanguage.googleapis.com/v1beta"
+    },
+    "deepseek": {
+      "apiKeyEnv": "DEEPSEEK_API_KEY",
+      "model": "deepseek-reasoner",
+      "baseUrl": "https://api.deepseek.com/v1"
+    },
+    "kimi": {
+      "apiKeyEnv": "KIMI_API_KEY",
+      "model": "kimi-latest",
+      "baseUrl": "https://api.moonshot.ai/v1"
+    },
+    "qwen": {
+      "apiKeyEnv": "QWEN_API_KEY",
+      "model": "qwen-max",
+      "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+    },
+    "glm": {
+      "apiKeyEnv": "GLM_API_KEY",
+      "model": "glm-4.5-flash",
+      "baseUrl": "https://open.bigmodel.cn/api/paas/v4"
+    },
+    "vllm": {
+      "model": "qwen3.8-27b",
+      "baseUrl": "http://127.0.0.1:8000/v1"
+    },
+    "om": {
+      "model": "om-v1"
+    }
+  }
+}

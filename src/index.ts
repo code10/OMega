@@ -1,0 +1,17 @@
+export { OMAgent, OMAgent as OM } from './agent.js';
+export { SkillRegistry } from './skills/index.js';
+export { OMMemory } from './memory.js';
+export { VectorStore, SQLiteVectorStore, createHttpEmbedder, embedText, cosineSimilarity } from './vectorStore.js';
+export { OMGitManager } from './git.js';
+export { loadConfig, loadEnv } from './config.js';
+export { createProvider, ModelRouter } from './providers/index.js';
+export { BaseProvider } from './providers/base.js';
+export { startGateway } from './gateway/server.js';
+export { ModelService } from './modelService.js';
+export { runInitCommand } from './cli/init.js';
+export { WorkspaceSnapshotManager } from './snapshot.js';
+export { SessionReplay } from './replay.js';
+export { OMDaemon } from './daemon.js';
+export { OMEvalRunner } from './eval.js';
+export { OMSelfImprover } from './selfImprove.js';
+export { OMTrainingPipeline } from './training.js';

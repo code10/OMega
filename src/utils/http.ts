@@ -1,0 +1,133 @@
+/**
+ * Shared HTTP fetch helper with timeout and hardened WHATWG SSE stream parsing
+ * for providers and http_request.
+ */
+
+export async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs = 60000
+): Promise<Response> {
+  const { signal: externalSignal, ...rest } = options;
+  const timeoutSignal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : null;
+  const combinedSignal =
+    externalSignal && timeoutSignal
+      ? AbortSignal.any([externalSignal, timeoutSignal])
+      : externalSignal || timeoutSignal;
+
+  return fetch(url, {
+    ...rest,
+    ...(combinedSignal ? { signal: combinedSignal } : {})
+  });
+}
+
+/**
+ * Extract an LLM token delta (OpenAI, Anthropic, Gemini) from a raw SSE `data:` payload.
+ */
+export function extractSSEToken(dataStr: string): { token?: string; json?: any } {
+  if (!dataStr || dataStr === '[DONE]') return {};
+  try {
+    const json = JSON.parse(dataStr);
+    const token =
+      json?.choices?.[0]?.delta?.content ??
+      json?.delta?.text ??
+      json?.candidates?.[0]?.content?.parts?.[0]?.text ??
+      json?.token ??
+      json?.content;
+    return {
+      json,
+      ...(typeof token === 'string' && token.length > 0 ? { token } : {})
+    };
+  } catch (_) {
+    return {};
+  }
+}
+
+export interface ConsumeSSEOptions {
+  maxBufferBytes?: number;
+  onRetry?: (retryMs: number) => void;
+}
+
+/**
+ * Iterate over Server-Sent Events (SSE) data payloads from a Fetch Response body.
+ * Implements WHATWG SSE field rules (`event:`, `data:`, `id:`, `retry:`, comments)
+ * with single-space stripping on `data:` and bounded buffer protection.
+ */
+export async function consumeSSEStream(
+  res: Response,
+  onEvent: (dataStr: string, eventName: string, id?: string) => void,
+  options: ConsumeSSEOptions = {}
+): Promise<void> {
+  if (!res.body) return;
+  const maxBufferBytes = options.maxBufferBytes ?? 10 * 1024 * 1024;
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  let lastEventId: string | undefined;
+
+  const processBlock = (block: string) => {
+    const lines = block.split(/\r\n|\r|\n/);
+    const dataLines: string[] = [];
+    let eventName = 'message';
+    let hasEventData = false;
+
+    for (const line of lines) {
+      if (!line || line.startsWith(':')) continue;
+      const colonIdx = line.indexOf(':');
+      const field = colonIdx === -1 ? line : line.slice(0, colonIdx);
+      let value = colonIdx === -1 ? '' : line.slice(colonIdx + 1);
+      if (value.startsWith(' ')) value = value.slice(1);
+
+      if (field === 'event') {
+        eventName = value || 'message';
+      } else if (field === 'data') {
+        dataLines.push(value);
+        hasEventData = true;
+      } else if (field === 'id') {
+        if (!value.includes('\0')) {
+          lastEventId = value;
+        }
+      } else if (field === 'retry') {
+        if (/^\d+$/.test(value)) {
+          options.onRetry?.(Number(value));
+        }
+      }
+    }
+
+    if (hasEventData) {
+      onEvent(dataLines.join('\n'), eventName, lastEventId);
+    }
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      if (Buffer.byteLength(buffer, 'utf8') > maxBufferBytes) {
+        await reader.cancel().catch(() => {});
+        throw new Error(`SSE stream buffer exceeded ${maxBufferBytes} bytes`);
+      }
+
+      let match: RegExpExecArray | null;
+      const blockSepRe = /\r\n\r\n|\n\n|\r\r/;
+      while ((match = blockSepRe.exec(buffer)) !== null) {
+        const block = buffer.slice(0, match.index);
+        buffer = buffer.slice(match.index + match[0].length);
+        if (block.trim()) {
+          processBlock(block);
+        }
+      }
+    }
+
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+      processBlock(buffer);
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch (_) {}
+  }
+}

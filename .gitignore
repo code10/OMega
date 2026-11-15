@@ -1,0 +1,29 @@
+# Dependencies & Virtual Environments
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# Build Output (compiled from src/*.ts via `npm run build`)
+dist/
+*.tsbuildinfo
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Agent Runtime State & Caches
+memory/
+offload_cache/
+.om/
+*.sqlite
+*.db
+
+# Editor & OS Artifacts
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*

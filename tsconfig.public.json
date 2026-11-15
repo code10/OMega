@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "rootDir": "src/gateway/public",
+    "outDir": "dist/gateway/public",
+    "sourceMap": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/gateway/public/**/*.ts"]
+}

@@ -1,0 +1,50 @@
+{
+  "name": "OMega",
+  "version": "1.1.0",
+  "description": "A local-first framework for building and running AI agents.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "OMega": "bin/om.js"
+  },
+  "files": [
+    "dist/",
+    "bin/",
+    "skills/",
+    "om.config.json",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc && tsc -p tsconfig.public.json",
+    "prepare": "npm run build",
+    "start": "node bin/om.js",
+    "init": "node bin/om.js init",
+    "gateway": "node bin/om.js gateway",
+    "test": "npm run build && node --test tests/*.test.js",
+    "benchmark": "npm run build && node --test tests/benchmark.test.js",
+    "check:types": "tsc --noEmit && tsc -p tsconfig.public.json --noEmit"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "autonomous",
+    "omega-agent",
+    "tools",
+    "skills",
+    "llm",
+    "vector-search",
+    "multi-model",
+    "local-first",
+    "framework"
+  ],
+  "author": "OM Framework Contributors",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  }
+}
