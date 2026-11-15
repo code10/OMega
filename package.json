@@ -1,6 +1,6 @@
 {
   "name": "OMega",
-  "version": "1.1.0",
+  "version": "1.0.0",
   "description": "A local-first framework for building and running AI agents.",
   "type": "module",
   "main": "dist/index.js",
