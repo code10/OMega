@@ -3,7 +3,7 @@
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-0-success.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-49%20passed-success.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-90%20passed-success.svg)](tests/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](README.md)
 
 > **OM** is a lightweight, local-first autonomous AI agent runtime built with pure Node.js.  
@@ -38,7 +38,7 @@
 
 Modern agentic frameworks often require complex runtime dependencies, external databases, or heavy Python stacks. **OM** takes a local-first, zero-dependency approach:
 
-- **Zero External Dependencies**: Operates entirely on standard Node.js built-ins (`node:events`, `node:fs`, `node:http`, `node:readline`, `node:process`, `node:crypto`).
+- **Zero Runtime Dependencies**: Operates entirely on standard Node.js built-ins (`node:events`, `node:fs`, `node:http`, `node:readline`, `node:process`, `node:crypto`, `node:sqlite`) with TypeScript (`devDependencies` only) compiled to `dist/`.
 - **Local-First & Private**: Works completely offline with local model runners (Ollama, LM Studio, vLLM) or a built-in interactive Mock simulator—no credit cards or API keys required to start.
 - **Transparent Markdown Memory**: Context, long-term facts, and daily journals are stored as human-readable Markdown files that you can inspect, edit, or commit to Git.
 - **Dual Operator Interfaces**: Access the agent via an ANSI-colored interactive terminal REPL or launch a web-based dashboard with Server-Sent Events (SSE) streaming.
@@ -97,7 +97,12 @@ Modern agentic frameworks often require complex runtime dependencies, external d
 ### 1. Requirements
 
 - **Node.js** `>= 18.0.0`
-- Zero external package installation required (`package.json` uses native modules).
+- Zero runtime dependencies (`devDependencies` only for TypeScript compilation). Install and build locally with:
+
+```bash
+npm install
+npm run build
+```
 
 ### 2. Initialize a New Project via CLI (`npx omega-agent init`)
 
@@ -118,7 +123,7 @@ npm start
 # or: npx omega-agent
 ```
 
-### 3. Run a One-Shot Autonomous Command
+### 4. Run a One-Shot Autonomous Command
 
 You can pass a prompt directly to execute headlessly:
 
@@ -126,7 +131,7 @@ You can pass a prompt directly to execute headlessly:
 node bin/om.js "Inspect system specs, check memory status, and summarize in notes.txt"
 ```
 
-### 4. Start the Web Dashboard Gateway
+### 5. Start the Web Dashboard Gateway
 
 ```bash
 npm run gateway
@@ -163,22 +168,34 @@ LMSTUDIO_BASE_URL=http://127.0.0.1:1234/v1
 
 ### Application Settings (`om.config.json`)
 
-Fine-tune agent behavior, paths, security boundaries, and network ports:
+Fine-tune agent behavior, routing/failover, paths, security boundaries, provider defaults, and network ports:
 
 ```json
 {
   "name": "OM Agent",
   "version": "1.0.0",
-  "provider": "mock",
-  "model": "om-mock-turbo",
+  "provider": "glm",
+  "model": "glm-4-flash",
   "maxSteps": 15,
   "temperature": 0.2,
   "memoryDir": "./memory",
   "skillsDir": "./skills",
   "workspaceDir": ".",
+  "routing": {
+    "enabled": true,
+    "maxRetries": 1,
+    "autoHandoffOnContextLimit": true,
+    "fallbackChain": [
+      { "provider": "gemini", "model": "gemini-3-flash-preview" },
+      { "provider": "openai", "model": "gpt-4o" },
+      { "provider": "anthropic", "model": "claude-3-5-sonnet-20241022" },
+      { "provider": "om", "model": "om-reasoning" }
+    ]
+  },
   "security": {
-    "requireConfirmationForShell": false,
-    "allowedCommands": [],
+    "requireConfirmationForShell": true,
+    "requireConfirmationForTools": ["exec_command", "http_request"],
+    "allowedCommands": ["node", "git", "python", "python3"],
     "deniedCommands": ["format", "rm -rf /", "del /f /s /q C:\\*"]
   },
   "gateway": {
@@ -197,13 +214,17 @@ OM provides seamless abstraction across cloud and self-hosted models:
 
 | Provider | Type | Supported Models | Configuration |
 |:---|:---|:---|:---|
-| **Mock** | Offline Simulator | `om-mock-turbo` | Built-in (default; zero key required) |
-| **Google Gemini** | Cloud API | `gemini-2.5-flash`, `gemini-1.5-pro` | `GEMINI_API_KEY` |
-| **OpenAI** | Cloud API | `gpt-4o`, `gpt-4o-mini`, `o1`, `o3-mini` | `OPENAI_API_KEY` |
+| **Mock / OM** | Offline Simulator | `om-mock-turbo`, `om-reasoning` | Built-in (zero key required) |
+| **Google Gemini** | Cloud API | `gemini-3.5-flash`, `gemini-3-flash-preview`, `gemini-2.5-flash` | `GEMINI_API_KEY` |
+| **OpenAI** | Cloud API | `gpt-5-mini-2025-08-07`, `gpt-4o`, `gpt-4o-mini`, `o1`, `o3-mini` | `OPENAI_API_KEY` |
 | **Anthropic** | Cloud API | `claude-3-5-sonnet-20241022`, `claude-3-opus` | `ANTHROPIC_API_KEY` |
+| **DeepSeek** | Cloud API | `deepseek-reasoner`, `deepseek-chat` | `DEEPSEEK_API_KEY` |
+| **Kimi (Moonshot)** | Cloud API | `kimi-latest` | `KIMI_API_KEY` |
+| **Qwen (DashScope)** | Cloud API | `qwen-max`, `qwen-plus` | `QWEN_API_KEY` |
+| **GLM (Zhipu)** | Cloud API | `glm-4-flash`, `glm-4-plus` | `GLM_API_KEY` |
 | **Ollama** | Local / Offline | `llama3.2`, `mistral`, `qwen2.5`, `deepseek-r1` | `OLLAMA_BASE_URL` |
 | **LM Studio** | Local / Offline | Any loaded local model (OpenAI-compatible) | `LMSTUDIO_BASE_URL` |
-| **vLLM** | Local / High-Throughput | Any served model endpoint | Local API endpoint |
+| **vLLM** | Local / High-Throughput | Any served model endpoint | `VLLM_BASE_URL` / `om.config.json` |
 
 ---
 
@@ -250,6 +271,10 @@ The agent ships with a suite of built-in operator skills:
 | `get_system_info` | — | Inspect host OS, CPU architecture, RAM, and Node runtime specs. |
 | `get_current_time`| — | Retrieve formatted local time, ISO 8601 timestamp, and timezone. |
 | `list_models` | `provider?` | Query available models and capabilities for any supported provider. |
+| `git_status` | — | Inspect working tree status, branch, and modified/untracked files. |
+| `git_diff` | `staged?`, `file?` | View git diff for working tree or staged changes. |
+| `git_branch` | `name?`, `checkout?` | List, create, or switch git branches. |
+| `spawn_subagent` | `task`, `isolated?`, `gitWorktree?` | Delegate a subtask to an autonomous child agent (with optional git worktree isolation). |
 
 ---
 
@@ -310,7 +335,7 @@ Trigger workflow skills in conversation or via slash syntax (e.g., `/code-review
 Embed OM directly into your Node.js applications:
 
 ```javascript
-import { OM } from './src/index.js';
+import { OM } from './dist/index.js';
 
 // 1. Initialize the agent
 const agent = new OM({
@@ -356,18 +381,42 @@ When launched via `npm run gateway`, OM serves a lightweight HTTP server on port
 |:---|:---|:---|
 | `GET` | `/` | Web Console Dashboard UI. |
 | `GET` | `/api/status` | Runtime status, active provider, model, and memory paths. |
+| `GET` | `/api/events` | Real-time SSE stream for live provider & skills updates. |
+| `GET` | `/api/activity` | Live activity trace history & router stats. |
 | `GET` | `/api/models` | List available models discovered across cloud and local engines. |
+| `POST` | `/api/provider` | Switch active provider and model dynamically. |
+| `GET` / `POST` | `/api/routing` | Inspect or update multi-model routing & fallback chain settings. |
+| `POST` | `/api/providers/keys` | Update or clear provider API keys in memory and `.env`. |
 | `GET` | `/api/skills` | JSON schema catalog of all registered tools and workflows. |
 | `GET` | `/api/skills/:skill/references/:ref` | Fetch reference documentation attached to skills. |
 | `POST` | `/api/skills/create` | Programmatically scaffold a new tool or workflow. |
 | `GET` | `/api/memory` | Retrieve contents of `MEMORY.md` and today's activity journal. |
 | `POST` | `/api/memory` | Update long-term memory (`{ "content": "..." }`). |
+| `GET` | `/api/memory/search` | Hybrid keyword + vector semantic search over memory. |
+| `POST` | `/api/memory/reindex` | Rebuild local vector embeddings index. |
+| `POST` | `/api/memory/distill` | Distill daily insights and promote `SKILL.md` workflows. |
+| `POST` | `/api/training/export` | Export SFT/DPO JSONL training datasets. |
+| `GET` | `/api/git/status` | Inspect workspace git status. |
+| `GET` | `/api/git/diff` | Inspect workspace git diff. |
+| `GET` | `/api/agents` | List configured one-off/persistent agents and run history. |
+| `POST` | `/api/agents/run` | Execute a one-off or persistent agent task. |
+| `POST` | `/api/agents/persistent` | Create or update a persistent agent definition. |
+| `POST` | `/api/agents/reset` | Reset agent state and run history. |
 | `GET` | `/api/sessions` | List recorded sessions with timestamps and step counts. |
+| `POST` | `/api/sessions/switch` | Switch the active session. |
+| `POST` | `/api/sessions/:id/fork` | Fork a session from a specific step. |
+| `POST` | `/api/sessions/:id/replay` | Replay a session deterministically. |
 | `GET` | `/api/sessions/:id/export` | Export session transcripts in Markdown or JSON format. |
+| `POST` | `/api/clear` | Clear active conversation history without changing `sessionId`. |
 | `POST` | `/api/sessions/reset-counter` | Clear session histories and reset identifier counter. |
-| `GET` | `/api/system-prompt` | Retrieve current agent system prompt directive. |
+| `GET` / `POST` | `/api/system-prompt` | Retrieve or update agent system prompt and temperature. |
 | `POST` | `/api/chat` | Synchronous execution endpoint returning JSON response. |
 | `POST` | `/api/chat/stream` | Server-Sent Events (SSE) streaming thoughts and tool events. |
+| `POST` | `/api/chat/abort` | Abort an active agent run. |
+| `POST` | `/api/chat/steer` | Inject a live mid-run steering directive. |
+| `POST` | `/api/approvals/:id` | Resolve a pending HITL tool/shell confirmation. |
+| `GET` | `/api/snapshots` | List workspace snapshots for diffing and rollback. |
+| `GET` | `/api/daemon/status` | Inspect background daemon and webhook trigger status. |
 
 ---
 
@@ -377,40 +426,57 @@ When launched via `npm run gateway`, OM serves a lightweight HTTP server on port
 OMega/
 ├── bin/
 │   └── om.js                  # CLI executable and interactive REPL
-├── src/
-│   ├── index.js               # Library entry point & programmatic exports
-│   ├── agent.js               # ReAct loop coordinator (OMAgent)
-│   ├── config.js              # Environment and JSON config loader
-│   ├── memory.js              # Markdown and session persistence manager
-│   ├── modelService.js        # Multi-provider model discovery service
+├── src/                       # TypeScript source (compiled to dist/)
+│   ├── index.ts               # Library entry point & programmatic exports
+│   ├── agent.ts               # ReAct loop coordinator (OMAgent)
+│   ├── agent/                 # Compaction, prompt builder, runner, slash commands
+│   ├── config.ts              # Environment and JSON config loader
+│   ├── memory.ts              # Markdown and session persistence manager
+│   ├── modelService.ts        # Multi-provider model discovery service
+│   ├── daemon.ts              # Background daemon & webhook triggers
+│   ├── eval.ts                # Autonomous evaluation runner (OMEvalRunner)
+│   ├── git.ts                 # Git status, diff, branch, worktree manager
+│   ├── replay.ts              # Deterministic session replay & model comparison
+│   ├── selfImprove.ts         # Tier 1 self-improvement & skill distillation
+│   ├── snapshot.ts            # Workspace snapshot & rollback manager
+│   ├── tokenizer.ts           # Zero-dependency BPE & model-aware tokenizer
+│   ├── training.ts            # Tier 2 SFT/DPO JSONL export & gating
+│   ├── mcp/                   # Streamable HTTP MCP client
+│   ├── vectorStore/           # Local JSON & node:sqlite vector stores
 │   ├── gateway/
-│   │   ├── server.js          # HTTP REST & SSE Gateway server
-│   │   └── public/            # Static assets for the Web Dashboard
-│   ├── providers/             # LLM provider implementations
-│   │   ├── base.js            # Base provider interface
-│   │   ├── gemini.js          # Google Gemini integration
-│   │   ├── openai.js          # OpenAI / OpenAI-compatible client
-│   │   ├── anthropic.js       # Anthropic Claude client
-│   │   ├── ollama.js          # Local Ollama runner client
-│   │   └── omega.js           # Built-in OMega local provider
+│   │   ├── server.ts          # HTTP REST & SSE Gateway server
+│   │   ├── agentManager.ts    # One-off & persistent agent orchestration
+│   │   ├── routes/            # Modular REST route handlers (agents, config, git, memory, sessions)
+│   │   └── public/            # TypeScript + HTML/CSS assets for the Web Dashboard
+│   ├── providers/             # LLM provider implementations & ModelRouter
+│   │   ├── base.ts            # Base provider interface
+│   │   ├── gemini.ts          # Google Gemini integration
+│   │   ├── openai.ts          # OpenAI / OpenAI-compatible client (Ollama, LM Studio, vLLM, DeepSeek, Kimi, Qwen, GLM)
+│   │   ├── anthropic.ts       # Anthropic Claude client
+│   │   ├── omega.ts           # Built-in OMega local/mock provider
+│   │   └── router.ts          # Multi-model routing, budgets & failover
 │   └── skills/                # Built-in tool implementations
-│       ├── shell.js           # Shell execution
-│       ├── filesystem.js      # File reading, writing, patching
-│       ├── web.js             # Web fetch and HTML-to-Markdown
-│       ├── system.js          # System info and time inspection
-│       └── memory.js          # Memory reading and persistence
+│       ├── shell.ts           # Shell execution
+│       ├── filesystem.ts      # File reading, writing, patching
+│       ├── git.ts             # Git status, diff, branch tools
+│       ├── subagent.ts        # Subagent spawning with worktree isolation
+│       ├── web.ts             # Web fetch and HTML-to-Markdown
+│       ├── system.ts          # System info and time inspection
+│       └── memory.ts          # Memory reading and persistence
+├── scripts/
+│   └── security-audit.js      # Workspace security audit script
 ├── skills/                    # Drop-in custom skills and workflows
 ├── memory/                    # Persistent storage (MEMORY.md, daily, sessions)
 ├── tests/                     # Built-in node:test test suite
 ├── om.config.json             # Framework runtime configuration
-└── package.json               # Manifest (ESM, zero external dependencies)
+└── package.json               # Manifest (ESM, zero runtime dependencies)
 ```
 
 ---
 
 ## Testing & Autonomous Benchmarking
 
-Run the native test and autonomous evaluation suite (covering tool-calling accuracy, multi-step planning, error recovery, local-to-cloud model failover, and vector semantic search):
+Run the TypeScript build and native test/evaluation suite (covering tool-calling accuracy, multi-step planning, error recovery, local-to-cloud model failover, vector semantic search, gateway routes, and security boundaries):
 
 ```bash
 npm test
@@ -418,7 +484,7 @@ npm test
 npm run benchmark
 ```
 
-All 49 test and benchmark suites run in under 2 seconds with zero external test frameworks required.
+All 90 tests pass using Node's built-in `node:test` runner with zero external test frameworks required.
 
 ---
 
