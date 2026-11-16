@@ -3,7 +3,7 @@
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-0-success.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-90%20passed-success.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-105%20passed-success.svg)](tests/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](README.md)
 
 > **OM** is a lightweight, local-first autonomous AI agent runtime built with pure Node.js.  
@@ -28,6 +28,7 @@
   - [2. Markdown Agent Workflows (SKILL.md)](#2-markdown-agent-workflows-skillmd)
 - [Programmatic API](#programmatic-api)
 - [Gateway REST & SSE Endpoints](#gateway-rest--sse-endpoints)
+- [Autonomous Self-Healing & Detached Execution](#autonomous-self-healing--detached-execution)
 - [Project Layout](#project-layout)
 - [Testing & Autonomous Benchmarking](#testing--autonomous-benchmarking)
 - [License](#license)
@@ -193,7 +194,7 @@ Fine-tune agent behavior, routing/failover, paths, security boundaries, provider
   "temperature": 0.2,
   "memoryDir": "./memory",
   "skillsDir": "./skills",
-  "workspaceDir": ".",
+  "workspaceDir": "./workspace",
   "routing": {
     "enabled": true,
     "maxRetries": 1,
@@ -433,6 +434,15 @@ When launched via `npm run gateway`, OM serves a lightweight HTTP server on port
 
 ---
 
+## Autonomous Self-Healing & Detached Execution
+
+- **Autonomous Self-Healing (`OMSelfHealer`)**: When enabled (`selfHeal.enabled` in `om.config.json`), tool failures or unhandled errors in the ReAct loop can spawn a scoped diagnostic subagent (`src/selfHeal.ts`) to inspect stack traces, apply a minimal patch, verify against `testCommand` (`npm test`), and roll back automatically if tests fail.
+- **Detached Swarm & Checkpointing**: Background worker processes (`src/agent/detachedSwarm.ts`, `src/agent/detachedWorker.ts`) and run state checkpoints (`src/agent/checkpoint.ts`) support resilient, multi-worker execution outside the main process.
+- **Memory Distillation**: `src/memory/distiller.ts` distills session and daily logs into durable long-term memory and reusable `SKILL.md` workflows.
+- **Sandboxed Workspace (`workspace/`)**: By default, `workspaceDir` is anchored to `./workspace`, isolating agent-generated files from the framework source tree.
+
+---
+
 ## Project Layout
 
 ```
@@ -442,14 +452,16 @@ OMega/
 ├── src/                       # TypeScript source (compiled to dist/)
 │   ├── index.ts               # Library entry point & programmatic exports
 │   ├── agent.ts               # ReAct loop coordinator (OMAgent)
-│   ├── agent/                 # Compaction, prompt builder, runner, slash commands
+│   ├── agent/                 # Compaction, prompt builder, runner, slash commands, checkpoints & detached swarm
 │   ├── config.ts              # Environment and JSON config loader
 │   ├── memory.ts              # Markdown and session persistence manager
+│   ├── memory/                # Memory distillation (distiller.ts)
 │   ├── modelService.ts        # Multi-provider model discovery service
 │   ├── daemon.ts              # Background daemon & webhook triggers
 │   ├── eval.ts                # Autonomous evaluation runner (OMEvalRunner)
 │   ├── git.ts                 # Git status, diff, branch, worktree manager
 │   ├── replay.ts              # Deterministic session replay & model comparison
+│   ├── selfHeal.ts            # Autonomous framework self-healing (OMSelfHealer)
 │   ├── selfImprove.ts         # Tier 1 self-improvement & skill distillation
 │   ├── snapshot.ts            # Workspace snapshot & rollback manager
 │   ├── tokenizer.ts           # Zero-dependency BPE & model-aware tokenizer
@@ -480,6 +492,7 @@ OMega/
 │   └── security-audit.js      # Workspace security audit script
 ├── skills/                    # Drop-in custom skills and workflows
 ├── memory/                    # Persistent storage (MEMORY.md, daily, sessions)
+├── workspace/                 # Default sandboxed workspaceDir for agent outputs
 ├── tests/                     # Built-in node:test test suite
 ├── om.config.json             # Framework runtime configuration
 └── package.json               # Manifest (ESM, zero runtime dependencies)
@@ -497,7 +510,7 @@ npm test
 npm run benchmark
 ```
 
-All 90 tests pass using Node's built-in `node:test` runner with zero external test frameworks required.
+All 105 tests pass using Node's built-in `node:test` runner with zero external test frameworks required.
 
 ---
 
