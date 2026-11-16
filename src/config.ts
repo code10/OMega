@@ -34,35 +34,7 @@ export function loadEnv(customPath?: string, override = false) {
 }
 
 /**
- * @typedef {Object} OMConfig
- * @property {string} rootDir
- * @property {string} provider
- * @property {string} model
- * @property {string} memoryDir
- * @property {string} skillsDir
- * @property {string} workspaceDir
- * @property {number} maxSteps
- * @property {number} [temperature]
- * @property {string} [version]
- * @property {string} [systemPrompt]
- * @property {number} [maxDailyLogLines]
- * @property {number} [maxHistoryMessages]
- * @property {number} [compactionThresholdChars]
- * @property {number} [compactionThresholdTokens]
- * @property {boolean} [llmCompaction]
- * @property {{ url?: string, model?: string, apiKey?: string }} [embedding]
- * @property {boolean} [parallelToolExecution]
- * @property {Record<string, any>} [providers]
- * @property {Record<string, any>} [security]
- * @property {Record<string, any>} [mcpServers]
- * @property {Record<string, any>} routing
- * @property {{ port: number, host: string, openBrowser: boolean, authToken?: string, corsOrigins?: string[] }} gateway
- */
-
-/**
- * Load and merge config from om.config.json and environment
- * @param {Record<string, any>} [overrides]
- * @returns {OMConfig}
+ * Load and merge config from om.config.json and environment.
  */
 export function loadConfig(overrides: Record<string, any> = {}): OMConfig {
   loadEnv(undefined, Boolean(overrides.reloadEnv));
@@ -139,7 +111,7 @@ export function loadConfig(overrides: Record<string, any> = {}): OMConfig {
     model,
     memoryDir: resolvePath(overrides.memoryDir || fileConfig.memoryDir || './memory'),
     skillsDir: resolvePath(overrides.skillsDir || fileConfig.skillsDir || './skills'),
-    workspaceDir: resolvePath(overrides.workspaceDir || fileConfig.workspaceDir || '.'),
+    workspaceDir: resolvePath(overrides.workspaceDir || fileConfig.workspaceDir || './workspace'),
     maxSteps: Number(overrides.maxSteps || fileConfig.maxSteps || 15),
     routing: {
       enabled: true,
@@ -164,16 +136,35 @@ export function loadConfig(overrides: Record<string, any> = {}): OMConfig {
       ...(overrides.security || {})
     },
     gateway: {
-      port: Number(process.env.OM_GATEWAY_PORT || overrides.port || (fileConfig.gateway && fileConfig.gateway.port) || 3000),
-      host: overrides.host || (fileConfig.gateway && fileConfig.gateway.host) || '127.0.0.1',
-      openBrowser: fileConfig.gateway ? Boolean(fileConfig.gateway.openBrowser) : false,
+      ...(fileConfig.gateway || {}),
+      ...(overrides.gateway || {}),
+      port: Number(process.env.OM_GATEWAY_PORT || overrides.port || overrides.gateway?.port || fileConfig.gateway?.port || 3000),
+      host: overrides.host || overrides.gateway?.host || fileConfig.gateway?.host || '127.0.0.1',
+      openBrowser: Boolean(overrides.gateway?.openBrowser ?? fileConfig.gateway?.openBrowser ?? false),
     },
     embedding: {
       url: overrides.embedding?.url || process.env.OM_EMBEDDING_URL || fileConfig.embedding?.url || '',
       model: overrides.embedding?.model || process.env.OM_EMBEDDING_MODEL || fileConfig.embedding?.model || 'text-embedding-3-small',
       apiKey: overrides.embedding?.apiKey || process.env.OM_EMBEDDING_API_KEY || fileConfig.embedding?.apiKey || ''
     },
-    llmCompaction: overrides.llmCompaction ?? (process.env.OM_LLM_COMPACTION === 'true' || Boolean(fileConfig.llmCompaction))
+    llmCompaction: overrides.llmCompaction ?? (process.env.OM_LLM_COMPACTION === 'true' || Boolean(fileConfig.llmCompaction)),
+    selfHeal: {
+      enabled: false,
+      autoCommit: true,
+      testCommand: 'npm test',
+      maxHealAttempts: 1,
+      maxSubagentSteps: 6,
+      healOnToolFailure: true,
+      healOnUnhandledError: true,
+      ...(fileConfig.selfHeal && typeof fileConfig.selfHeal === 'object' ? fileConfig.selfHeal : {}),
+      ...(overrides.selfHeal === true
+        ? { enabled: true }
+        : overrides.selfHeal === false
+          ? { enabled: false }
+          : overrides.selfHeal && typeof overrides.selfHeal === 'object'
+            ? overrides.selfHeal
+            : {})
+    }
   };
 }
 

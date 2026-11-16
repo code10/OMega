@@ -1,5 +1,7 @@
 import { createProvider } from '../providers/index.js';
 import { compactHistory } from './compaction.js';
+import { OMSelfHealer } from '../selfHeal.js';
+import { saveCheckpoint, type CheckpointStatus } from './checkpoint.js';
 
 /**
  * Execute a single user prompt through the autonomous ReAct loop.
@@ -14,14 +16,15 @@ export async function executeAgentRun(
   options: Record<string, any> = {}
 ): Promise<Record<string, any>> {
   const maxSteps = options.maxSteps || agent.config.maxSteps || 15;
-  const steps: any[] = [];
-  const trimmedPrompt = (prompt || '').trim();
+  const resumeCp = options.resumeCheckpoint || null;
+  const steps: any[] = Array.isArray(resumeCp?.steps) ? [...resumeCp.steps] : [];
+  const trimmedPrompt = (prompt || resumeCp?.prompt || '').trim();
 
   const controlResponse = agent._handleSlashControl(trimmedPrompt);
   if (controlResponse) return controlResponse;
 
   // Resolve workflow slash directives (e.g. /state, /no-overthinking, /deepapi)
-  let effectivePrompt = prompt;
+  let effectivePrompt = prompt || resumeCp?.prompt || '';
   const slashMatch = trimmedPrompt.match(/^\/([a-zA-Z0-9_-]+)(?:\s+([\s\S]*))?$/);
   if (slashMatch) {
     const workflowSkill = agent.skills.get(slashMatch[1].toLowerCase());
@@ -31,32 +34,97 @@ export async function executeAgentRun(
     }
   }
 
-  const userMessage: Record<string, any> = { role: 'user', content: effectivePrompt };
-  if (Array.isArray(options.attachments) && options.attachments.length > 0) {
-    userMessage.attachments = options.attachments;
+  if (resumeCp && Array.isArray(resumeCp.history) && resumeCp.history.length > 0) {
+    agent.history = [...resumeCp.history];
+    if (Array.isArray(resumeCp.answers)) {
+      agent.answers = [...resumeCp.answers];
+    }
+    const lastRole = agent.history[agent.history.length - 1]?.role;
+    if (prompt && prompt !== resumeCp.prompt && lastRole === 'assistant') {
+      agent.history.push({ role: 'user', content: effectivePrompt });
+    }
+  } else {
+    const userMessage: Record<string, any> = { role: 'user', content: effectivePrompt };
+    if (Array.isArray(options.attachments) && options.attachments.length > 0) {
+      userMessage.attachments = options.attachments;
+    }
+    agent.history.push(userMessage);
   }
-  agent.history.push(userMessage);
-  await agent.memory.logDailyAsync(`User Task: "${prompt.slice(0, 100)}"`);
+  await agent.memory.logDailyAsync(`User Task: "${(prompt || effectivePrompt).slice(0, 100)}"`);
 
-  let currentStep = 0;
+  let currentStep = typeof resumeCp?.currentStep === 'number' ? resumeCp.currentStep : 0;
   let finalAnswer = '';
   let activeTurnProvider = agent.config.provider;
   let activeTurnModel = agent.config.model;
   let activeProviderInstance = agent.provider;
   const fallbackEvents = [];
+  const healEvents: any[] = [];
+  let healAttempts = 0;
+  const selfHealOverride = options.selfHeal === true
+    ? { enabled: true }
+    : options.selfHeal === false
+      ? { enabled: false }
+      : options.selfHeal && typeof options.selfHeal === 'object'
+        ? options.selfHeal
+        : undefined;
+  const effectiveSelfHeal = { ...(agent.config?.selfHeal || {}), ...(selfHealOverride || {}) };
+  const maxHealAttempts = Number(effectiveSelfHeal.maxHealAttempts ?? 1);
+  const canSelfHeal = (source: 'tool_failure' | 'unhandled_error') => {
+    if (!effectiveSelfHeal.enabled) return false;
+    if (agent._isSelfHealing || (options.subagentDepth || 0) > 0) return false;
+    if (healAttempts >= maxHealAttempts) return false;
+    return source === 'tool_failure'
+      ? effectiveSelfHeal.healOnToolFailure !== false
+      : effectiveSelfHeal.healOnUnhandledError !== false;
+  };
   const seenToolSignatures = new Map();
   let activeTools = agent.getFormattedTools();
   let systemPrompt = agent.buildSystemPrompt({ query: effectivePrompt });
   let promptNeedsRefresh = false;
-  const runUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+  const runUsage = resumeCp?.usage
+    ? { ...resumeCp.usage }
+    : { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
-  const startPayload = { prompt, sessionId: agent.sessionId, provider: agent.config.provider, model: agent.config.model };
+  const startPayload = { prompt: prompt || effectivePrompt, sessionId: agent.sessionId, provider: agent.config.provider, model: agent.config.model };
   agent.emit('start', startPayload);
   agent._recordActivity('start', startPayload);
 
-  const runId = `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
+  const runId = resumeCp?.runId || `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
+  const startedAt = resumeCp?.startedAt || new Date().toISOString();
   agent.lastRunId = runId;
-  agent.snapshots.startRun(runId, { sessionId: agent.sessionId, prompt: prompt.slice(0, 120) });
+  agent.snapshots.startRun(runId, { sessionId: agent.sessionId, prompt: (prompt || effectivePrompt).slice(0, 120) });
+
+  const persistCheckpoint = (status: CheckpointStatus, extra: Record<string, any> = {}) => {
+    if (options.checkpoint === false || !agent.config?.memoryDir) return;
+    try {
+      saveCheckpoint(agent.config.memoryDir, {
+        sessionId: agent.sessionId,
+        runId,
+        pid: process.pid,
+        detached: Boolean(options.detached),
+        status,
+        prompt: prompt || effectivePrompt,
+        systemPrompt: agent.config.systemPrompt,
+        provider: activeTurnProvider,
+        model: activeTurnModel,
+        workspaceDir: agent.config.workspaceDir || process.cwd(),
+        currentStep,
+        maxSteps,
+        usage: { ...runUsage },
+        history: agent.history,
+        steps,
+        answers: agent.answers,
+        logFile: options.logFile || resumeCp?.logFile || null,
+        startedAt,
+        updatedAt: new Date().toISOString(),
+        ...extra
+      });
+    } catch (_) {
+      // Never fail a run due to checkpoint serialization
+    }
+  };
+
+  persistCheckpoint('running');
 
   const runAbortController = new AbortController();
   agent._activeAbortController = runAbortController;
@@ -67,6 +135,7 @@ export async function executeAgentRun(
   try {
     while (currentStep < maxSteps) {
       if (combinedSignal.aborted) {
+        persistCheckpoint('aborted', { finishedAt: new Date().toISOString() });
         agent._recordActivity('aborted', { step: currentStep, reason: 'Run aborted' });
         agent.emit('aborted', { step: currentStep, reason: 'Run aborted' });
         return {
@@ -190,7 +259,32 @@ export async function executeAgentRun(
             success: false
           };
         }
+        if (canSelfHeal('unhandled_error')) {
+          healAttempts++;
+          const healResult = await OMSelfHealer.heal(
+            agent,
+            {
+              error: err,
+              source: 'unhandled_error',
+              step: currentStep,
+              runId,
+              subagentDepth: options.subagentDepth || 0,
+              signal: combinedSignal
+            },
+            effectiveSelfHeal
+          );
+          if (healResult.healed) {
+            healEvents.push(healResult);
+            agent.history.push({
+              role: 'user',
+              content: `[OM Self-Heal Notice]: Intercepted runtime error (${err.message}). Diagnostic sub-agent patched ${healResult.offendingFile || 'the offending file'}, verified with test suite, and${healResult.committed ? ` committed (${healResult.commitHash})` : ' applied the fix'}. Resuming execution.`
+            });
+            currentStep = Math.max(0, currentStep - 1);
+            continue;
+          }
+        }
         agent._recordActivity('error', { step: currentStep, error: err.message });
+        persistCheckpoint('failed', { error: err.message, finishedAt: new Date().toISOString() });
         if (agent.listenerCount('error') > 0) {
           agent.emit('error', { step: currentStep, error: err.message });
         }
@@ -232,6 +326,7 @@ export async function executeAgentRun(
           toolCalls: [],
           final: true
         });
+        persistCheckpoint('running');
         break;
       }
 
@@ -259,6 +354,7 @@ export async function executeAgentRun(
 
         const startTime = Date.now();
         let result;
+        let effectiveArgs = tc.args;
         try {
           const confirmTools = Array.isArray(agent.config.security?.requireConfirmationForTools)
             ? agent.config.security.requireConfirmationForTools
@@ -293,7 +389,7 @@ export async function executeAgentRun(
             result = { success: false, error: beforeToolCtx.reason || `Tool '${tc.name}' blocked by beforeTool hook.` };
             return { tc, result, durationMs: Date.now() - startTime, repeated: prevCount >= 1 };
           }
-          const effectiveArgs = beforeToolCtx.args || tc.args;
+          effectiveArgs = beforeToolCtx.args || tc.args;
 
           if ((tc.name === 'write_file' || tc.name === 'patch_file') && effectiveArgs?.path) {
             agent.snapshots.captureBeforeMutation(runId, effectiveArgs.path);
@@ -307,6 +403,35 @@ export async function executeAgentRun(
             subagentDepth: options.subagentDepth || 0,
             confirmCommand: options.confirmCommand || agent.options.confirmCommand || agent.confirmCommand
           });
+          if (result?.success === false && (result?.stack || result?.unhandled) && canSelfHeal('tool_failure')) {
+            healAttempts++;
+            const healResult = await OMSelfHealer.heal(
+              agent,
+              {
+                error: result.stack || result.error || `Tool '${tc.name}' failed`,
+                source: 'tool_failure',
+                step: currentStep,
+                toolName: tc.name,
+                toolArgs: effectiveArgs,
+                runId,
+                subagentDepth: options.subagentDepth || 0,
+                signal: combinedSignal
+              },
+              effectiveSelfHeal
+            );
+            if (healResult.healed) {
+              healEvents.push(healResult);
+              result = await agent.skills.execute(tc.name, effectiveArgs, {
+                config: agent.config,
+                memory: agent.memory,
+                agent,
+                signal: combinedSignal,
+                subagentDepth: options.subagentDepth || 0,
+                confirmCommand: options.confirmCommand || agent.options.confirmCommand || agent.confirmCommand
+              });
+              result = { ...(result && typeof result === 'object' ? result : { value: result }), selfHealed: true, healResult };
+            }
+          }
           const afterToolCtx = await agent._runHooks('afterTool', {
             step: currentStep,
             name: tc.name,
@@ -315,6 +440,40 @@ export async function executeAgentRun(
           });
           result = afterToolCtx.result;
         } catch (execErr: any) {
+          if (canSelfHeal('tool_failure')) {
+            healAttempts++;
+            const healResult = await OMSelfHealer.heal(
+              agent,
+              {
+                error: execErr,
+                source: 'tool_failure',
+                step: currentStep,
+                toolName: tc.name,
+                toolArgs: effectiveArgs,
+                runId,
+                subagentDepth: options.subagentDepth || 0,
+                signal: combinedSignal
+              },
+              effectiveSelfHeal
+            );
+            if (healResult.healed) {
+              healEvents.push(healResult);
+              try {
+                const retryResult = await agent.skills.execute(tc.name, effectiveArgs, {
+                  config: agent.config,
+                  memory: agent.memory,
+                  agent,
+                  signal: combinedSignal,
+                  subagentDepth: options.subagentDepth || 0,
+                  confirmCommand: options.confirmCommand || agent.options.confirmCommand || agent.confirmCommand
+                });
+                result = { ...(retryResult && typeof retryResult === 'object' ? retryResult : { value: retryResult }), selfHealed: true, healResult };
+              } catch (retryErr: any) {
+                result = { success: false, error: retryErr.message, selfHealed: true, healResult };
+              }
+              return { tc, result, durationMs: Date.now() - startTime, repeated: prevCount >= 1 };
+            }
+          }
           result = { success: false, error: execErr.message };
         }
         return { tc, result, durationMs: Date.now() - startTime, repeated: prevCount >= 1 };
@@ -387,6 +546,7 @@ export async function executeAgentRun(
       }
 
       steps.push(stepRecord);
+      persistCheckpoint('running');
     }
 
     if (currentStep >= maxSteps && !finalAnswer) {
@@ -427,6 +587,8 @@ export async function executeAgentRun(
       steps
     });
 
+    persistCheckpoint('completed', { finishedAt: new Date().toISOString() });
+
     const completion = {
       content: finalAnswer,
       answer: finalAnswer,
@@ -436,6 +598,8 @@ export async function executeAgentRun(
       usage: runUsage,
       fallbackUsed: fallbackEvents.length > 0,
       fallbackEvents,
+      selfHealed: healEvents.length > 0,
+      healEvents,
       answers: agent.answers,
       steps,
       totalSteps: currentStep,

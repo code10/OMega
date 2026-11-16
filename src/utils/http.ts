@@ -105,7 +105,7 @@ export async function consumeSSEStream(
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
 
-      if (Buffer.byteLength(buffer, 'utf8') > maxBufferBytes) {
+      if (buffer.length * 3 > maxBufferBytes && Buffer.byteLength(buffer, 'utf8') > maxBufferBytes) {
         await reader.cancel().catch(() => {});
         throw new Error(`SSE stream buffer exceeded ${maxBufferBytes} bytes`);
       }

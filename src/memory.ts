@@ -187,7 +187,9 @@ This file stores persistent facts, user preferences, and important context acros
       const header = `# Daily Journal - ${todayFile.replace('.md', '')}\n\n`;
       fs.writeFileSync(file, header + formatted, 'utf8');
     } else {
-      fs.appendFileSync(file, formatted, 'utf8');
+      const existing = fs.readFileSync(file, 'utf8');
+      const prefix = existing.length > 0 && !existing.endsWith('\n') ? '\n' : '';
+      fs.appendFileSync(file, prefix + formatted, 'utf8');
     }
 
     if (entry && entry.length > 8) {
@@ -214,7 +216,9 @@ This file stores persistent facts, user preferences, and important context acros
         const header = `# Daily Journal - ${todayFile.replace('.md', '')}\n\n`;
         await fs.promises.writeFile(file, header + formatted, 'utf8');
       } else {
-        await fs.promises.appendFile(file, formatted, 'utf8');
+        const existing = await fs.promises.readFile(file, 'utf8');
+        const prefix = existing.length > 0 && !existing.endsWith('\n') ? '\n' : '';
+        await fs.promises.appendFile(file, prefix + formatted, 'utf8');
       }
     });
 
@@ -509,12 +513,23 @@ This file stores persistent facts, user preferences, and important context acros
 
   /**
    * Render memory context for system prompt injection.
-   * Daily activity logs are automatically trimmed to recent lines to optimize context length.
+   * Both MEMORY.md and daily activity logs are bounded to prevent prompt bloat,
+   * while full historical knowledge remains searchable in the local vector index.
    */
   getPromptContext(options: Record<string, any> = {}) {
     const maxDailyLines = options.maxDailyLines || 50;
-    const longTerm = this.readLongTermMemory().trim();
+    const maxMemoryLines = options.maxMemoryLines || 80;
+    let longTerm = this.readLongTermMemory().trim();
     let daily = this.readDailyJournal().trim();
+
+    if (longTerm) {
+      const memLines = longTerm.split('\n');
+      if (memLines.length > maxMemoryLines) {
+        const headerLines = memLines.slice(0, 6).join('\n');
+        const recentLines = memLines.slice(-(maxMemoryLines - 6)).join('\n');
+        longTerm = `${headerLines}\n... [${memLines.length - maxMemoryLines} older facts omitted from prompt; query via semantic memory recall] ...\n${recentLines}`;
+      }
+    }
 
     if (daily) {
       const dailyLines = daily.split('\n');

@@ -4,12 +4,9 @@ import { createLogger } from '../utils/logger.js';
 const log = createLogger('OMAgent:Compaction');
 
 /**
- * Token-aware history compaction for OMAgent.
- * Preserves assistant/tool message pairs and supports both `compactionThresholdTokens`
- * and legacy `compactionThresholdChars`.
- * @param {any} agent
+ * Compute the split point for history compaction, preserving assistant/tool pairs.
  */
-export function compactHistoryIfNeeded(agent: any) {
+function findCompactionSplit(agent: any): { older: any[]; recent: any[]; totalTokens: number } | null {
   const maxMsgs = agent.config.maxHistoryMessages || 48;
   const modelLimit = getModelContextLimit(agent.config.provider, agent.config.model);
   const defaultTokenThreshold = Math.min(Math.floor(modelLimit * 0.75), 32000);
@@ -17,20 +14,34 @@ export function compactHistoryIfNeeded(agent: any) {
     || (agent.config.compactionThresholdChars ? Math.ceil(agent.config.compactionThresholdChars / 4) : defaultTokenThreshold);
 
   const { estimatedTokens: totalTokens } = estimateMessagesTokens(agent.history, '', agent.config.model);
-  if (agent.history.length <= maxMsgs && totalTokens <= thresholdTokens) return;
+  if (agent.history.length <= maxMsgs && totalTokens <= thresholdTokens) return null;
 
   const keepRecent = 12;
-  if (agent.history.length <= keepRecent) return;
+  if (agent.history.length <= keepRecent) return null;
 
   // Snap cutIndex so `recent` never starts on an orphaned `tool` message
   let cutIndex = agent.history.length - keepRecent;
   while (cutIndex > 0 && agent.history[cutIndex]?.role === 'tool') {
     cutIndex--;
   }
-  if (cutIndex === 0) return;
+  if (cutIndex === 0) return null;
 
-  const older = agent.history.slice(0, cutIndex);
-  const recent = agent.history.slice(cutIndex);
+  return {
+    older: agent.history.slice(0, cutIndex),
+    recent: agent.history.slice(cutIndex),
+    totalTokens
+  };
+}
+
+/**
+ * Token-aware history compaction for OMAgent.
+ * Preserves assistant/tool message pairs and supports both `compactionThresholdTokens`
+ * and legacy `compactionThresholdChars`.
+ */
+export function compactHistoryIfNeeded(agent: any) {
+  const split = findCompactionSplit(agent);
+  if (!split) return;
+  const { older, recent, totalTokens } = split;
 
   /** @type {string[]} */
   const summaryLines = [];
@@ -65,28 +76,11 @@ export async function compactHistory(
   agent: any,
   options: { useLLM?: boolean; model?: string } = {}
 ): Promise<{ compacted: boolean; mode?: 'llm' | 'heuristic' }> {
-  const maxMsgs = agent.config.maxHistoryMessages || 48;
-  const modelLimit = getModelContextLimit(agent.config.provider, agent.config.model);
-  const defaultTokenThreshold = Math.min(Math.floor(modelLimit * 0.75), 32000);
-  const thresholdTokens = agent.config.compactionThresholdTokens
-    || (agent.config.compactionThresholdChars ? Math.ceil(agent.config.compactionThresholdChars / 4) : defaultTokenThreshold);
-
-  const { estimatedTokens: totalTokens } = estimateMessagesTokens(agent.history, '', agent.config.model);
-  if (agent.history.length <= maxMsgs && totalTokens <= thresholdTokens) {
+  const split = findCompactionSplit(agent);
+  if (!split) {
     return { compacted: false };
   }
-
-  const keepRecent = 12;
-  if (agent.history.length <= keepRecent) return { compacted: false };
-
-  let cutIndex = agent.history.length - keepRecent;
-  while (cutIndex > 0 && agent.history[cutIndex]?.role === 'tool') {
-    cutIndex--;
-  }
-  if (cutIndex === 0) return { compacted: false };
-
-  const older = agent.history.slice(0, cutIndex);
-  const recent = agent.history.slice(cutIndex);
+  const { older, recent } = split;
   const useLLM = options.useLLM ?? Boolean(agent.config.llmCompaction);
 
   if (useLLM && (agent.router?.chat || agent.provider?.chat)) {

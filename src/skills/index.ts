@@ -230,6 +230,8 @@ export class SkillRegistry {
     } catch (err: any) {
       return {
         success: false,
+        unhandled: true,
+        stack: err?.stack,
         error: `Execution error in skill '${name}': ${err.message}`
       };
     }
@@ -315,7 +317,7 @@ export class SkillRegistry {
                   }
                 }
               },
-              execute: async (args: Record<string, any> = {}, context: Record<string, any> = {}) => {
+              execute: async (args: Record<string, any> = {}, _context: Record<string, any> = {}) => {
                 return {
                   success: true,
                   name: parsed.name,
@@ -368,7 +370,7 @@ export class SkillRegistry {
                 }
               }
             },
-            execute: async (args: Record<string, any> = {}, context: Record<string, any> = {}) => {
+            execute: async (args: Record<string, any> = {}, _context: Record<string, any> = {}) => {
               return {
                 success: true,
                 name: parsed.name,

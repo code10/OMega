@@ -1,6 +1,7 @@
 import type http from 'node:http';
 import { readJsonBody, sendJson } from '../httpUtils.js';
 import type { AgentManager } from '../agentManager.js';
+import { DetachedSwarmManager } from '../../agent/detachedSwarm.js';
 
 export interface AgentsRouteContext {
   req: http.IncomingMessage;
@@ -192,6 +193,97 @@ export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boole
       return true;
     }
     sendJson(res, 200, { success: true, deleted: true, id });
+    return true;
+  }
+
+  const getDetachedManager = () => new DetachedSwarmManager({
+    memoryDir: agentManager.memoryDir,
+    workspaceDir: agentManager.parentAgent?.config?.workspaceDir,
+    skillsDir: agentManager.parentAgent?.config?.skillsDir,
+    provider: agentManager.parentAgent?.config?.provider,
+    model: agentManager.parentAgent?.config?.model
+  });
+
+  if (pathname === '/api/agents/detached' && req.method === 'GET') {
+    const sessions = getDetachedManager().listSessions();
+    sendJson(res, 200, { success: true, sessions }, true);
+    return true;
+  }
+
+  if (pathname === '/api/agents/detached/spawn' && req.method === 'POST') {
+    const data: Record<string, any> | null = await readJsonBody(req, res);
+    if (!data) return true;
+    try {
+      const handle = getDetachedManager().spawnDetached({
+        prompt: data.prompt,
+        sessionId: data.sessionId,
+        provider: data.provider,
+        model: data.model,
+        systemPrompt: data.systemPrompt,
+        maxSteps: data.maxSteps
+      });
+      sendJson(res, 202, { success: true, ...handle });
+    } catch (err: any) {
+      sendJson(res, 400, { success: false, error: err?.message || String(err) });
+    }
+    return true;
+  }
+
+  const dInspectMatch = pathname.match(/^\/api\/agents\/detached\/([^/]+)$/);
+  if (dInspectMatch && req.method === 'GET') {
+    const sessionId = decodeURIComponent(dInspectMatch[1]);
+    try {
+      const session = getDetachedManager().inspectSession(sessionId);
+      sendJson(res, 200, { success: true, session }, true);
+    } catch (err: any) {
+      sendJson(res, 404, { success: false, error: err?.message || String(err) });
+    }
+    return true;
+  }
+
+  const dResumeMatch = pathname.match(/^\/api\/agents\/detached\/([^/]+)\/resume$/);
+  if (dResumeMatch && req.method === 'POST') {
+    const sessionId = decodeURIComponent(dResumeMatch[1]);
+    const data: Record<string, any> = (await readJsonBody(req, res)) || {};
+    try {
+      const handle = getDetachedManager().resumeSession(sessionId, {
+        maxSteps: data.maxSteps,
+        prompt: data.prompt
+      });
+      sendJson(res, 202, { success: true, ...handle });
+    } catch (err: any) {
+      sendJson(res, 400, { success: false, error: err?.message || String(err) });
+    }
+    return true;
+  }
+
+  const dForkMatch = pathname.match(/^\/api\/agents\/detached\/([^/]+)\/fork$/);
+  if (dForkMatch && req.method === 'POST') {
+    const sessionId = decodeURIComponent(dForkMatch[1]);
+    const data: Record<string, any> = (await readJsonBody(req, res)) || {};
+    try {
+      const result = getDetachedManager().forkSession(sessionId, {
+        step: data.step,
+        newSessionId: data.newSessionId,
+        prompt: data.prompt,
+        autoStart: Boolean(data.autoStart)
+      });
+      sendJson(res, 201, { success: true, ...result }, true);
+    } catch (err: any) {
+      sendJson(res, 400, { success: false, error: err?.message || String(err) });
+    }
+    return true;
+  }
+
+  const dStopMatch = pathname.match(/^\/api\/agents\/detached\/([^/]+)\/stop$/);
+  if (dStopMatch && req.method === 'POST') {
+    const sessionId = decodeURIComponent(dStopMatch[1]);
+    try {
+      const result = getDetachedManager().stopSession(sessionId);
+      sendJson(res, 200, { success: true, ...result });
+    } catch (err: any) {
+      sendJson(res, 404, { success: false, error: err?.message || String(err) });
+    }
     return true;
   }
 

@@ -1,4 +1,5 @@
 import type { SkillContext, SkillDefinition } from '../types.js';
+import { distillMemory } from '../memory/distiller.js';
 
 /**
  * Memory & Vector Semantic Search skills for OM Agent
@@ -94,6 +95,24 @@ export const memorySkills: SkillDefinition[] = [
         chunksIndexed,
         message: `Indexed ${chunksIndexed} chunk(s) into local vector store under 'knowledge/${title}'`
       };
+    }
+  },
+
+  {
+    name: 'distill_memory',
+    description: 'Run zero-token algorithmic distillation on daily journals and session logs to extract architectural heuristics, deduplicate facts, and prune redundant turns.',
+    parameters: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: 'Optional YYYY-MM-DD date to distill' },
+        prune: { type: 'boolean', description: 'Whether to prune redundant session turns and compress old daily logs (default true)' }
+      }
+    },
+    execute: async ({ date, prune = true }, context: SkillContext = {}) => {
+      if (!context.memory) {
+        return { success: false, error: 'Memory system not available in this context' };
+      }
+      return distillMemory(context.memory, { date, prune, useLLM: false });
     }
   }
 ];

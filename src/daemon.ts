@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { OMAgent } from './agent.js';
+import { OMSelfImprover } from './selfImprove.js';
 import { createLogger } from './utils/logger.js';
 
 const log = createLogger('OMDaemon');
@@ -80,6 +81,8 @@ export class OMDaemon extends EventEmitter {
       watchPath: trigger.watchPath || null,
       prompt: trigger.prompt || '',
       skill: trigger.skill || null,
+      handler: typeof trigger.handler === 'function' ? trigger.handler : null,
+      runOnStart: Boolean(trigger.runOnStart),
       enabled: trigger.enabled !== false,
       lastRunAt: null,
       runCount: 0
@@ -93,7 +96,47 @@ export class OMDaemon extends EventEmitter {
     for (const t of list) {
       this.addTrigger(t);
     }
+    if (config.daemon?.distillation?.enabled) {
+      this.enableAutonomousDistillation(config.daemon.distillation);
+    }
     return this;
+  }
+
+  /**
+   * Enable zero-token autonomous background memory distillation.
+   * Compresses daily logs and prunes redundant session turns on a schedule without LLM calls.
+   */
+  enableAutonomousDistillation(options: {
+    id?: string;
+    intervalMs?: number;
+    cron?: string;
+    runOnStart?: boolean;
+    prune?: boolean;
+    retainDailyDays?: number;
+    maxRetainedTurns?: number;
+    maxVectorDocs?: number;
+  } = {}) {
+    const id = options.id || 'autonomous_memory_distillation';
+    const useCron = Boolean(options.cron && !options.intervalMs);
+    return this.addTrigger({
+      id,
+      type: useCron ? 'cron' : 'interval',
+      cron: useCron ? options.cron : null,
+      everyMs: useCron ? null : (options.intervalMs ?? 3600_000),
+      runOnStart: Boolean(options.runOnStart),
+      enabled: true,
+      handler: async (_payload: Record<string, any>, activeAgent: any) => {
+        const result = await OMSelfImprover.distill(activeAgent, {
+          useLLM: false,
+          prune: options.prune ?? true,
+          retainDailyDays: options.retainDailyDays,
+          maxRetainedTurns: options.maxRetainedTurns,
+          maxVectorDocs: options.maxVectorDocs
+        });
+        this.emit('distillation', result);
+        return result;
+      }
+    });
   }
 
   async fireTrigger(triggerId: string, payload: Record<string, any> = {}) {
@@ -117,9 +160,16 @@ export class OMDaemon extends EventEmitter {
     };
 
     try {
-      const res = await agent.run(promptText);
-      record.success = Boolean(res.success);
-      record.answer = res.content;
+      if (trigger.handler) {
+        const res = await trigger.handler(payload, agent);
+        record.success = res?.success !== false;
+        record.result = res;
+        record.zeroToken = true;
+      } else {
+        const res = await agent.run(promptText);
+        record.success = Boolean(res.success);
+        record.answer = res.content;
+      }
       record.finishedAt = new Date().toISOString();
       this.emit('trigger_run', record);
       return record;
@@ -159,6 +209,9 @@ export class OMDaemon extends EventEmitter {
 
     for (const t of this.triggers.values()) {
       if (!t.enabled) continue;
+      if (t.runOnStart) {
+        this.fireTrigger(t.id, { runOnStart: true }).catch((e) => log.warn(e.message));
+      }
       if (t.type === 'interval' && t.everyMs > 0) {
         const timer = setInterval(() => {
           this.fireTrigger(t.id, { intervalMs: t.everyMs }).catch((e) => log.warn(e.message));

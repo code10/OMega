@@ -1,6 +1,5 @@
 import { execSync } from 'child_process';
 import fs from 'fs';
-import path from 'path';
 
 console.log('--- OMega Security Audit ---');
 
@@ -15,7 +14,7 @@ try {
 // 2. Secret Scanning (Basic)
 console.log('[2/4] Scanning for potential hardcoded secrets...');
 const sensitivePatterns = [/API_KEY/i, /SECRET/i, /PASSWORD/i, /TOKEN/i];
-const filesToScan = ['src/config.ts', 'src/gateway/index.ts', '.env.example'];
+const filesToScan = ['src/config.ts', 'src/gateway/server.ts', '.env.example'];
 
 filesToScan.forEach(file => {
     if (fs.existsSync(file)) {
@@ -31,7 +30,7 @@ filesToScan.forEach(file => {
 // 3. Dangerous Function Check
 console.log('[3/4] Checking for dangerous function usage...');
 const dangerousFunctions = ['exec', 'eval', 'spawn'];
-const filesToCheck = ['src/agent.ts', 'src/utils/shell.ts'];
+const filesToCheck = ['src/agent.ts', 'src/skills/shell.ts'];
 
 filesToCheck.forEach(file => {
     if (fs.existsSync(file)) {

@@ -78,9 +78,13 @@ export class WorkspaceSnapshotManager {
     if (this.runs.has(runId)) return this.runs.get(runId);
     const p = this._manifestPath(runId);
     if (!fs.existsSync(p)) return null;
-    const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
-    this.runs.set(runId, parsed);
-    return parsed;
+    try {
+      const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
+      this.runs.set(runId, parsed);
+      return parsed;
+    } catch (_) {
+      return null;
+    }
   }
 
   listRuns() {

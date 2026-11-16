@@ -15,7 +15,7 @@ export class OMProvider extends BaseProvider {
     this.stepCounter = 0;
   }
 
-  async chat({ messages, tools, signal }: Record<string, any>) {
+  async chat({ messages, signal }: Record<string, any>) {
     if (signal?.aborted) {
       const err = new Error('Aborted');
       err.name = 'AbortError';

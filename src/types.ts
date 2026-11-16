@@ -108,6 +108,25 @@ export interface EmbeddingConfig {
   apiKey?: string;
 }
 
+export interface SelfHealConfig {
+  enabled?: boolean;
+  autoCommit?: boolean;
+  testCommand?: string;
+  maxHealAttempts?: number;
+  maxSubagentSteps?: number;
+  healOnToolFailure?: boolean;
+  healOnUnhandledError?: boolean;
+  savePatchDir?: string;
+  testRunner?: (workspaceDir: string, testCommand: string) => Promise<{
+    passed: boolean;
+    exitCode: number;
+    stdout?: string;
+    stderr?: string;
+    output?: string;
+    durationMs?: number;
+  }>;
+}
+
 export interface OMConfig {
   rootDir: string;
   provider: string;
@@ -130,6 +149,7 @@ export interface OMConfig {
   security?: Record<string, any>;
   mcpServers?: Record<string, any>;
   routing: Record<string, any>;
+  selfHeal?: SelfHealConfig;
   gateway: {
     port: number;
     host: string;

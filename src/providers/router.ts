@@ -27,7 +27,6 @@ export class ModelRouter {
       maxRetries: 1,
       retryDelayMs: 150,
       rateLimitCooldownMs: 60000,
-      contextLimitChars: 48000, // ~12k tokens default local context threshold before handoff if configured
       autoHandoffOnContextLimit: true,
       fallbackChain: [
         { provider: 'gemini', model: 'gemini-3-flash-preview' },
@@ -500,12 +499,17 @@ export class ModelRouter {
           this.stats.rateLimitFallbacks++;
         }
         this.stats.history.push(fallbackEvent);
+        if (this.stats.history.length > 200) this.stats.history.shift();
         this.onEvent('fallback', fallbackEvent);
 
         const response = await targetProvider.chat({
           ...chatParams,
           tools: adaptedTools
         });
+
+        const tok = Number(response.usage?.total_tokens ?? response.usage?.totalTokenCount ?? 0) || 0;
+        this.stats.totalTokens += tok;
+        this.stats.estimatedCostUsd += ModelRouter.estimateCost(candidate.provider, targetProvider.model || candidate.model, response.usage);
 
         return {
           ...response,

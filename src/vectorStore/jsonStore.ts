@@ -51,7 +51,9 @@ export class VectorStore {
   _saveTimer: NodeJS.Timeout | null;
   _dirty: boolean;
   _closed: boolean;
-  _docCache: Map<string, { tokens: string[]; stems: Set<string>; lowerText: string }>;
+  _docCache: Map<string, { tokenSet: Set<string>; stems: Set<string>; lowerText: string }>;
+  _hashIndex: Map<string, number>;
+  _idIndex: Map<string, number>;
   asyncEmbedder: ((text: string) => Promise<number[]>) | null;
 
   constructor(storePath: string, options: Record<string, any> = {}) {
@@ -62,6 +64,8 @@ export class VectorStore {
     this._dirty = false;
     this._closed = false;
     this._docCache = new Map();
+    this._hashIndex = new Map();
+    this._idIndex = new Map();
     this.asyncEmbedder = typeof options.asyncEmbedder === 'function' ? options.asyncEmbedder : null;
   }
 
@@ -74,10 +78,22 @@ export class VectorStore {
     const tokens = tokenize(doc.text);
     const stems = new Set(tokens.map(stemWord));
     this._docCache.set(doc.id, {
-      tokens,
+      tokenSet: new Set(tokens),
       stems,
       lowerText: (doc.text || '').toLowerCase()
     });
+  }
+
+  _rebuildIndexes() {
+    this._hashIndex.clear();
+    this._idIndex.clear();
+    this._docCache.clear();
+    for (let i = 0; i < this.documents.length; i++) {
+      const doc = this.documents[i];
+      if (doc.hash) this._hashIndex.set(doc.hash, i);
+      if (doc.id) this._idIndex.set(doc.id, i);
+      this._primeDocCache(doc);
+    }
   }
 
   _ensureLoaded() {
@@ -88,9 +104,7 @@ export class VectorStore {
         const raw = JSON.parse(fs.readFileSync(this.storePath, 'utf8'));
         if (Array.isArray(raw.documents)) {
           this.documents = raw.documents;
-          for (const doc of this.documents) {
-            this._primeDocCache(doc);
-          }
+          this._rebuildIndexes();
         }
       } catch (err: any) {
         log.warn(`Failed to load vector store at ${this.storePath}: ${err.message}`);
@@ -176,7 +190,7 @@ export class VectorStore {
     if (!cleanText) return null;
 
     const hash = this._hashContent(source, cleanText);
-    const existingIdx = this.documents.findIndex((d) => d.hash === hash || (id && d.id === id));
+    const existingIdx = this._hashIndex.get(hash) ?? (id ? this._idIndex.get(id) : undefined) ?? -1;
 
     const doc: VectorDocument = {
       id: id || `vec_${hash}`,
@@ -190,8 +204,13 @@ export class VectorStore {
 
     if (existingIdx !== -1) {
       this.documents[existingIdx] = doc;
+      this._hashIndex.set(doc.hash, existingIdx);
+      this._idIndex.set(doc.id, existingIdx);
     } else {
+      const idx = this.documents.length;
       this.documents.push(doc);
+      this._hashIndex.set(doc.hash, idx);
+      this._idIndex.set(doc.id, idx);
     }
     this._primeDocCache(doc);
 
@@ -231,6 +250,7 @@ export class VectorStore {
     const before = this.documents.length;
     this.documents = this.documents.filter((d) => !d.source.startsWith(sourcePrefix));
     if (this.documents.length !== before) {
+      this._rebuildIndexes();
       this.save();
     }
   }
@@ -266,10 +286,7 @@ export class VectorStore {
     const removed = before - kept.length;
     if (removed > 0) {
       this.documents = kept;
-      this._docCache.clear();
-      for (const doc of this.documents) {
-        this._primeDocCache(doc);
-      }
+      this._rebuildIndexes();
       this.scheduleSave();
     }
     return { removed, remaining: this.documents.length };
@@ -278,6 +295,8 @@ export class VectorStore {
   clear() {
     this.documents = [];
     this._docCache.clear();
+    this._hashIndex.clear();
+    this._idIndex.clear();
     this._loaded = true;
     this.save();
   }
@@ -312,7 +331,7 @@ export class VectorStore {
         this._primeDocCache(doc);
         cached = this._docCache.get(doc.id)!;
       }
-      const { tokens: docTokens, stems: docStems, lowerText } = cached;
+      const { tokenSet, stems: docStems, lowerText } = cached;
 
       let stemMatches = 0;
       for (const qs of queryStems) {
@@ -322,7 +341,7 @@ export class VectorStore {
           const related = WORD_TO_CONCEPTS.get(qs);
           if (related) {
             for (const r of related) {
-              if (docStems.has(r) || docTokens.includes(r)) {
+              if (docStems.has(r) || tokenSet.has(r)) {
                 stemMatches += 0.65;
                 break;
               }

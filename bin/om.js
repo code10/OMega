@@ -310,7 +310,9 @@ Usage:
       console.log(`\n${C.bold}${C.skyBlue}> Final Answer:${C.reset}\n${res.content}\n`);
     } catch (err) {
       console.error(`${C.red}Error:${C.reset} ${err.message}`);
-      process.exit(1);
+      process.exitCode = 1;
+    } finally {
+      await agent.close();
     }
     return;
   }
@@ -369,7 +371,7 @@ Usage:
       if (
         cmdInput.startsWith('/provider') ||
         cmdInput.startsWith('/provide') ||
-        /^\/(gemini|google|openai|gpt|chatgpt|anthropic|claude|vllm|lmstudio|om|omega|mock)(\s+|$)/i.test(cmdInput)
+        /^\/(gemini|google|openai|gpt|chatgpt|anthropic|claude|deepseek|kimi|moonshot|qwen|dashscope|glm|zhipu|vllm|lmstudio|om|omega|mock)(\s+|$)/i.test(cmdInput)
       ) {
         const isDirect = !cmdInput.startsWith('/provide');
         const parts = cmdInput.slice(1).split(/\s+/);
@@ -468,6 +470,7 @@ Usage:
       }
 
       if (trimmed === '/gateway') {
+        await agent.close();
         rl.close();
         await startGateway();
         break;

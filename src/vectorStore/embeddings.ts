@@ -128,8 +128,9 @@ export function embedText(text: string, dim = EMBEDDING_DIM): number[] {
   }
   const norm = Math.sqrt(normSq);
   if (norm > 0) {
+    const invNorm = 1 / norm;
     for (let i = 0; i < dim; i++) {
-      vec[i] = Number((vec[i] / norm).toFixed(6));
+      vec[i] = Math.round(vec[i] * invNorm * 1e6) / 1e6;
     }
   }
 

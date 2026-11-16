@@ -62,14 +62,15 @@ export class SessionManager {
     const next = new Promise((resolve) => {
       release = resolve;
     });
-    this.locks.set(key, prev.then(() => next));
+    const tail = prev.then(() => next);
+    this.locks.set(key, tail);
 
     await prev;
     try {
       return await taskFn(this.getAgent(sessionId));
     } finally {
       release();
-      if (this.locks.get(key) === next) {
+      if (this.locks.get(key) === tail) {
         this.locks.delete(key);
       }
     }

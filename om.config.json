@@ -8,7 +8,7 @@
   "temperature": 0.2,
   "memoryDir": "./memory",
   "skillsDir": "./skills",
-  "workspaceDir": ".",
+  "workspaceDir": "./workspace",
   "routing": {
     "enabled": true,
     "maxRetries": 1,
@@ -72,7 +72,7 @@
     },
     "gemini": {
       "apiKeyEnv": "GEMINI_API_KEY",
-      "model": "gemini-3.5-flash",
+      "model": "gemini-3.5-flash-lite",
       "baseUrl": "https://generativelanguage.googleapis.com/v1beta"
     },
     "deepseek": {
@@ -102,5 +102,12 @@
     "om": {
       "model": "om-turbo"
     }
+  },
+  "selfHeal": {
+    "enabled": true,
+    "autoCommit": false,
+    "testCommand": "npm test",
+    "maxHealAttempts": 1,
+    "maxSubagentSteps": 6
   }
 }

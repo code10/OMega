@@ -94,20 +94,6 @@ export function serveStatic(
   const publicDirs = Array.isArray(publicDirOrDirs) ? publicDirOrDirs : [publicDirOrDirs];
   const sanitizedRelPath = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
 
-  if (pathname === '/favicon.ico') {
-    const hasFavicon = publicDirs.some((dir) => fs.existsSync(path.join(dir, 'favicon.ico')));
-    if (!hasFavicon) {
-      for (const dir of publicDirs) {
-        const favPath = path.join(dir, 'logo_nobg.jpeg');
-        if (fs.existsSync(favPath)) {
-          res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=3600' });
-          fs.createReadStream(favPath).pipe(res);
-          return true;
-        }
-      }
-    }
-  }
-
   for (const publicDir of publicDirs) {
     const resolvedFilePath = path.resolve(publicDir, sanitizedRelPath);
     const relToPublic = path.relative(publicDir, resolvedFilePath);

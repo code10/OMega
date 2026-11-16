@@ -1,6 +1,7 @@
 import type http from 'node:http';
 import { OMSelfImprover } from '../../selfImprove.js';
 import { OMTrainingPipeline } from '../../training.js';
+import { readDistillState } from '../../memory/distiller.js';
 import { readJsonBody, sendJson } from '../httpUtils.js';
 
 export interface MemoryRouteContext {
@@ -50,6 +51,12 @@ export async function handleMemoryRoutes(ctx: MemoryRouteContext): Promise<boole
       message: 'Vector index rebuilt successfully',
       vectorStats: stats
     });
+    return true;
+  }
+
+  if (pathname === '/api/memory/distill/status' && req.method === 'GET') {
+    const state = readDistillState(agent.config.memoryDir);
+    sendJson(res, 200, { success: true, ...state }, true);
     return true;
   }
 

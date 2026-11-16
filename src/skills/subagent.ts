@@ -126,6 +126,7 @@ export const subagentSkills: SkillDefinition[] = [
         child.off('tool_start', onToolStart);
         child.off('tool_end', onToolEnd);
         child.off('error', onError);
+        await child.close?.();
         if (worktreePath) {
           try {
             parentAgent.git?.removeWorktree?.(worktreePath, true);

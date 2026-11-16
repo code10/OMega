@@ -107,7 +107,7 @@ export async function startGateway(options: Record<string, any> = {}) {
         res.setHeader('Vary', 'Origin');
       }
     }
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Session-Id');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
@@ -521,6 +521,7 @@ ${prompt && prompt.trim() ? prompt.trim() : `Execute procedure for ${cleanName}.
   server.on('close', () => {
     agentManager.dispose();
     daemon.stop();
+    agent.close?.().catch(() => {});
   });
 
   return new Promise((resolve) => {

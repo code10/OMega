@@ -562,7 +562,11 @@ export class AgentManager {
     }
 
     // Reset live instance so next run uses updated prompt/model/workspace
-    this.liveAgents.delete(agentId);
+    const prevLive = this.liveAgents.get(agentId);
+    if (prevLive) {
+      prevLive.close?.().catch(() => {});
+      this.liveAgents.delete(agentId);
+    }
     if (record.enabled) {
       this._armSchedule(record);
     } else {
@@ -603,7 +607,11 @@ export class AgentManager {
     if (!record) return false;
     this.persistentAgents.delete(agentId);
     this._clearSchedule(agentId);
-    this.liveAgents.delete(agentId);
+    const live = this.liveAgents.get(agentId);
+    if (live) {
+      live.close?.().catch(() => {});
+      this.liveAgents.delete(agentId);
+    }
 
     if (record.worktreePath && fs.existsSync(record.worktreePath)) {
       try {
@@ -975,6 +983,9 @@ export class AgentManager {
     }
 
     this.persistentAgents.clear();
+    for (const live of this.liveAgents.values()) {
+      live.close?.().catch(() => {});
+    }
     this.liveAgents.clear();
     this.runs = [];
     this._save();
@@ -997,5 +1008,9 @@ export class AgentManager {
       ac.abort();
     }
     this.activeControllers.clear();
+    for (const live of this.liveAgents.values()) {
+      live.close?.().catch(() => {});
+    }
+    this.liveAgents.clear();
   }
 }
