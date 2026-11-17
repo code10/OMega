@@ -40,15 +40,19 @@ export async function startGateway(options: Record<string, any> = {}) {
 
   const isLocalHostBind = host === '127.0.0.1' || host === 'localhost' || host === '::1';
   const persistConfig = options.persistConfig ?? (path.resolve(config.workspaceDir) === path.resolve(config.rootDir));
-  let authToken = options.authToken || config.gateway?.authToken || process.env.OM_GATEWAY_TOKEN || '';
-  if (!isLocalHostBind && !authToken) {
-    authToken = crypto.randomBytes(24).toString('hex');
-    console.warn(`[OMega Security] Binding to non-loopback host '${host}' without authToken. Generated ephemeral token: ${authToken}`);
-  }
+  const explicitToken = options.authToken || config.gateway?.authToken || process.env.OM_GATEWAY_TOKEN || '';
+  const isEphemeralToken = !explicitToken;
+  const authToken = explicitToken || crypto.randomBytes(24).toString('hex');
+  const allowSkillCreation = Boolean(options.allowSkillCreation ?? config.gateway?.allowSkillCreation ?? false);
 
-  const allowedOrigins = Array.isArray(config.gateway?.corsOrigins)
-    ? config.gateway.corsOrigins
-    : [`http://127.0.0.1:${port}`, `http://localhost:${port}`];
+  const getAllowedOrigins = (): string[] => {
+    if (Array.isArray(config.gateway?.corsOrigins)) {
+      return config.gateway.corsOrigins;
+    }
+    const addr = server?.address();
+    const activePort = typeof addr === 'object' && addr ? addr.port : port;
+    return [`http://127.0.0.1:${activePort}`, `http://localhost:${activePort}`];
+  };
 
   const broadcastSSE = (eventName: string, dataObj: any) => {
     const payload = JSON.stringify(dataObj);
@@ -101,11 +105,18 @@ export async function startGateway(options: Record<string, any> = {}) {
 
   const server = http.createServer(async (req, res) => {
     const reqOrigin = req.headers.origin;
+    const allowedOrigins = getAllowedOrigins();
+    const isOriginAllowed = !reqOrigin || allowedOrigins.includes('*') || allowedOrigins.includes(reqOrigin);
+
+    if (reqOrigin && !isOriginAllowed) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Forbidden: Origin not allowed' }));
+      return;
+    }
+
     if (reqOrigin) {
-      if (allowedOrigins.includes('*') || allowedOrigins.includes(reqOrigin)) {
-        res.setHeader('Access-Control-Allow-Origin', reqOrigin);
-        res.setHeader('Vary', 'Origin');
-      }
+      res.setHeader('Access-Control-Allow-Origin', reqOrigin);
+      res.setHeader('Vary', 'Origin');
     }
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Session-Id');
@@ -121,8 +132,8 @@ export async function startGateway(options: Record<string, any> = {}) {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     const pathname = url.pathname;
 
-    // Enforce Bearer token authentication on /api/* when authToken is configured
-    if (authToken && pathname.startsWith('/api/')) {
+    // Enforce Bearer token authentication on /api/*
+    if (pathname.startsWith('/api/')) {
       const authHeader = req.headers.authorization || '';
       const tokenQuery = url.searchParams.get('token');
       const provided = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : tokenQuery;
@@ -427,8 +438,16 @@ export async function startGateway(options: Record<string, any> = {}) {
       return;
     }
 
-    // 15. POST /api/skills/create (Interactively scaffold and register new skill)
+    // 15. POST /api/skills/create (Interactively scaffold and register new skill - disabled by default)
     if (pathname === '/api/skills/create' && req.method === 'POST') {
+      if (!allowSkillCreation) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: false,
+          error: 'Skill creation via API is disabled by default. Enable gateway.allowSkillCreation in om.config.json to allow it.'
+        }));
+        return;
+      }
       const data: Record<string, any> | null = await readJsonBody(req, res);
       if (!data) return;
       try {
@@ -511,6 +530,20 @@ ${prompt && prompt.trim() ? prompt.trim() : `Execute procedure for ${cleanName}.
     }
 
     // --- Static Web Dashboard Files ---
+    if ((pathname === '/' || pathname === '/index.html') && isEphemeralToken && isLocalHostBind && !reqOrigin) {
+      for (const dir of PUBLIC_DIRS) {
+        const indexPath = path.join(dir, 'index.html');
+        if (fs.existsSync(indexPath)) {
+          const html = fs.readFileSync(indexPath, 'utf8').replace(
+            '<head>',
+            `<head>\n  <meta name="om-gateway-token" content="${authToken}">`
+          );
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+          res.end(html);
+          return;
+        }
+      }
+    }
     if (serveStatic(res, pathname, PUBLIC_DIRS)) return;
 
     // Default 404
@@ -526,9 +559,16 @@ ${prompt && prompt.trim() ? prompt.trim() : `Execute procedure for ${cleanName}.
 
   return new Promise((resolve) => {
     server.listen(port, host, () => {
-      const url = `http://${host}:${port}`;
-      console.log(`\n[OMega] Running live at: \x1b[36m${url}\x1b[0m\n`);
-      resolve({ server, agent, agentManager, url, port, host });
+      const addr = server.address();
+      const actualPort = typeof addr === 'object' && addr ? addr.port : port;
+      const url = `http://${host}:${actualPort}`;
+      console.log(`\n[OMega] Running live at: \x1b[36m${url}\x1b[0m`);
+      if (isEphemeralToken) {
+        console.log(`[OMega Security] Gateway token: \x1b[33m${authToken}\x1b[0m\n`);
+      } else {
+        console.log('');
+      }
+      resolve({ server, agent, agentManager, url, port: actualPort, host, authToken });
     });
   });
 }

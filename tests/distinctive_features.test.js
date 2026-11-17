@@ -310,23 +310,24 @@ describe('OMega Core Reliability & Distinctive Features', () => {
       workspaceDir: tmp
     });
     const base = `http://127.0.0.1:${gw.server.address().port}`;
+    const authHeaders = { Authorization: `Bearer ${gw.authToken}` };
     try {
-      const snapRes = await fetch(`${base}/api/snapshots`);
+      const snapRes = await fetch(`${base}/api/snapshots`, { headers: authHeaders });
       assert.equal(snapRes.status, 200);
 
-      const daemonRes = await fetch(`${base}/api/daemon/status`);
+      const daemonRes = await fetch(`${base}/api/daemon/status`, { headers: authHeaders });
       assert.equal(daemonRes.status, 200);
 
       const abortRes = await fetch(`${base}/api/chat/abort`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({})
       });
       assert.equal(abortRes.status, 200);
 
       const steerRes = await fetch(`${base}/api/chat/steer`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ instruction: 'Be concise' })
       });
       assert.equal(steerRes.status, 200);

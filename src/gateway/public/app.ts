@@ -13,6 +13,41 @@ import { initSessions } from './sessions.js';
 import { initTraceRenderer } from './traceRenderer.js';
 import { initAgents } from './agents.js';
 
+function resolveGatewayToken(): string {
+  const params = new URLSearchParams(window.location.search);
+  const urlToken = params.get('token');
+  if (urlToken) {
+    sessionStorage.setItem('om_gateway_token', urlToken);
+    params.delete('token');
+    const cleanSearch = params.toString();
+    const cleanUrl = `${window.location.pathname}${cleanSearch ? `?${cleanSearch}` : ''}${window.location.hash}`;
+    window.history.replaceState({}, '', cleanUrl);
+    return urlToken;
+  }
+  const metaToken = document.querySelector<HTMLMetaElement>('meta[name="om-gateway-token"]')?.content?.trim();
+  if (metaToken) {
+    sessionStorage.setItem('om_gateway_token', metaToken);
+    return metaToken;
+  }
+  return sessionStorage.getItem('om_gateway_token') || '';
+}
+
+const gatewayToken = resolveGatewayToken();
+if (gatewayToken) {
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+    const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    if (urlStr.startsWith('/api/') || urlStr.startsWith(`${window.location.origin}/api/`)) {
+      const headers = new Headers(init?.headers || (input instanceof Request ? input.headers : undefined));
+      if (!headers.has('Authorization')) {
+        headers.set('Authorization', `Bearer ${gatewayToken}`);
+      }
+      return originalFetch(input, { ...init, headers });
+    }
+    return originalFetch(input, init);
+  };
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const { appendActivityLogEntry, loadActivityHistory, loadMemory } = initTelemetry();
   const { openRefViewer, closeRefViewer, closeSkillCreator } = initModals({ loadSkills: () => loadSkills() });
@@ -367,7 +402,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function connectLiveEvents() {
     try {
-      const es = new EventSource('/api/events');
+      const eventsUrl = gatewayToken ? `/api/events?token=${encodeURIComponent(gatewayToken)}` : '/api/events';
+      const es = new EventSource(eventsUrl);
       es.addEventListener('config_updated', (ev) => {
         try {
           const data = JSON.parse(ev.data);

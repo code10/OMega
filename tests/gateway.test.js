@@ -8,7 +8,7 @@ import { saveConfigPatch } from '../dist/config.js';
 const TEST_DIR = path.resolve('./tests/tmp_gateway_test');
 
 test('OM Gateway Server API endpoints', async (t) => {
-  const { server, agent, url } = await startGateway({
+  const { server, agent, url, authToken } = await startGateway({
     port: 3099,
     host: '127.0.0.1',
     memoryDir: path.join(TEST_DIR, 'memory'),
@@ -16,12 +16,36 @@ test('OM Gateway Server API endpoints', async (t) => {
     provider: 'om'
   });
 
+  const rawFetch = globalThis.fetch;
+  const fetch = (target, init = {}) => {
+    const headers = new Headers(init.headers || {});
+    if (!headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${authToken}`);
+    }
+    return rawFetch(target, { ...init, headers });
+  };
+
   t.after(() => {
     agent.stopWatching();
     server.close();
     try {
       fs.rmSync(TEST_DIR, { recursive: true, force: true });
     } catch (_) {}
+  });
+
+  await t.test('Gateway enforces startup token and Origin header on localhost', async () => {
+    assert.ok(authToken && authToken.length >= 32, 'should generate ephemeral startup token on localhost');
+
+    const unauthRes = await rawFetch(`${url}/api/status`);
+    assert.equal(unauthRes.status, 401);
+
+    const badOriginRes = await rawFetch(`${url}/api/status`, {
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+        Origin: 'https://evil.example'
+      }
+    });
+    assert.equal(badOriginRes.status, 403);
   });
 
   await t.test('GET /api/status returns runtime status', async () => {
@@ -100,59 +124,84 @@ test('OM Gateway Server API endpoints', async (t) => {
     assert.equal(res3.status, 404);
   });
 
-  await t.test('POST /api/skills/create scaffolds new workflows and tools interactively', async () => {
-    // 1. Create a workflow skill
-    const wfName = 'test-workflow-auto';
-    const wfRes = await fetch(`${url}/api/skills/create`, {
+  await t.test('POST /api/skills/create is disabled by default and works when allowSkillCreation is enabled', async () => {
+    // 0. Disabled by default -> 403
+    const blockedRes = await fetch(`${url}/api/skills/create`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'workflow',
-        name: wfName,
-        description: 'Automated test workflow skill',
-        prompt: 'Run the automated workflow checklist.'
-      })
+      body: JSON.stringify({ type: 'workflow', name: 'blocked-skill' })
     });
-    assert.equal(wfRes.status, 200);
-    const wfData = await wfRes.json();
-    assert.equal(wfData.success, true);
-    assert.equal(wfData.name, wfName);
-    assert.equal(agent.skills.has(wfName), true);
-    assert.equal(agent.skills.get(wfName).type, 'workflow');
+    assert.equal(blockedRes.status, 403);
 
-    // 2. Create a JS tool skill
-    const toolName = 'test-tool-auto';
-    const toolRes = await fetch(`${url}/api/skills/create`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: 'tool',
-        name: toolName,
-        description: 'Automated test tool skill',
-        code: `export const skill = {
+    // Spin up a gateway instance with allowSkillCreation: true
+    const skillGw = await startGateway({
+      port: 0,
+      host: '127.0.0.1',
+      memoryDir: path.join(TEST_DIR, 'memory_skills'),
+      workspaceDir: TEST_DIR,
+      provider: 'om',
+      allowSkillCreation: true
+    });
+
+    try {
+      const skillAuthHeaders = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${skillGw.authToken}`
+      };
+
+      // 1. Create a workflow skill
+      const wfName = 'test-workflow-auto';
+      const wfRes = await rawFetch(`${skillGw.url}/api/skills/create`, {
+        method: 'POST',
+        headers: skillAuthHeaders,
+        body: JSON.stringify({
+          type: 'workflow',
+          name: wfName,
+          description: 'Automated test workflow skill',
+          prompt: 'Run the automated workflow checklist.'
+        })
+      });
+      assert.equal(wfRes.status, 200);
+      const wfData = await wfRes.json();
+      assert.equal(wfData.success, true);
+      assert.equal(wfData.name, wfName);
+      assert.equal(skillGw.agent.skills.has(wfName), true);
+      assert.equal(skillGw.agent.skills.get(wfName).type, 'workflow');
+
+      // 2. Create a JS tool skill
+      const toolName = 'test-tool-auto';
+      const toolRes = await rawFetch(`${skillGw.url}/api/skills/create`, {
+        method: 'POST',
+        headers: skillAuthHeaders,
+        body: JSON.stringify({
+          type: 'tool',
+          name: toolName,
+          description: 'Automated test tool skill',
+          code: `export const skill = {
   name: '${toolName}',
   description: 'Automated test tool skill',
   parameters: { type: 'object', properties: {} },
   async execute() { return { success: true, toolRan: true }; }
 };`
-      })
-    });
-    assert.equal(toolRes.status, 200);
-    const toolData = await toolRes.json();
-    assert.equal(toolData.success, true);
-    assert.equal(agent.skills.has(toolName), true);
+        })
+      });
+      assert.equal(toolRes.status, 200);
+      const toolData = await toolRes.json();
+      assert.equal(toolData.success, true);
+      assert.equal(skillGw.agent.skills.has(toolName), true);
 
-    // Clean up created files/folders
-    try {
-      const fs = await import('fs');
-      const path = await import('path');
-      const wfDir = path.join(agent.config.skillsDir, wfName);
+      // Clean up created files/folders
+      const wfDir = path.join(skillGw.agent.config.skillsDir, wfName);
       if (fs.existsSync(wfDir)) fs.rmSync(wfDir, { recursive: true, force: true });
-      const toolFile = path.join(agent.config.skillsDir, `${toolName}.js`);
+      const toolFile = path.join(skillGw.agent.config.skillsDir, `${toolName}.js`);
       if (fs.existsSync(toolFile)) fs.unlinkSync(toolFile);
-      agent.skills.skills.delete(wfName);
-      agent.skills.skills.delete(toolName);
-    } catch (_) {}
+      skillGw.agent.skills.skills.delete(wfName);
+      skillGw.agent.skills.skills.delete(toolName);
+    } finally {
+      skillGw.agent.stopWatching();
+      skillGw.server.close();
+      await skillGw.agent.close();
+    }
   });
 
   await t.test('GET /api/sessions/:id/export exports session transcripts in Markdown & JSON', async () => {

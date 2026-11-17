@@ -43,6 +43,28 @@ test('OMega Architectural & Security Improvements', async (t) => {
     assert.equal(denied.success, false);
     assert.ok(denied.error.includes('allowedCommands'));
 
+    // Empty allowedCommands still falls back to safe default allowlist (never denylist-only)
+    const emptyAllowDenied = await registry.execute('exec_command', { command: 'whoami' }, {
+      config: { workspaceDir: TMP_DIR, security: { allowedCommands: [] } }
+    });
+    assert.equal(emptyAllowDenied.success, false);
+    assert.ok(emptyAllowDenied.error.includes('allowedCommands'));
+
+    // Secret redaction in tool output
+    const prevRedactKey = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = 'sk-test-redact-value-123456';
+    try {
+      const leakTest = await registry.execute('exec_command', {
+        command: 'node -e "console.log(\'token=sk-test-redact-value-123456\')"'
+      }, { config: { workspaceDir: TMP_DIR } });
+      assert.equal(leakTest.success, true);
+      assert.ok(!leakTest.stdout.includes('sk-test-redact-value-123456'));
+      assert.ok(leakTest.stdout.includes('[REDACTED:OPENAI_API_KEY]'));
+    } finally {
+      if (prevRedactKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = prevRedactKey;
+    }
+
     const unconfirmed = await registry.execute('exec_command', { command: 'node -v' }, {
       config: { workspaceDir: TMP_DIR, security: { requireConfirmationForShell: true } }
     });
@@ -53,7 +75,9 @@ test('OMega Architectural & Security Improvements', async (t) => {
     process.env.OPENAI_API_KEY = 'sk-secret-test-key';
     try {
       const envCheck = await registry.execute('exec_command', {
-        command: 'node -e "console.log(process.env.OPENAI_API_KEY || \'SCRUBBED\')"'
+        command: 'node',
+        executable: 'node',
+        args: ['-e', "console.log(process.env.OPENAI_API_KEY || 'SCRUBBED')"]
       }, { config: { workspaceDir: TMP_DIR } });
       assert.equal(envCheck.success, true);
       assert.ok(envCheck.stdout.includes('SCRUBBED'));

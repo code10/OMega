@@ -3,9 +3,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveSafePath } from './filesystem.js';
+import { redactSecrets } from '../utils/redact.js';
 import type { SkillContext } from '../types.js';
 
 const SHELL_CONTROL_PATTERN = /[;|&`<>\r\n]|\$\(/;
+const DEFAULT_ALLOWED_COMMANDS = ['node', 'git', 'python', 'python3'];
 
 /**
  * Tokenize a command string into [executable, ...args] respecting single/double quotes.
@@ -104,8 +106,11 @@ export const shellSkills = [
         }
       }
 
-      // Security check 2: Enforce allowedCommands allowlist if configured (non-empty)
-      const allowed = Array.isArray(security.allowedCommands) ? security.allowedCommands.filter(Boolean) : [];
+      // Security check 2: Always enforce allowedCommands allowlist unless allowAllCommands is explicitly enabled
+      const configuredAllowed = Array.isArray(security.allowedCommands) ? security.allowedCommands.filter(Boolean) : [];
+      const allowed = security.allowAllCommands === true
+        ? []
+        : (configuredAllowed.length > 0 ? configuredAllowed : DEFAULT_ALLOWED_COMMANDS);
       let directExecutable = executable ? String(executable).trim() : null;
       let directArgs = Array.isArray(args) ? args.map(String) : [];
 
@@ -211,15 +216,15 @@ export const shellSkills = [
 
       return new Promise((resolve) => {
         const handleResult = (error: any, stdout: string, stderr: string) => {
-          const outStr = (stdout || '').trim();
-          const errStr = (stderr || '').trim();
+          const outStr = redactSecrets((stdout || '').trim());
+          const errStr = redactSecrets((stderr || '').trim());
           const exitCode = error ? (error.code ?? 1) : 0;
 
           if (error && !outStr && !errStr) {
             resolve({
               success: false,
               exitCode,
-              error: error.message
+              error: redactSecrets(error.message)
             });
           } else {
             resolve({

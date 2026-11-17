@@ -18,6 +18,7 @@ dist/
 /workspace/
 .om_snapshots/
 offload_cache/
+tests/tmp_*/
 .om/
 *.sqlite
 *.db
