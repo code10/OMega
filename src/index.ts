@@ -16,6 +16,7 @@ export { OMDaemon } from './daemon.js';
 export { DetachedSwarmManager } from './agent/detachedSwarm.js';
 export { saveCheckpoint, loadCheckpoint, listCheckpoints, forkCheckpoint } from './agent/checkpoint.js';
 export { OMEvalRunner } from './eval.js';
+export { LayaEngine } from './laya.js';
 export { OMSelfImprover } from './selfImprove.js';
 export { OMSelfHealer } from './selfHeal.js';
 export { OMTrainingPipeline } from './training.js';

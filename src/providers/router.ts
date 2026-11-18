@@ -17,6 +17,7 @@ export class ModelRouter {
   routingConfig: Record<string, any>;
   onEvent: (event: string, payload: any) => void;
   providerFactory: (cfg: Record<string, any>) => any;
+  laya: any;
   cooldowns: Map<string, number>;
   stats: Record<string, any>;
 
@@ -40,6 +41,7 @@ export class ModelRouter {
     };
     this.onEvent = options.onEvent || (() => {});
     this.providerFactory = options.providerFactory || createProvider;
+    this.laya = options.laya || null;
     this.cooldowns = new Map();
     this.stats = {
       totalCalls: 0,
@@ -337,7 +339,7 @@ export class ModelRouter {
     if (complexityCfg?.enabled) {
       const complexity = typeof complexityCfg.classifier === 'function'
         ? await complexityCfg.classifier(chatParams)
-        : ModelRouter.classifyComplexity(chatParams);
+        : (await this.laya?.classifyComplexity?.(chatParams)) || ModelRouter.classifyComplexity(chatParams);
       if (complexity === 'simple' && !isLocal && complexityCfg.simpleToLocal) {
         const target = complexityCfg.localTarget || { provider: 'om', model: 'om-turbo' };
         const localProv = this.providerFactory({ ...this.config, ...target });

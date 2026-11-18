@@ -15,6 +15,7 @@ dist/
 
 # Agent Runtime State & Caches
 /memory/
+/models/
 /workspace/
 .om_snapshots/
 offload_cache/

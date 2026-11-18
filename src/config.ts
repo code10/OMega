@@ -127,6 +127,23 @@ export function loadConfig(overrides: Record<string, any> = {}): OMConfig {
       ...(fileConfig.routing || {}),
       ...(overrides.routing || {})
     },
+    laya: {
+      multilingualModelDir: (overrides.laya?.multilingualModelDir || fileConfig.laya?.multilingualModelDir)
+        ? resolvePath(overrides.laya?.multilingualModelDir || fileConfig.laya?.multilingualModelDir)
+        : '',
+      device: overrides.laya?.device || fileConfig.laya?.device || 'auto',
+      complexityRouting: overrides.laya?.complexityRouting ?? fileConfig.laya?.complexityRouting ?? true,
+      riskGating: overrides.laya?.riskGating ?? fileConfig.laya?.riskGating ?? true,
+      riskThreshold: Number(overrides.laya?.riskThreshold ?? fileConfig.laya?.riskThreshold ?? 0.15),
+      toolShortlistK: Number(overrides.laya?.toolShortlistK ?? fileConfig.laya?.toolShortlistK ?? 20),
+      selfHealTriage: overrides.laya?.selfHealTriage ?? fileConfig.laya?.selfHealTriage ?? true,
+      ...(fileConfig.laya || {}),
+      ...(overrides.laya || {}),
+      enabled: (process.env.NODE_TEST_CONTEXT && overrides.laya?.enabled === undefined)
+        ? false
+        : Boolean(overrides.laya?.enabled ?? fileConfig.laya?.enabled ?? false),
+      modelDir: resolvePath(overrides.laya?.modelDir || fileConfig.laya?.modelDir || './models/laya')
+    },
     security: {
       requireConfirmationForShell: true,
       requireConfirmationForTools: ['exec_command', 'http_request'],

@@ -80,6 +80,9 @@ export async function executeAgentRun(
   };
   const seenToolSignatures = new Map();
   let activeTools = agent.getFormattedTools();
+  if (agent.laya?.isConfigured() && effectivePrompt) {
+    activeTools = await agent.laya.shortlistTools(effectivePrompt, activeTools);
+  }
   let systemPrompt = agent.buildSystemPrompt({ query: effectivePrompt });
   let promptNeedsRefresh = false;
   const runUsage = resumeCp?.usage
@@ -361,23 +364,28 @@ export async function executeAgentRun(
             ? agent.config.security.requireConfirmationForTools
             : [];
           if (tc.name !== 'exec_command' && confirmTools.includes(tc.name)) {
-            const confirmFn = options.confirmCommand || agent.options.confirmCommand || agent.confirmCommand;
-            if (typeof confirmFn !== 'function') {
-              result = {
-                success: false,
-                confirmationRequired: true,
-                error: `Tool '${tc.name}' requires human confirmation (security.requireConfirmationForTools), but no confirmation handler is attached.`
-              };
-              return { tc, result, durationMs: Date.now() - startTime, repeated: prevCount >= 1 };
-            }
-            const approved = await confirmFn({ tool: tc.name, args: tc.args });
-            if (!approved) {
-              result = {
-                success: false,
-                confirmationRequired: true,
-                error: `Tool '${tc.name}' execution was denied by user confirmation.`
-              };
-              return { tc, result, durationMs: Date.now() - startTime, repeated: prevCount >= 1 };
+            const risk = agent.laya?.isConfigured()
+              ? await agent.laya.assessToolRisk(tc.name, tc.args, effectivePrompt)
+              : null;
+            if (!risk?.safeToAutoApprove) {
+              const confirmFn = options.confirmCommand || agent.options.confirmCommand || agent.confirmCommand;
+              if (typeof confirmFn !== 'function') {
+                result = {
+                  success: false,
+                  confirmationRequired: true,
+                  error: `Tool '${tc.name}' requires human confirmation (security.requireConfirmationForTools), but no confirmation handler is attached.`
+                };
+                return { tc, result, durationMs: Date.now() - startTime, repeated: prevCount >= 1 };
+              }
+              const approved = await confirmFn({ tool: tc.name, args: tc.args, layaRisk: risk || undefined });
+              if (!approved) {
+                result = {
+                  success: false,
+                  confirmationRequired: true,
+                  error: `Tool '${tc.name}' execution was denied by user confirmation.`
+                };
+                return { tc, result, durationMs: Date.now() - startTime, repeated: prevCount >= 1 };
+              }
             }
           }
 
@@ -405,7 +413,11 @@ export async function executeAgentRun(
             confirmCommand: options.confirmCommand || agent.options.confirmCommand || agent.confirmCommand
           });
           if (result?.success === false && (result?.stack || result?.unhandled) && canSelfHeal('tool_failure')) {
-            healAttempts++;
+            const failureCause = (!result?.stack && agent.laya?.isConfigured())
+              ? await agent.laya.triageToolFailure(tc.name, result.error || '', effectiveArgs)
+              : null;
+            if (failureCause !== 'bad_tool_args') {
+              healAttempts++;
             const healResult = await OMSelfHealer.heal(
               agent,
               {
@@ -431,6 +443,7 @@ export async function executeAgentRun(
                 confirmCommand: options.confirmCommand || agent.options.confirmCommand || agent.confirmCommand
               });
               result = { ...(result && typeof result === 'object' ? result : { value: result }), selfHealed: true, healResult };
+              }
             }
           }
           const afterToolCtx = await agent._runHooks('afterTool', {

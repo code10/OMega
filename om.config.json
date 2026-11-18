@@ -73,7 +73,7 @@
     },
     "gemini": {
       "apiKeyEnv": "GEMINI_API_KEY",
-      "model": "gemini-3.5-flash-lite",
+      "model": "gemini-4-hydrogen",
       "baseUrl": "https://generativelanguage.googleapis.com/v1beta"
     },
     "deepseek": {
@@ -103,6 +103,15 @@
     "om": {
       "model": "om-turbo"
     }
+  },
+  "laya": {
+    "enabled": true,
+    "modelDir": "./models/laya",
+    "multilingualModelDir": "./models/laya-multilingual",
+    "device": "auto",
+    "complexityRouting": true,
+    "riskGating": true,
+    "selfHealTriage": true
   },
   "selfHeal": {
     "enabled": true,

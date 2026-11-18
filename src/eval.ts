@@ -72,6 +72,19 @@ export class OMEvalRunner {
               });
             }
           }
+          if (Array.isArray(tc.layaAssertions) && agent.laya?.isConfigured()) {
+            for (const assertion of tc.layaAssertions) {
+              const evalRes = await agent.laya.evaluateAssertion(tc.prompt, answerText, String(assertion));
+              if (evalRes) {
+                checks.push({
+                  type: 'layaAssertion',
+                  expected: assertion,
+                  score: evalRes.score,
+                  ok: evalRes.ok
+                });
+              }
+            }
+          }
           if (tc.maxStepsExpected) {
             checks.push({
               type: 'maxStepsExpected',
