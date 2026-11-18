@@ -1,7 +1,7 @@
 # OM (OMega) — AI Agent Framework
 
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
-[![Dependencies](https://img.shields.io/badge/dependencies-0-success.svg)](package.json)
+[![Dependencies](https://img.shields.io/badge/dependencies-1-blue.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-113%20passed-success.svg)](tests/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](README.md)
@@ -37,9 +37,9 @@
 
 ## Overview
 
-Modern agentic frameworks often require complex runtime dependencies, external databases, or heavy Python stacks. **OM** takes a local-first, zero-dependency approach:
+Modern agentic frameworks often require complex runtime setups, external databases, or heavy Python stacks. **OM** takes a local-first, lightweight Node.js approach:
 
-- **Zero Runtime Dependencies**: Operates entirely on standard Node.js built-ins (`node:events`, `node:fs`, `node:http`, `node:readline`, `node:process`, `node:crypto`, `node:sqlite`) with TypeScript (`devDependencies` only) compiled to `dist/`.
+- **Lightweight Node.js Core**: Operates on standard Node.js built-ins (`node:events`, `node:fs`, `node:http`, `node:readline`, `node:process`, `node:crypto`, `node:sqlite`) with `@huggingface/transformers` (and optional `onnxruntime-node`) for hardware-adaptive local neural inference (`OMSystemOne`), plus TypeScript (`devDependencies` only) compiled to `dist/`.
 - **Local-First & Private**: Works completely offline with local model runners (Ollama, LM Studio, vLLM) or a built-in interactive Mock simulator—no credit cards or API keys required to start.
 - **Transparent Markdown Memory**: Context, long-term facts, and daily journals are stored as human-readable Markdown files that you can inspect, edit, or commit to Git.
 - **Dual Operator Interfaces**: Access the agent via an ANSI-colored interactive terminal REPL or launch a web-based dashboard with Server-Sent Events (SSE) streaming.
@@ -53,12 +53,13 @@ Modern agentic frameworks often require complex runtime dependencies, external d
 - **Universal Model Abstraction**: Unified interface across Google Gemini, OpenAI, Anthropic Claude, DeepSeek, Kimi (Moonshot), Qwen (DashScope), GLM (Zhipu), Ollama, LM Studio, vLLM, and built-in Mock/OM engines.
 - **Dynamic Skill Registry & Subagents**: Automatic hot-discovery of custom JavaScript tools (`./skills/*.js`), structured agent workflows (`./skills/*/SKILL.md`), MCP Streamable HTTP tools, and isolated subagents (`spawn_subagent` with optional git worktree isolation).
 - **Comprehensive Built-in Tools**: Shell command execution, file manipulation, surgical patching, directory inspection, git operations (`git_status`, `git_diff`, `git_branch`), web fetching with HTML-to-Markdown conversion, and system telemetry.
+- **Hardware-Adaptive System 1 (`OMSystemOne`)**: Local neural decision engine (`src/systemOne.ts`) with GPU/CPU auto-detection (`src/deviceSpecs.ts`) for complexity-based routing, risk gating, tool shortlisting, and self-heal triage.
 - **Enhanced Memory with Local Vector Search**:
   - `memory/MEMORY.md`: Curated, long-term project knowledge and user preferences.
   - `memory/daily/YYYY-MM-DD.md`: Timestamped daily activity ledgers.
   - `memory/sessions/session_<id>.json`: Full execution traces, session forking, and deterministic replay trajectories.
-  - `memory/vectors.json` & `node:sqlite` Vector Store: Local vector embeddings (or HTTP `/v1/embeddings` / Ollama `/api/embed`) enabling semantic search across past sessions, journals, and project knowledge bases (`semantic_search_memory` & `index_knowledge`).
-- **Polished Web Dashboard & Agent Console**: Real-time SSE event streaming, collapsible tool-execution traces, failover banners, semantic vector search UI, HITL tool/shell approvals, workspace snapshots/rollback, and one-off/persistent Agent Management (`/api/agents`).
+  - `memory/vectors.json` & `node:sqlite` Vector Store: Local vector embeddings (or HTTP `/v1/embeddings` / Ollama `/api/embed`) enabling semantic search across past sessions, journals, and project knowledge bases (`search_memory` & `index_knowledge`).
+- **Polished Web Dashboard & Agent Console**: Real-time SSE event streaming, collapsible tool-execution traces, failover banners, semantic vector search UI, Device Specs telemetry, HITL tool/shell approvals, workspace snapshots/rollback, and one-off/persistent/detached Agent Management (`/api/agents`).
 - **Community-Ready CLI Quickstart (`npx omega-agent init`)**: One-command project scaffolder generating template tool/workflow skills, config, and `.gitignore`-protected `.env` files.
 
 ---
@@ -87,9 +88,19 @@ Modern agentic frameworks often require complex runtime dependencies, external d
 │ • OpenAI     │         │ • Web Fetcher │ │ • Sessions   │    │ • Agents UI   │
 │ • Anthropic  │         │ • Subagents   │ │ • VectorStore│    │ • Approvals   │
 │ • DeepSeek   │         │ • MCP Client  │ │   (JSON/SQL) │    │ • Snapshots   │
-│ • Kimi/Qwen  │         │ • ./skills/*  │ └──────────────┘    └───────────────┘
-│ • GLM/Ollama │         │ • SKILL.md    │
+│ • Kimi/Qwen  │         │ • ./skills/*  │ └──────────────┘    │ • DeviceSpecs │
+│ • GLM/Ollama │         │ • SKILL.md    │                     └───────────────┘
 │ • LMStu/vLLM │         └───────────────┘
+└──────┬───────┘
+       │
+       ▼
+┌──────────────┐
+│ OMSystemOne  │
+├──────────────┤
+│ • Complexity │
+│ • Risk Gate  │
+│ • Shortlist  │
+│ • Triage     │
 └──────────────┘
 ```
 
@@ -100,7 +111,7 @@ Modern agentic frameworks often require complex runtime dependencies, external d
 ### 1. Requirements
 
 - **Node.js** `>= 18.0.0`
-- Zero runtime dependencies (`devDependencies` only for TypeScript compilation). Install and build locally with:
+- Install dependencies and build locally with:
 
 ```bash
 npm install
@@ -194,13 +205,14 @@ Fine-tune agent behavior, routing/failover, paths, security boundaries, provider
   "temperature": 0.1,
   "memoryDir": "./memory",
   "skillsDir": "./skills",
-  "workspaceDir": "./workspace",
+  "workspaceDir": ".",
   "routing": {
     "enabled": true,
     "maxRetries": 1,
     "autoHandoffOnContextLimit": true,
     "fallbackChain": [
       { "provider": "gemini", "model": "gemini-3-flash-preview" },
+      { "provider": "gemini", "model": "gemini-3.1-flash-lite" },
       { "provider": "openai", "model": "gpt-4o" },
       { "provider": "anthropic", "model": "claude-3-5-sonnet-20241022" },
       { "provider": "om", "model": "om-reasoning" }
@@ -215,7 +227,23 @@ Fine-tune agent behavior, routing/failover, paths, security boundaries, provider
   "gateway": {
     "port": 3000,
     "host": "127.0.0.1",
-    "openBrowser": false
+    "openBrowser": false,
+    "allowSkillCreation": false
+  },
+  "systemOne": {
+    "enabled": true,
+    "device": "auto",
+    "complexityRouting": true,
+    "riskGating": true,
+    "toolShortlisting": true,
+    "selfHealTriage": true
+  },
+  "selfHeal": {
+    "enabled": true,
+    "autoCommit": false,
+    "testCommand": "npm test",
+    "maxHealAttempts": 1,
+    "maxSubagentSteps": 6
   }
 }
 ```
@@ -275,13 +303,14 @@ The agent ships with a suite of built-in operator skills:
 | `list_dir` | `path?` | List files and directories with sizes and timestamps. |
 | `patch_file` | `path`, `targetText`, `replacementText` | Perform precise, in-place string replacements in files. |
 | `search_files` | `query`, `dir?`, `maxResults?` | Recursively search files for keyword or regex matches. |
+| `search_web` | `query`, `maxResults?` | Search the web for live information and summaries. |
 | `fetch_page` | `url`, `maxChars?` | Fetch web pages and convert HTML directly to clean Markdown. |
 | `http_request` | `url`, `method`, `headers`, `body` | Generic HTTP client for interacting with REST APIs. |
 | `save_memory` | `fact`, `category?` | Persist key facts and preferences into `MEMORY.md` and index vector embeddings. |
 | `read_memory` | — | Retrieve the complete contents of `MEMORY.md`. |
-| `search_memory` | `query`, `topK?` | Hybrid keyword + vector semantic search across memory and daily journals. |
-| `semantic_search_memory` | `query`, `topK?`, `sourceFilter?` | Query 256-dim local vector embeddings across sessions, journals, and knowledge bases. |
+| `search_memory` | `query`, `topK?`, `sourceFilter?` | Hybrid keyword + 256-dim local vector semantic search across memory, sessions, and journals. |
 | `index_knowledge` | `title`, `content` | Chunk and embed project documentation into the local vector store. |
+| `distill_memory` | `date?`, `prune?` | Run zero-token algorithmic distillation on daily journals and session logs. |
 | `get_system_info` | — | Inspect host OS, CPU architecture, RAM, and Node runtime specs. |
 | `get_current_time`| — | Retrieve formatted local time, ISO 8601 timestamp, and timezone. |
 | `list_models` | `provider?` | Query available models and capabilities for any supported provider. |
@@ -395,6 +424,7 @@ When launched via `npm run gateway`, OM serves a lightweight HTTP server on port
 |:---|:---|:---|
 | `GET` | `/` | Web Console Dashboard UI. |
 | `GET` | `/api/status` | Runtime status, active provider, model, and memory paths. |
+| `GET` | `/api/device-specs` | Inspect host hardware specs and `OMSystemOne` engine status. |
 | `GET` | `/api/events` | Real-time SSE stream for live provider & skills updates. |
 | `GET` | `/api/activity` | Live activity trace history & router stats. |
 | `GET` | `/api/models` | List available models discovered across cloud and local engines. |
@@ -409,20 +439,26 @@ When launched via `npm run gateway`, OM serves a lightweight HTTP server on port
 | `GET` | `/api/memory/search` | Hybrid keyword + vector semantic search over memory. |
 | `POST` | `/api/memory/reindex` | Rebuild local vector embeddings index. |
 | `POST` | `/api/memory/distill` | Distill daily insights and promote `SKILL.md` workflows. |
+| `GET` | `/api/memory/distill/status` | Check memory distillation status. |
 | `POST` | `/api/training/export` | Export SFT/DPO JSONL training datasets. |
 | `GET` | `/api/git/status` | Inspect workspace git status. |
 | `GET` | `/api/git/diff` | Inspect workspace git diff. |
 | `GET` | `/api/agents` | List configured one-off/persistent agents and run history. |
 | `POST` | `/api/agents/run` | Execute a one-off or persistent agent task. |
+| `POST` | `/api/agents/runs/:id/abort` | Abort an active agent run. |
+| `GET` | `/api/agents/runs/:id/diff` | Inspect git diff for an agent run. |
+| `POST` | `/api/agents/runs/:id/rollback` | Roll back changes from an agent run. |
 | `POST` | `/api/agents/persistent` | Create or update a persistent agent definition. |
 | `POST` | `/api/agents/runs/clear` | Clear agent run history. |
 | `POST` | `/api/agents/oneoff/clear` | Clear one-off agent runs. |
 | `POST` | `/api/agents/persistent/clear` | Clear persistent agent definitions. |
 | `POST` | `/api/agents/reset` | Reset agent state and run history. |
+| `GET` / `POST` | `/api/agents/detached` | List or spawn detached background swarm workers (`/spawn`, `/:id/resume`, `/:id/fork`, `/:id/stop`). |
 | `GET` | `/api/sessions` | List recorded sessions with timestamps and step counts. |
 | `POST` | `/api/sessions/switch` | Switch the active session. |
 | `POST` | `/api/sessions/:id/fork` | Fork a session from a specific step. |
 | `POST` | `/api/sessions/:id/replay` | Replay a session deterministically. |
+| `POST` | `/api/compare` | Compare outputs across multiple models/providers on a prompt or session. |
 | `GET` | `/api/sessions/:id/export` | Export session transcripts in Markdown or JSON format. |
 | `POST` | `/api/clear` | Clear active conversation history without changing `sessionId`. |
 | `POST` | `/api/sessions/reset-counter` | Clear session histories and reset identifier counter. |
@@ -433,16 +469,19 @@ When launched via `npm run gateway`, OM serves a lightweight HTTP server on port
 | `POST` | `/api/chat/steer` | Inject a live mid-run steering directive. |
 | `POST` | `/api/approvals/:id` | Resolve a pending HITL tool/shell confirmation. |
 | `GET` | `/api/snapshots` | List workspace snapshots for diffing and rollback. |
+| `GET` | `/api/snapshots/:id/diff` | Inspect diff for a specific workspace snapshot. |
+| `POST` | `/api/snapshots/:id/rollback` | Roll back workspace to a specific snapshot. |
 | `GET` | `/api/daemon/status` | Inspect background daemon and webhook trigger status. |
 
 ---
 
 ## Autonomous Self-Healing & Detached Execution
 
+- **Hardware-Adaptive System 1 (`OMSystemOne`)**: `src/systemOne.ts` and `src/deviceSpecs.ts` provide local complexity routing, risk gating, tool shortlisting, and self-heal triage with automatic GPU/CPU hardware profiling.
 - **Autonomous Self-Healing (`OMSelfHealer`)**: When enabled (`selfHeal.enabled` in `om.config.json`), tool failures or unhandled errors in the ReAct loop can spawn a scoped diagnostic subagent (`src/selfHeal.ts`) to inspect stack traces, apply a minimal patch, verify against `testCommand` (`npm test`), and roll back automatically if tests fail.
 - **Detached Swarm & Checkpointing**: Background worker processes (`src/agent/detachedSwarm.ts`, `src/agent/detachedWorker.ts`) and run state checkpoints (`src/agent/checkpoint.ts`) support resilient, multi-worker execution outside the main process.
 - **Memory Distillation**: `src/memory/distiller.ts` distills session and daily logs into durable long-term memory and reusable `SKILL.md` workflows.
-- **Sandboxed Workspace (`workspace/`)**: By default, `workspaceDir` is anchored to `./workspace`, isolating agent-generated files from the framework source tree.
+- **Workspace Isolation**: `workspaceDir` in `om.config.json` (`.`, or `./workspace` for sandboxed runs) controls where agent-generated files are anchored.
 
 ---
 
@@ -457,8 +496,12 @@ OMega/
 │   ├── agent.ts               # ReAct loop coordinator (OMAgent)
 │   ├── agent/                 # Compaction, prompt builder, runner, slash commands, checkpoints & detached swarm
 │   ├── config.ts              # Environment and JSON config loader
+│   ├── deviceSpecs.ts         # Host hardware & OMSystemOne telemetry
+│   ├── systemOne.ts           # Hardware-adaptive System 1 decision engine
 │   ├── memory.ts              # Markdown and session persistence manager
-│   ├── memory/                # Memory distillation (distiller.ts)
+│   ├── memory/                # Chunker, distiller & session helpers
+│   ├── cli/                   # CLI project scaffolder (init.ts)
+│   ├── utils/                 # HTTP/SSE stream, logger & secret redaction utilities
 │   ├── modelService.ts        # Multi-provider model discovery service
 │   ├── daemon.ts              # Background daemon & webhook triggers
 │   ├── eval.ts                # Autonomous evaluation runner (OMEvalRunner)
@@ -498,7 +541,7 @@ OMega/
 ├── workspace/                 # Default sandboxed workspaceDir for agent outputs
 ├── tests/                     # Built-in node:test test suite
 ├── om.config.json             # Framework runtime configuration
-└── package.json               # Manifest (ESM, zero runtime dependencies)
+└── package.json               # Manifest (ESM, Node.js >= 18)
 ```
 
 ---
