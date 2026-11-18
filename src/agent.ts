@@ -15,7 +15,7 @@ import { handleSlashControl } from './agent/slashCommands.js';
 import { compactHistoryIfNeeded } from './agent/compaction.js';
 import { buildRecallContext, buildSystemPrompt as buildAgentSystemPrompt } from './agent/promptBuilder.js';
 import { executeAgentRun } from './agent/runner.js';
-import { LayaEngine } from './laya.js';
+import { OMSystemOne } from './systemOne.js';
 
 const log = createLogger('OMAgent');
 
@@ -42,7 +42,7 @@ export class OMAgent extends EventEmitter {
   skills: SkillRegistry;
   provider: any;
   router: ModelRouter;
-  laya: LayaEngine;
+  systemOne: OMSystemOne;
   history: any[];
   answers: any[];
   activityLog: any[];
@@ -81,11 +81,11 @@ export class OMAgent extends EventEmitter {
     this.git = new OMGitManager(this.config.workspaceDir);
     this.skills = new SkillRegistry();
     this.provider = options.providerInstance || createProvider(this.config);
-    this.laya = new LayaEngine(this.config.laya, { predictor: options.layaPredictor });
+    this.systemOne = new OMSystemOne(this.config.systemOne, { embedder: options.systemOneEmbedder });
     this.router = new ModelRouter({
       config: this.config,
       routing: options.routing || this.config.routing,
-      laya: this.laya,
+      systemOne: this.systemOne,
       onEvent: (event: string, payload: any) => {
         this.emit(event, payload);
         this._recordActivity(event, payload);

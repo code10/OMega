@@ -108,7 +108,7 @@ export interface EmbeddingConfig {
   apiKey?: string;
 }
 
-import type { LayaConfig } from './laya.js';
+import type { SystemOneConfig } from './systemOne.js';
 
 export interface SelfHealConfig {
   enabled?: boolean;
@@ -151,7 +151,7 @@ export interface OMConfig {
   security?: Record<string, any>;
   mcpServers?: Record<string, any>;
   routing: Record<string, any>;
-  laya?: LayaConfig;
+  systemOne?: SystemOneConfig;
   selfHeal?: SelfHealConfig;
   gateway: {
     port: number;

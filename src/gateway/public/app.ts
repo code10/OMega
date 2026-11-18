@@ -12,6 +12,7 @@ import { initModels } from './models.js';
 import { initSessions } from './sessions.js';
 import { initTraceRenderer } from './traceRenderer.js';
 import { initAgents } from './agents.js';
+import { initDeviceSpecs } from './device.js';
 
 function resolveGatewayToken(): string {
   const params = new URLSearchParams(window.location.search);
@@ -53,6 +54,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const { openRefViewer, closeRefViewer, closeSkillCreator } = initModals({ loadSkills: () => loadSkills() });
   const { refreshRouting } = initRoutingModal();
   const { loadAgents, handleAgentUpdate } = initAgents();
+  const { loadDeviceSpecs } = initDeviceSpecs();
 
   function autoResizePromptInput() {
     promptInput.style.height = 'auto';
@@ -172,7 +174,8 @@ document.addEventListener('DOMContentLoaded', () => {
     models: 'Models',
     skills: 'Skills',
     memory: 'Memory',
-    system: 'Developer & Server'
+    system: 'Developer & Server',
+    device: 'Device Specs'
   };
 
   // --------------------------------------------------------------------------
@@ -193,6 +196,7 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (tab === 'skills') targetPane = document.getElementById('paneSkills');
     else if (tab === 'memory') targetPane = document.getElementById('paneMemory');
     else if (tab === 'system') targetPane = document.getElementById('paneSystem');
+    else if (tab === 'device') targetPane = document.getElementById('paneDevice');
 
     if (targetPane) targetPane.classList.add('active');
     if (viewTitle) viewTitle.textContent = TAB_NAMES[tab] || 'OM Agent Studio';
@@ -201,12 +205,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (tab === 'agents') loadAgents();
     if (tab === 'models') loadModels();
     if (tab === 'skills') loadSkills();
-    if (tab === 'memory') loadMemory();
-    if (tab === 'system') {
+    else if (tab === 'memory') loadMemory();
+    else if (tab === 'system') {
       loadStatus();
       loadModels();
       loadActivityHistory();
     }
+    else if (tab === 'device') loadDeviceSpecs();
     syncLeftSidebarToggle();
   }
 

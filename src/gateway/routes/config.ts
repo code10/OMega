@@ -3,6 +3,7 @@ import path from 'node:path';
 import type http from 'node:http';
 import { readJsonBody, sendJson } from '../httpUtils.js';
 import { saveConfigPatch } from '../../config.js';
+import { collectDeviceSpecs } from '../../deviceSpecs.js';
 
 export interface ConfigRouteContext {
   req: http.IncomingMessage;
@@ -335,6 +336,17 @@ export async function handleConfigRoutes(ctx: ConfigRouteContext): Promise<boole
       apiKeyEnv: envName,
       hasKey: Boolean(apiKey)
     });
+    return true;
+  }
+
+  // GET /api/device-specs (Hardware CPU/GPU/NPU/VRAM/RAM + Core Engine & Laya specs)
+  if (pathname === '/api/device-specs' && req.method === 'GET') {
+    try {
+      const specs = await collectDeviceSpecs(agent);
+      sendJson(res, 200, { success: true, ...specs });
+    } catch (err: any) {
+      sendJson(res, 500, { success: false, error: err.message });
+    }
     return true;
   }
 

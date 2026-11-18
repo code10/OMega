@@ -6,19 +6,34 @@
 export async function fetchWithTimeout(
   url: string,
   options: RequestInit = {},
-  timeoutMs = 60000
+  timeoutMs = 60000,
+  totalMaxTimeoutMs = 180000
 ): Promise<Response> {
   const { signal: externalSignal, ...rest } = options;
-  const timeoutSignal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : null;
-  const combinedSignal =
-    externalSignal && timeoutSignal
-      ? AbortSignal.any([externalSignal, timeoutSignal])
-      : externalSignal || timeoutSignal;
+  const runFetch = (ms: number) => {
+    const timeoutSignal = ms > 0 ? AbortSignal.timeout(ms) : null;
+    const combinedSignal =
+      externalSignal && timeoutSignal
+        ? AbortSignal.any([externalSignal, timeoutSignal])
+        : externalSignal || timeoutSignal;
 
-  return fetch(url, {
-    ...rest,
-    ...(combinedSignal ? { signal: combinedSignal } : {})
-  });
+    return fetch(url, {
+      ...rest,
+      ...(combinedSignal ? { signal: combinedSignal } : {})
+    });
+  };
+
+  try {
+    return await runFetch(timeoutMs);
+  } catch (err: any) {
+    const isTimeout = (err?.name === 'TimeoutError' || err?.name === 'AbortError') && !externalSignal?.aborted;
+    const bodyBytes = typeof rest.body === 'string' ? Buffer.byteLength(rest.body, 'utf8') : 0;
+    const remainingBudgetMs = totalMaxTimeoutMs - timeoutMs;
+    if (isTimeout && bodyBytes >= 8192 && timeoutMs > 0 && remainingBudgetMs > 0) {
+      return await runFetch(remainingBudgetMs);
+    }
+    throw err;
+  }
 }
 
 /**

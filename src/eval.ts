@@ -72,12 +72,13 @@ export class OMEvalRunner {
               });
             }
           }
-          if (Array.isArray(tc.layaAssertions) && agent.laya?.isConfigured()) {
-            for (const assertion of tc.layaAssertions) {
-              const evalRes = await agent.laya.evaluateAssertion(tc.prompt, answerText, String(assertion));
+          const semanticAssertions = tc.semanticAssertions || tc.layaAssertions;
+          if (Array.isArray(semanticAssertions) && agent.systemOne?.isConfigured()) {
+            for (const assertion of semanticAssertions) {
+              const evalRes = await agent.systemOne.evaluateAssertion(tc.prompt, answerText, String(assertion));
               if (evalRes) {
                 checks.push({
-                  type: 'layaAssertion',
+                  type: 'semanticAssertion',
                   expected: assertion,
                   score: evalRes.score,
                   ok: evalRes.ok

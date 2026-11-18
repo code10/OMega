@@ -127,22 +127,21 @@ export function loadConfig(overrides: Record<string, any> = {}): OMConfig {
       ...(fileConfig.routing || {}),
       ...(overrides.routing || {})
     },
-    laya: {
-      multilingualModelDir: (overrides.laya?.multilingualModelDir || fileConfig.laya?.multilingualModelDir)
-        ? resolvePath(overrides.laya?.multilingualModelDir || fileConfig.laya?.multilingualModelDir)
-        : '',
-      device: overrides.laya?.device || fileConfig.laya?.device || 'auto',
-      complexityRouting: overrides.laya?.complexityRouting ?? fileConfig.laya?.complexityRouting ?? true,
-      riskGating: overrides.laya?.riskGating ?? fileConfig.laya?.riskGating ?? true,
-      riskThreshold: Number(overrides.laya?.riskThreshold ?? fileConfig.laya?.riskThreshold ?? 0.15),
-      toolShortlistK: Number(overrides.laya?.toolShortlistK ?? fileConfig.laya?.toolShortlistK ?? 20),
-      selfHealTriage: overrides.laya?.selfHealTriage ?? fileConfig.laya?.selfHealTriage ?? true,
-      ...(fileConfig.laya || {}),
-      ...(overrides.laya || {}),
-      enabled: (process.env.NODE_TEST_CONTEXT && overrides.laya?.enabled === undefined)
+    systemOne: {
+      device: overrides.systemOne?.device || fileConfig.systemOne?.device || 'auto',
+      dtype: overrides.systemOne?.dtype || fileConfig.systemOne?.dtype || 'q8',
+      model: overrides.systemOne?.model || fileConfig.systemOne?.model || '',
+      complexityRouting: overrides.systemOne?.complexityRouting ?? fileConfig.systemOne?.complexityRouting ?? true,
+      riskGating: overrides.systemOne?.riskGating ?? fileConfig.systemOne?.riskGating ?? true,
+      riskThreshold: Number(overrides.systemOne?.riskThreshold ?? fileConfig.systemOne?.riskThreshold ?? 0.45),
+      toolShortlisting: overrides.systemOne?.toolShortlisting ?? fileConfig.systemOne?.toolShortlisting ?? true,
+      toolShortlistK: Number(overrides.systemOne?.toolShortlistK ?? fileConfig.systemOne?.toolShortlistK ?? 20),
+      selfHealTriage: overrides.systemOne?.selfHealTriage ?? fileConfig.systemOne?.selfHealTriage ?? true,
+      ...(fileConfig.systemOne || {}),
+      ...(overrides.systemOne || {}),
+      enabled: (process.env.NODE_TEST_CONTEXT && overrides.systemOne?.enabled === undefined)
         ? false
-        : Boolean(overrides.laya?.enabled ?? fileConfig.laya?.enabled ?? false),
-      modelDir: resolvePath(overrides.laya?.modelDir || fileConfig.laya?.modelDir || './models/laya')
+        : Boolean(overrides.systemOne?.enabled ?? fileConfig.systemOne?.enabled ?? false),
     },
     security: {
       requireConfirmationForShell: true,
