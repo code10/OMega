@@ -133,3 +133,20 @@ test('LayaEngine device:auto tunes settings for GPU vs CPU/RAM', async () => {
   assert.equal(cpuProfile.toolShortlisting, false);
   assert.equal(cpuProfile.loadMultilingual, false);
 });
+
+test('LayaEngine falls back safely if predictor throws', async () => {
+  const failingEngine = new LayaEngine(
+    { enabled: true },
+    {
+      predictor: {
+        async predict() {
+          throw new Error('ONNX runtime error');
+        }
+      }
+    }
+  );
+  assert.equal(await failingEngine.classifyComplexity({ messages: [{ role: 'user', content: 'hi' }] }), null);
+  assert.equal(await failingEngine.assessToolRisk('http_request', {}), null);
+  assert.equal(await failingEngine.triageToolFailure('exec_command', 'fail'), null);
+  assert.equal(await failingEngine.evaluateAssertion('p', 'a', 'c'), null);
+});

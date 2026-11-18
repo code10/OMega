@@ -180,13 +180,25 @@ export class LayaEngine {
     return router;
   }
 
+  private async _safePredict(
+    state: unknown,
+    questions: Record<string, any>
+  ): Promise<{ answers: Record<string, any> } | null> {
+    const predictor = await this.getPredictor();
+    if (!predictor) return null;
+    try {
+      return await predictor.predict(state, questions);
+    } catch (err: any) {
+      log.debug(`Laya prediction failed, falling back: ${err?.message || err}`);
+      return null;
+    }
+  }
+
   /**
    * A. Classify prompt complexity ('simple' | 'moderate' | 'complex').
    */
   async classifyComplexity(chatParams: Record<string, any> = {}): Promise<'simple' | 'moderate' | 'complex' | null> {
     if (!this.config.complexityRouting) return null;
-    const predictor = await this.getPredictor();
-    if (!predictor) return null;
 
     const messages = Array.isArray(chatParams.messages) ? chatParams.messages : [];
     const last = messages[messages.length - 1];
@@ -198,7 +210,7 @@ export class LayaEngine {
       turnCount: messages.length,
     };
 
-    const out = await predictor.predict(state, {
+    const out = await this._safePredict(state, {
       complexity: {
         type: 'choice',
         instructions: 'How much reasoning does this engineering task require?',
@@ -226,10 +238,8 @@ export class LayaEngine {
     context = ''
   ): Promise<{ safeToAutoApprove: boolean; riskScore: number; reason: string } | null> {
     if (!this.config.riskGating) return null;
-    const predictor = await this.getPredictor();
-    if (!predictor) return null;
 
-    const out = await predictor.predict(
+    const out = await this._safePredict(
       { tool: toolName, args, userContext: String(context || '').slice(0, 400) },
       {
         is_destructive: {
@@ -238,8 +248,9 @@ export class LayaEngine {
         },
       }
     );
+    if (!out) return null;
 
-    const riskScore = Number(out?.answers?.is_destructive?.noul ?? 1);
+    const riskScore = Number(out.answers?.is_destructive?.noul ?? 1);
     const safeToAutoApprove = Number.isFinite(riskScore) && riskScore < this.config.riskThreshold;
     return {
       safeToAutoApprove,
@@ -262,7 +273,7 @@ export class LayaEngine {
       return tools;
     }
     const predictor = await this.getPredictor();
-    if (!predictor) return tools;
+    if (!predictor || !this.config.toolShortlisting) return tools;
 
     // Score each tool's relevance in batches via noul or choice; keep top-k.
     const scored = await Promise.all(
@@ -297,10 +308,8 @@ export class LayaEngine {
     args: Record<string, any> = {}
   ): Promise<'transient_network' | 'bad_tool_args' | 'code_bug' | null> {
     if (!this.config.selfHealTriage) return null;
-    const predictor = await this.getPredictor();
-    if (!predictor) return null;
 
-    const out = await predictor.predict(
+    const out = await this._safePredict(
       { tool: toolName, args, error: String(errorText || '').slice(0, 800) },
       {
         cause: {
@@ -330,10 +339,7 @@ export class LayaEngine {
     answer: string,
     assertion: string
   ): Promise<{ ok: boolean; score: number } | null> {
-    const predictor = await this.getPredictor();
-    if (!predictor) return null;
-
-    const out = await predictor.predict(
+    const out = await this._safePredict(
       {
         prompt: String(prompt || '').slice(0, 500),
         answer: String(answer || '').slice(0, 1500),
@@ -346,8 +352,9 @@ export class LayaEngine {
         },
       }
     );
+    if (!out) return null;
 
-    const score = Number(out?.answers?.passes?.noul ?? 0);
+    const score = Number(out.answers?.passes?.noul ?? 0);
     return {
       ok: Number.isFinite(score) && score >= 0.5,
       score,
