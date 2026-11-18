@@ -56,7 +56,7 @@ test('SkillRegistry built-in skills and execution', async (t) => {
   await t.test('Shell skill: exec_command', async () => {
     const shellRes = await registry.execute('exec_command', {
       command: 'node -e "console.log(12345)"'
-    }, context);
+    }, { ...context, config: { ...context.config, security: { allowedCommands: ['node'] } } });
     assert.equal(shellRes.success, true);
     assert.ok(shellRes.stdout.includes('12345'));
   });

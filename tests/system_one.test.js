@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { OMSystemOne, ModelRouter, collectDeviceSpecs } from '../dist/index.js';
+import { consumeSSEStream } from '../dist/utils/http.js';
 
 function makeMockEmbedder() {
   return async (text) => {
@@ -159,4 +160,30 @@ test('collectDeviceSpecs returns hardware and OMSystemOne engine snapshot', asyn
   assert.ok(Array.isArray(specs.gpus));
   assert.equal(typeof specs.npu.detected, 'boolean');
   assert.equal(specs.engine.systemOne.enabled, true);
+});
+
+test('consumeSSEStream resets idle timeout on active chunks and throws 408 on stall', async () => {
+  const encoder = new TextEncoder();
+  const activeStream = new ReadableStream({
+    async start(controller) {
+      for (let i = 0; i < 3; i++) {
+        await new Promise((r) => setTimeout(r, 25));
+        controller.enqueue(encoder.encode(`data: {"token":"t${i}"}\n\n`));
+      }
+      controller.close();
+    }
+  });
+  const events = [];
+  await consumeSSEStream(new Response(activeStream), (d) => events.push(d), { idleTimeoutMs: 60 });
+  assert.equal(events.length, 3);
+
+  const stalledStream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode('data: {"token":"start"}\n\n'));
+    }
+  });
+  await assert.rejects(
+    () => consumeSSEStream(new Response(stalledStream), () => {}, { idleTimeoutMs: 40 }),
+    (err) => err.name === 'TimeoutError' && err.status === 408
+  );
 });

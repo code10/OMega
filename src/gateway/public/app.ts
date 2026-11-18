@@ -175,7 +175,7 @@ document.addEventListener('DOMContentLoaded', () => {
     skills: 'Skills',
     memory: 'Memory',
     system: 'Developer & Server',
-    device: 'Device Specs'
+    device: 'Device'
   };
 
   // --------------------------------------------------------------------------

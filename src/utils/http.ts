@@ -10,17 +10,26 @@ export async function fetchWithTimeout(
   totalMaxTimeoutMs = 180000
 ): Promise<Response> {
   const { signal: externalSignal, ...rest } = options;
-  const runFetch = (ms: number) => {
-    const timeoutSignal = ms > 0 ? AbortSignal.timeout(ms) : null;
-    const combinedSignal =
-      externalSignal && timeoutSignal
-        ? AbortSignal.any([externalSignal, timeoutSignal])
-        : externalSignal || timeoutSignal;
+  const runFetch = async (ms: number) => {
+    const controller = new AbortController();
+    const timer = ms > 0 ? setTimeout(() => controller.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError')), ms) : null;
+    const onExternalAbort = () => controller.abort(externalSignal?.reason);
+    if (externalSignal) {
+      if (externalSignal.aborted) controller.abort(externalSignal.reason);
+      else externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
 
-    return fetch(url, {
-      ...rest,
-      ...(combinedSignal ? { signal: combinedSignal } : {})
-    });
+    try {
+      const res = await fetch(url, { ...rest, signal: controller.signal });
+      // Headers received: clear header timeout so active SSE streams are governed by idle-token timeout
+      if (timer) clearTimeout(timer);
+      return res;
+    } catch (err) {
+      if (timer) clearTimeout(timer);
+      throw err;
+    } finally {
+      if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
+    }
   };
 
   try {
@@ -60,6 +69,7 @@ export function extractSSEToken(dataStr: string): { token?: string; json?: any }
 
 export interface ConsumeSSEOptions {
   maxBufferBytes?: number;
+  idleTimeoutMs?: number;
   onRetry?: (retryMs: number) => void;
 }
 
@@ -75,10 +85,31 @@ export async function consumeSSEStream(
 ): Promise<void> {
   if (!res.body) return;
   const maxBufferBytes = options.maxBufferBytes ?? 10 * 1024 * 1024;
+  const idleTimeoutMs = options.idleTimeoutMs ?? 30000;
   const reader = res.body.getReader();
   const decoder = new TextDecoder('utf-8');
   let buffer = '';
   let lastEventId: string | undefined;
+
+  const readWithIdleTimeout = async () => {
+    if (idleTimeoutMs <= 0) return reader.read();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      return await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            const err: Error & { status?: number } = new Error(`SSE stream idle timeout after ${idleTimeoutMs}ms`);
+            err.name = 'TimeoutError';
+            err.status = 408;
+            reject(err);
+          }, idleTimeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
 
   const processBlock = (block: string) => {
     const lines = block.split(/\r\n|\r|\n/);
@@ -116,7 +147,7 @@ export async function consumeSSEStream(
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readWithIdleTimeout();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
 

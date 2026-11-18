@@ -20,11 +20,23 @@ export class OMGitManager {
    * @returns {string}
    */
   _exec(args: string[], cwd = this.workspaceDir) {
-    return execFileSync('git', args, {
-      cwd,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe']
-    }).trim();
+    try {
+      return execFileSync('git', args, {
+        cwd,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe']
+      }).trim();
+    } catch (err: any) {
+      const stderr = String(err?.stderr || '').trim();
+      const detail = stderr || err?.message || 'Unknown git error';
+      const wrapped: Error & { status?: number; code?: string; stderr?: string } = new Error(
+        `git ${args[0] || ''} failed: ${detail}`.trim()
+      );
+      if (typeof err?.status === 'number') wrapped.status = err.status;
+      if (err?.code) wrapped.code = err.code;
+      if (stderr) wrapped.stderr = stderr;
+      throw wrapped;
+    }
   }
 
   /**

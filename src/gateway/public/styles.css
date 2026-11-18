@@ -3002,6 +3002,27 @@ body {
   color: var(--text-primary);
 }
 
+#paneDevice .config-val {
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-left: auto;
+  text-align: right;
+}
+
+.agent-sidebar-section-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 10px 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
 /* Responsive adjustments */
 @media (max-width: 900px) {
   .chat-sessions-sidebar {

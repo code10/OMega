@@ -110,16 +110,22 @@ export function initTraceRenderer(deps: TraceRendererDeps) {
     scrollToBottom();
   }
 
-  function createAgentMessageContainer() {
+  function createAgentMessageContainer(modelName?: string) {
     const row = document.createElement('div');
     row.className = 'message-row agent-msg';
     const bubble = document.createElement('div');
     bubble.className = 'msg-bubble';
 
+    const resolvedModel =
+      (modelName && modelName !== 'unknown' ? modelName : '') ||
+      (topLoadedModel && topLoadedModel.textContent) ||
+      (inputModelTag && inputModelTag.textContent) ||
+      'OM Agent';
+
     const header = document.createElement('div');
     header.className = 'agent-header-row';
     header.innerHTML = `
-      <span class="agent-header-chip">${escapeHtml((topLoadedModel && topLoadedModel.textContent) || (inputModelTag && inputModelTag.textContent) || 'OM Agent')}</span>
+      <span class="agent-header-chip">${escapeHtml(resolvedModel)}</span>
     `;
     bubble.appendChild(header);
 

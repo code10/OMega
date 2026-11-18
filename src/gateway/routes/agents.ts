@@ -43,6 +43,24 @@ export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boole
     return true;
   }
 
+  if (pathname === '/api/agents/runs/clear' && req.method === 'POST') {
+    agentManager.clearRuns();
+    sendJson(res, 200, { success: true, ...agentManager.getState() });
+    return true;
+  }
+
+  if (pathname === '/api/agents/oneoff/clear' && req.method === 'POST') {
+    agentManager.clearOneOffRuns();
+    sendJson(res, 200, { success: true, ...agentManager.getState() });
+    return true;
+  }
+
+  if (pathname === '/api/agents/persistent/clear' && req.method === 'POST') {
+    agentManager.clearPersistentAgents();
+    sendJson(res, 200, { success: true, ...agentManager.getState() });
+    return true;
+  }
+
   const abortMatch = pathname.match(/^\/api\/agents\/runs\/([^/]+)\/abort$/);
   if (abortMatch && req.method === 'POST') {
     const runId = decodeURIComponent(abortMatch[1]);

@@ -8,7 +8,7 @@ export interface SessionsDeps {
   resetSessionsCounterBtn: HTMLButtonElement | null;
   clearSessionBtn: HTMLButtonElement | null;
   appendUserMessage: (text: string, attachments?: any[], timestamp?: number | string) => void;
-  createAgentMessageContainer: () => { row: HTMLElement; bubble: HTMLElement };
+  createAgentMessageContainer: (modelName?: string) => { row: HTMLElement; bubble: HTMLElement };
   appendCopyAction: (parentEl: HTMLElement, getTextFn: () => string, timestamp?: number | string) => void;
   scrollToBottom: () => void;
   updateModelUsageBar: () => void;
@@ -81,7 +81,6 @@ export function initSessions(deps: SessionsDeps) {
           </div>
           <span class="session-date">${escapeHtml(dateStr || (s.isNew ? 'Fresh turn' : s.sessionId))}</span>
         </div>
-        <span class="session-badge-count">${s.historyLength || s.messageCount || (s.isNew ? 0 : 1)}</span>
       `;
 
       item.addEventListener('click', () => switchSession(s.sessionId));
@@ -98,7 +97,7 @@ export function initSessions(deps: SessionsDeps) {
       });
       if (res.ok) {
         const data = await res.json();
-        if (topbarSessionTag) topbarSessionTag.textContent = sessionId;
+        if (topbarSessionTag) topbarSessionTag.textContent = data.session?.title || sessionId;
         renderLoadedSession(data.session);
         await loadSessions();
       }
@@ -114,18 +113,36 @@ export function initSessions(deps: SessionsDeps) {
         appendUserMessage(session.prompt, [], session.timestamp);
       }
       if (session?.finalResponse) {
-        const { row, bubble } = createAgentMessageContainer();
+        const sessionModel =
+          (session.model && session.model !== 'unknown' ? session.model : undefined) ||
+          session.answers?.[0]?.model;
+        const { row, bubble } = createAgentMessageContainer(sessionModel);
         messagesContainer.appendChild(row);
         const answer = document.createElement('div');
         answer.className = 'final-markdown-response';
         answer.innerHTML = formatMarkdown(session.finalResponse);
         bubble.appendChild(answer);
+        const ansMeta = session.answers?.[0];
+        const reqModel = ansMeta?.fallbackEvents?.[0]?.fromModel || ansMeta?.requestedModel || session.requestedModel;
+        const actualModel = ansMeta?.model || sessionModel;
+        if (reqModel && actualModel && reqModel !== actualModel) {
+          const attrEl = document.createElement('div');
+          attrEl.className = 'agent-model-attribution';
+          attrEl.style.cssText = 'margin-top: 8px; font-size: 0.72rem; color: var(--text-muted, #8b949e); font-family: var(--font-mono, monospace); opacity: 0.85;';
+          attrEl.textContent = `Requested: ${reqModel} → Answered by: ${actualModel}`;
+          bubble.appendChild(attrEl);
+        }
         appendCopyAction(bubble, () => session.finalResponse, session.timestamp);
       }
       return;
     }
 
+    const totalHistoryAsst = session.history.filter(
+      (m: any) => m.role === 'assistant' && !(m.toolCalls && m.toolCalls.length > 0)
+    ).length;
+    const answerOffset = Math.max(0, (session.answers?.length || 0) - totalHistoryAsst);
     let pendingReasoning: string[] = [];
+    let assistantAnswerIdx = 0;
     for (const msg of session.history) {
       if (msg.role === 'user') {
         pendingReasoning = [];
@@ -151,7 +168,13 @@ export function initSessions(deps: SessionsDeps) {
           if (msg.content) pendingReasoning.push(msg.content);
           continue;
         }
-        const { row, bubble } = createAgentMessageContainer();
+        const ansMeta = session.answers?.[answerOffset + assistantAnswerIdx];
+        const answerModel =
+          msg.model ||
+          ansMeta?.model ||
+          (session.model && session.model !== 'unknown' ? session.model : undefined);
+        assistantAnswerIdx++;
+        const { row, bubble } = createAgentMessageContainer(answerModel);
         messagesContainer.appendChild(row);
         if (pendingReasoning.length > 0) {
           const thoughtBox = document.createElement('div');
@@ -171,6 +194,15 @@ export function initSessions(deps: SessionsDeps) {
         answer.className = 'final-markdown-response';
         answer.innerHTML = formatMarkdown(msg.content);
         bubble.appendChild(answer);
+        const reqModel = ansMeta?.fallbackEvents?.[0]?.fromModel || ansMeta?.requestedModel || session.requestedModel;
+        const actualModel = ansMeta?.model || answerModel;
+        if (reqModel && actualModel && reqModel !== actualModel) {
+          const attrEl = document.createElement('div');
+          attrEl.className = 'agent-model-attribution';
+          attrEl.style.cssText = 'margin-top: 8px; font-size: 0.72rem; color: var(--text-muted, #8b949e); font-family: var(--font-mono, monospace); opacity: 0.85;';
+          attrEl.textContent = `Requested: ${reqModel} → Answered by: ${actualModel}`;
+          bubble.appendChild(attrEl);
+        }
         appendCopyAction(bubble, () => msg.content || '', msg.timestamp || session.timestamp);
       }
     }

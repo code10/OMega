@@ -39,6 +39,7 @@ interface AgentRunItem {
   prompt: string;
   provider: string;
   model: string;
+  requestedModel?: string;
   status: 'running' | 'completed' | 'failed' | 'aborted';
   liveStatus?: string | null;
   startedAt: string;
@@ -474,12 +475,17 @@ export function initAgents() {
     if (!sidebarListEl) return;
 
     const q = sidebarSearchQuery.toLowerCase();
+    const allOneOff = runs.filter((r) => !r.agentId);
+    const filteredOneOff = q
+      ? allOneOff.filter((r) => `${r.name || 'One-Off'} ${r.prompt || ''} ${r.model || ''} ${r.provider || ''}`.toLowerCase().includes(q))
+      : allOneOff;
     const filteredPersistent = q
       ? persistent.filter((a) => `${a.name} ${a.description || ''} ${a.provider || ''} ${a.model || ''}`.toLowerCase().includes(q))
       : persistent;
 
     const latestRunTime = runs[0]?.startedAt ? formatTime(runs[0].startedAt) : 'No runs yet';
     const allActive = selectedSidebarAgentId === null ? 'active' : '';
+    const totalAgentsCount = persistent.length + allOneOff.length;
     const allItemHtml = `
       <div class="session-item ${allActive}" data-sidebar-agent="__all__">
         <div class="session-item-left">
@@ -489,11 +495,32 @@ export function initAgents() {
           </div>
           <span class="session-date">${escapeHtml(latestRunTime)}</span>
         </div>
-        <span class="session-badge-count">${persistent.length}</span>
+        <span class="session-badge-count">${totalAgentsCount}</span>
       </div>
     `;
 
-    const itemsHtml = filteredPersistent
+    const oneOffItemsHtml = filteredOneOff
+      .map((r) => {
+        const key = `oneoff:${r.runId}`;
+        const isActive = selectedSidebarAgentId === key ? 'active' : '';
+        const statusLabel = r.status === 'running' ? 'ACTIVE' : r.status === 'failed' ? 'ERR' : '';
+        const badgeClass = r.status === 'running' ? 'agent-sidebar-badge-running' : r.status === 'failed' ? 'agent-sidebar-badge-error' : '';
+        const timeStr = formatTime(r.startedAt);
+        return `
+          <div class="session-item ${isActive}" data-sidebar-agent="${escapeHtml(key)}">
+            <div class="session-item-left">
+              <div class="session-title-row">
+                <span class="session-name">${escapeHtml(r.name || 'One-Off')}</span>
+                ${statusLabel ? `<span class="session-active-pill ${badgeClass}">${escapeHtml(statusLabel)}</span>` : ''}
+              </div>
+              <span class="session-date">${escapeHtml(timeStr)}</span>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+
+    const persistentItemsHtml = filteredPersistent
       .map((ag) => {
         const isActive = selectedSidebarAgentId === ag.id ? 'active' : '';
         const statusLabel = ag.status === 'running' ? 'ACTIVE' : ag.status.toUpperCase();
@@ -514,7 +541,21 @@ export function initAgents() {
       })
       .join('');
 
-    sidebarListEl.innerHTML = allItemHtml + itemsHtml;
+    const clearIconSvg = `
+      <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+        <path d="M3 3v5h5"></path>
+      </svg>
+    `;
+
+    const oneOffSection = filteredOneOff.length > 0
+      ? `<div class="agent-sidebar-section-label"><span>One-off</span><button type="button" class="sessions-action-btn danger-hover" data-clear-group="oneoff" title="Clear One-off Agents">${clearIconSvg}</button></div>${oneOffItemsHtml}`
+      : '';
+    const persistentSection = filteredPersistent.length > 0
+      ? `<div class="agent-sidebar-section-label"><span>Persistent</span><button type="button" class="sessions-action-btn danger-hover" data-clear-group="persistent" title="Clear Persistent Agents">${clearIconSvg}</button></div>${persistentItemsHtml}`
+      : '';
+
+    sidebarListEl.innerHTML = allItemHtml + oneOffSection + persistentSection;
   }
 
   function renderState(data: { persistentAgents?: PersistentAgentItem[]; runs?: AgentRunItem[] }) {
@@ -523,19 +564,35 @@ export function initAgents() {
     const allRuns = Array.isArray(data.runs) ? data.runs : [];
     lastPersistentList = allPersistent;
 
-    if (selectedSidebarAgentId && !allPersistent.some((a) => a.id === selectedSidebarAgentId)) {
-      selectedSidebarAgentId = null;
+    const isOneOffSelected = Boolean(selectedSidebarAgentId && selectedSidebarAgentId.startsWith('oneoff:'));
+    const selectedRunId = isOneOffSelected ? selectedSidebarAgentId!.slice('oneoff:'.length) : null;
+    if (selectedSidebarAgentId) {
+      const exists = isOneOffSelected
+        ? allRuns.some((r) => !r.agentId && r.runId === selectedRunId)
+        : allPersistent.some((a) => a.id === selectedSidebarAgentId);
+      if (!exists) selectedSidebarAgentId = null;
     }
 
     renderSidebar(allPersistent, allRuns);
 
-    const oneOffRuns = selectedSidebarAgentId ? [] : allRuns.filter((r) => !r.agentId);
+    const oneOffRuns = selectedSidebarAgentId
+      ? (isOneOffSelected ? allRuns.filter((r) => !r.agentId && r.runId === selectedRunId) : [])
+      : allRuns.filter((r) => !r.agentId);
     const persistent = selectedSidebarAgentId
-      ? allPersistent.filter((a) => a.id === selectedSidebarAgentId)
+      ? (isOneOffSelected ? [] : allPersistent.filter((a) => a.id === selectedSidebarAgentId))
       : allPersistent;
     const runs = selectedSidebarAgentId
-      ? allRuns.filter((r) => r.agentId === selectedSidebarAgentId)
+      ? (isOneOffSelected ? allRuns.filter((r) => r.runId === selectedRunId) : allRuns.filter((r) => r.agentId === selectedSidebarAgentId))
       : allRuns;
+
+    const oneOffSectionWrap = oneOffListEl?.closest<HTMLElement>('.agents-section');
+    const persistentSectionWrap = persistentListEl?.closest<HTMLElement>('.agents-section');
+    if (oneOffSectionWrap) {
+      oneOffSectionWrap.style.display = selectedSidebarAgentId && !isOneOffSelected ? 'none' : '';
+    }
+    if (persistentSectionWrap) {
+      persistentSectionWrap.style.display = isOneOffSelected ? 'none' : '';
+    }
 
     if (oneOffCountEl) oneOffCountEl.textContent = String(oneOffRuns.length);
     if (persistentCountEl) persistentCountEl.textContent = String(persistent.length);
@@ -567,12 +624,12 @@ export function initAgents() {
                     <span class="agent-status-badge ${statusClass}">${escapeHtml(run.status)}</span>
                   </div>
                   <div class="agent-card-badges">
-                    <span class="agent-meta-pill">One-Off</span>
-                    <span class="agent-meta-pill">${escapeHtml(run.model || run.provider)}</span>
+                    <span class="agent-meta-pill">${escapeHtml(run.requestedModel || run.model || run.provider)}</span>
                   </div>
                 </div>
                 <p class="agent-card-desc">${escapeHtml(run.prompt.slice(0, 140))}${run.prompt.length > 140 ? '...' : ''}</p>
                 <div class="agent-card-preview">${formatMinimalAnswer(previewText)}</div>
+                ${run.requestedModel && run.model && run.requestedModel !== run.model ? `<div class="agent-model-attribution" style="margin-top:6px;font-size:0.72rem;color:var(--text-muted,#8b949e);font-family:var(--font-mono,monospace);opacity:0.85;">Requested: ${escapeHtml(run.requestedModel)} → Answered by: ${escapeHtml(run.model)}</div>` : ''}
                 <div class="agent-card-meta">
                   <span class="agent-stat-item">Steps <strong>${run.stepsCount}</strong></span>
                   <span class="agent-stat-item">Time <strong>${escapeHtml(formatTime(run.startedAt))}</strong></span>
@@ -622,7 +679,6 @@ export function initAgents() {
                   <div class="agent-card-badges">
                     <span class="agent-meta-pill">${escapeHtml(formatSchedule(ag))}</span>
                     ${ag.model || ag.provider ? `<span class="agent-meta-pill">${escapeHtml(ag.model || ag.provider || '')}</span>` : ''}
-                    ${ag.keepHistory ? '<span class="agent-meta-pill">Stateful</span>' : ''}
                     ${ag.workspaceMode === 'worktree' ? '<span class="agent-meta-pill">Worktree</span>' : ''}
                   </div>
                 </div>
@@ -680,7 +736,7 @@ export function initAgents() {
                   <div class="agent-run-title-group">
                     <span class="agent-card-name">${escapeHtml(run.name)}</span>
                     <span class="agent-status-badge ${statusClass}">${escapeHtml(run.status)}</span>
-                    <span class="agent-meta-pill">${escapeHtml(run.model || run.provider)}</span>
+                    <span class="agent-meta-pill" style="border-color: rgba(248, 81, 73, 0.55); color: #f85149; background: rgba(248, 81, 73, 0.12);">${escapeHtml(run.model || run.provider)}</span>
                     ${run.status === 'running' && run.liveStatus ? `<span class="agent-live-pill">${escapeHtml(run.liveStatus)}</span>` : ''}
                   </div>
                   <div class="agent-run-metrics">
@@ -701,6 +757,7 @@ export function initAgents() {
                 ${toolsSummary.length > 0 ? `<div class="agent-run-tools">Tools: ${toolsSummary.map((t) => `<code class="${t.errors > 0 ? 'tool-has-err' : ''}">${escapeHtml(t.name)}${t.count > 1 ? ` &times;${t.count}` : ''}${t.errors > 0 ? ` (${t.errors} err)` : ''}</code>`).join(' ')}</div>` : ''}
                 ${diffText ? `<pre class="agent-run-diff">${escapeHtml(diffText)}</pre>` : ''}
                 <div class="agent-run-output">${formatMinimalAnswer(outputText)}</div>
+                ${run.requestedModel && run.model && run.requestedModel !== run.model ? `<div class="agent-model-attribution" style="margin-top:8px;font-size:0.72rem;color:var(--text-muted,#8b949e);font-family:var(--font-mono,monospace);opacity:0.85;">Requested: ${escapeHtml(run.requestedModel)} → Answered by: ${escapeHtml(run.model)}</div>` : ''}
               </div>
             `;
           })
@@ -738,7 +795,33 @@ export function initAgents() {
   }
 
   if (sidebarListEl) {
-    sidebarListEl.addEventListener('click', (ev) => {
+    sidebarListEl.addEventListener('click', async (ev) => {
+      const clearBtn = (ev.target as HTMLElement).closest<HTMLButtonElement>('[data-clear-group]');
+      if (clearBtn) {
+        ev.stopPropagation();
+        const group = clearBtn.dataset.clearGroup;
+        const endpoint = group === 'oneoff' ? '/api/agents/oneoff/clear' : '/api/agents/persistent/clear';
+        clearBtn.disabled = true;
+        showError(null);
+        try {
+          const res = await fetch(endpoint, { method: 'POST' });
+          if (!res.ok) {
+            showError(await readErrorMessage(res, `Failed to clear ${group} agents`));
+            return;
+          }
+          const data = await res.json();
+          if (selectedSidebarAgentId?.startsWith(group === 'oneoff' ? 'oneoff:' : '')) {
+            selectedSidebarAgentId = null;
+          }
+          renderState(data);
+        } catch (err: any) {
+          showError(err?.message || `Failed to clear ${group} agents`);
+        } finally {
+          clearBtn.disabled = false;
+        }
+        return;
+      }
+
       const item = (ev.target as HTMLElement).closest<HTMLElement>('[data-sidebar-agent]');
       if (!item) return;
       const val = item.dataset.sidebarAgent;
@@ -945,6 +1028,27 @@ export function initAgents() {
         showError(e?.message || 'Failed to save persistent agent');
       } finally {
         submitCreatePersistBtn.disabled = false;
+      }
+    });
+  }
+
+  const clearRunsBtn = document.getElementById('clearAgentRunsBtn') as HTMLButtonElement | null;
+  if (clearRunsBtn) {
+    clearRunsBtn.addEventListener('click', async () => {
+      clearRunsBtn.disabled = true;
+      showError(null);
+      try {
+        const res = await fetch('/api/agents/runs/clear', { method: 'POST' });
+        if (!res.ok) {
+          showError(await readErrorMessage(res, 'Failed to clear runs'));
+          return;
+        }
+        const data = await res.json();
+        renderState(data);
+      } catch (err: any) {
+        showError(err?.message || 'Failed to clear runs');
+      } finally {
+        clearRunsBtn.disabled = false;
       }
     });
   }

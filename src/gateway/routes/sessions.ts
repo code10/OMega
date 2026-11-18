@@ -8,10 +8,47 @@ export interface SessionRouteContext {
   res: http.ServerResponse;
   pathname: string;
   agent: any;
+  agentManager?: any;
+}
+
+function enrichPersistentSession(sessionData: any, sessionId: string, agentManager?: any): any {
+  if (!sessionData || !agentManager) return sessionData;
+  let configuredModel: string | null = null;
+  let agentTitle: string | null = null;
+  if (agentManager.persistentAgents) {
+    for (const ag of agentManager.persistentAgents.values()) {
+      if (ag.sessionId === sessionId) {
+        if (ag.model) configuredModel = ag.model;
+        if (ag.name) agentTitle = ag.name;
+        break;
+      }
+    }
+  }
+  if (!agentTitle && Array.isArray(agentManager.runs)) {
+    const matchedRun = agentManager.runs.find((r: any) => !r.agentId && r.sessionId === sessionId);
+    if (matchedRun?.name) agentTitle = matchedRun.name;
+  }
+
+  if (!configuredModel && !agentTitle) return sessionData;
+
+  const answers = configuredModel && Array.isArray(sessionData.answers)
+    ? sessionData.answers.map((a: any) =>
+        a && !a.requestedModel && !a.fallbackEvents?.[0]?.fromModel
+          ? { ...a, requestedModel: configuredModel }
+          : a
+      )
+    : sessionData.answers;
+
+  return {
+    ...sessionData,
+    ...(agentTitle && !sessionData.title ? { title: agentTitle } : {}),
+    ...(configuredModel ? { requestedModel: sessionData.requestedModel || configuredModel } : {}),
+    answers
+  };
 }
 
 export async function handleSessionRoutes(ctx: SessionRouteContext): Promise<boolean> {
-  const { req, res, pathname, agent } = ctx;
+  const { req, res, pathname, agent, agentManager } = ctx;
 
   // POST /api/sessions/:id/fork
   const forkMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/fork$/);
@@ -103,6 +140,26 @@ export async function handleSessionRoutes(ctx: SessionRouteContext): Promise<boo
         });
         sessions.sort((a: any, b: any) => a.sessionNumber - b.sessionNumber);
       }
+      if (agentManager) {
+        const sessionNameMap = new Map<string, string>();
+        if (agentManager.persistentAgents) {
+          for (const ag of agentManager.persistentAgents.values()) {
+            if (ag.sessionId && ag.name) sessionNameMap.set(ag.sessionId, ag.name);
+          }
+        }
+        if (Array.isArray(agentManager.runs)) {
+          for (const r of agentManager.runs) {
+            if (!r.agentId && r.sessionId && r.name && !sessionNameMap.has(r.sessionId)) {
+              sessionNameMap.set(r.sessionId, r.name);
+            }
+          }
+        }
+        for (const s of sessions) {
+          if (!s.title && sessionNameMap.has(s.sessionId)) {
+            s.title = sessionNameMap.get(s.sessionId);
+          }
+        }
+      }
       sendJson(res, 200, { success: true, currentSessionId: agent.sessionId, sessions });
     } catch (err: any) {
       sendJson(res, 500, { success: false, error: err.message });
@@ -120,7 +177,7 @@ export async function handleSessionRoutes(ctx: SessionRouteContext): Promise<boo
       return true;
     }
     try {
-      const sessionData = agent.resumeSession(sessionId);
+      const sessionData = enrichPersistentSession(agent.resumeSession(sessionId), sessionId, agentManager);
       sendJson(res, 200, { success: true, sessionId: agent.sessionId, session: sessionData });
     } catch (err: any) {
       sendJson(res, 400, { error: err.message });

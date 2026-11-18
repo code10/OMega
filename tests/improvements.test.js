@@ -6,6 +6,7 @@ import { OMAgent } from '../dist/agent.js';
 import { SkillRegistry } from '../dist/skills/index.js';
 import { VectorStore } from '../dist/vectorStore.js';
 import { startGateway } from '../dist/gateway/server.js';
+import { MCPClient } from '../dist/mcp/client.js';
 
 const TMP_DIR = path.resolve('./tests/tmp_improvements_test');
 
@@ -43,12 +44,21 @@ test('OMega Architectural & Security Improvements', async (t) => {
     assert.equal(denied.success, false);
     assert.ok(denied.error.includes('allowedCommands'));
 
-    // Empty allowedCommands still falls back to safe default allowlist (never denylist-only)
+    // Empty allowedCommands still falls back to safe default allowlist (never denylist-only),
+    // and default allowlist excludes general-purpose interpreters like node and python
     const emptyAllowDenied = await registry.execute('exec_command', { command: 'whoami' }, {
       config: { workspaceDir: TMP_DIR, security: { allowedCommands: [] } }
     });
     assert.equal(emptyAllowDenied.success, false);
     assert.ok(emptyAllowDenied.error.includes('allowedCommands'));
+
+    for (const interpCmd of ['node -e "console.log(1)"', 'python -c "print(1)"', 'python3 -c "print(1)"']) {
+      const interpDenied = await registry.execute('exec_command', { command: interpCmd }, {
+        config: { workspaceDir: TMP_DIR }
+      });
+      assert.equal(interpDenied.success, false);
+      assert.ok(interpDenied.error.includes('allowedCommands'));
+    }
 
     // Secret redaction in tool output
     const prevRedactKey = process.env.OPENAI_API_KEY;
@@ -56,7 +66,7 @@ test('OMega Architectural & Security Improvements', async (t) => {
     try {
       const leakTest = await registry.execute('exec_command', {
         command: 'node -e "console.log(\'token=sk-test-redact-value-123456\')"'
-      }, { config: { workspaceDir: TMP_DIR } });
+      }, { config: { workspaceDir: TMP_DIR, security: { allowedCommands: ['node'] } } });
       assert.equal(leakTest.success, true);
       assert.ok(!leakTest.stdout.includes('sk-test-redact-value-123456'));
       assert.ok(leakTest.stdout.includes('[REDACTED:OPENAI_API_KEY]'));
@@ -65,7 +75,7 @@ test('OMega Architectural & Security Improvements', async (t) => {
       else process.env.OPENAI_API_KEY = prevRedactKey;
     }
 
-    const unconfirmed = await registry.execute('exec_command', { command: 'node -v' }, {
+    const unconfirmed = await registry.execute('exec_command', { command: 'git --version' }, {
       config: { workspaceDir: TMP_DIR, security: { requireConfirmationForShell: true } }
     });
     assert.equal(unconfirmed.success, false);
@@ -78,7 +88,7 @@ test('OMega Architectural & Security Improvements', async (t) => {
         command: 'node',
         executable: 'node',
         args: ['-e', "console.log(process.env.OPENAI_API_KEY || 'SCRUBBED')"]
-      }, { config: { workspaceDir: TMP_DIR } });
+      }, { config: { workspaceDir: TMP_DIR, security: { allowedCommands: ['node'] } } });
       assert.equal(envCheck.success, true);
       assert.ok(envCheck.stdout.includes('SCRUBBED'));
     } finally {
@@ -114,7 +124,7 @@ test('OMega Architectural & Security Improvements', async (t) => {
 
     // Enforce workspace path confinement on cwd
     const outsideCwd = await registry.execute('exec_command', {
-      command: 'node -v',
+      command: 'git --version',
       cwd: path.join(TMP_DIR, '..', 'outside-cwd-escape')
     }, {
       config: { workspaceDir: TMP_DIR }
@@ -424,6 +434,60 @@ test('OMega Architectural & Security Improvements', async (t) => {
     store2.close();
     assert.ok(hits.length >= 1);
     assert.equal(hits[0].source, 'sqlite-test');
+  });
+
+  await t.test('MCPClient scrubs sensitive provider keys from child env by default', async () => {
+    const prevOpenAI = process.env.OPENAI_API_KEY;
+    const prevGateway = process.env.OM_GATEWAY_TOKEN;
+    process.env.OPENAI_API_KEY = 'sk-mcp-leak-check';
+    process.env.OM_GATEWAY_TOKEN = 'gw-mcp-leak-check';
+
+    const serverScript = [
+      'const readline = require("readline");',
+      'const rl = readline.createInterface({ input: process.stdin });',
+      'rl.on("line", (line) => {',
+      '  if (!line.trim()) return;',
+      '  const msg = JSON.parse(line);',
+      '  if (msg.id === undefined) return;',
+      '  if (msg.method === "initialize") {',
+      '    process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: "2024-11-05", capabilities: {} } }) + "\\n");',
+      '  } else if (msg.method === "tools/call") {',
+      '    process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: JSON.stringify({ openai: process.env.OPENAI_API_KEY || null, gateway: process.env.OM_GATEWAY_TOKEN || null, custom: process.env.CUSTOM_MCP_TOKEN || null, gemini: process.env.GEMINI_API_KEY || null }) }] } }) + "\\n");',
+      '  }',
+      '});'
+    ].join(' ');
+
+    try {
+      const scrubbedClient = new MCPClient('scrub-test', {
+        command: process.execPath,
+        args: ['-e', serverScript],
+        env: { CUSTOM_MCP_TOKEN: 'per-server-ok', GEMINI_API_KEY: 'explicit-mcp-gemini' }
+      });
+      await scrubbedClient.connect();
+      const res = await scrubbedClient.callTool('inspect_env', {});
+      scrubbedClient.close();
+      const parsed = JSON.parse(res.content[0].text);
+      assert.equal(parsed.openai, null);
+      assert.equal(parsed.gateway, null);
+      assert.equal(parsed.custom, 'per-server-ok');
+      assert.equal(parsed.gemini, 'explicit-mcp-gemini');
+
+      const inheritClient = new MCPClient('inherit-test', {
+        command: process.execPath,
+        args: ['-e', serverScript],
+        inheritSensitiveEnv: true
+      });
+      await inheritClient.connect();
+      const res2 = await inheritClient.callTool('inspect_env', {});
+      inheritClient.close();
+      const parsed2 = JSON.parse(res2.content[0].text);
+      assert.equal(parsed2.openai, 'sk-mcp-leak-check');
+    } finally {
+      if (prevOpenAI === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = prevOpenAI;
+      if (prevGateway === undefined) delete process.env.OM_GATEWAY_TOKEN;
+      else process.env.OM_GATEWAY_TOKEN = prevGateway;
+    }
   });
 });
 

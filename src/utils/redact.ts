@@ -1,4 +1,4 @@
-const SENSITIVE_ENV_KEYS = [
+export const SENSITIVE_ENV_KEYS = [
   'OPENAI_API_KEY',
   'ANTHROPIC_API_KEY',
   'GEMINI_API_KEY',
@@ -9,7 +9,8 @@ const SENSITIVE_ENV_KEYS = [
   'DASHSCOPE_API_KEY',
   'GLM_API_KEY',
   'ZHIPU_API_KEY',
-  'OM_GATEWAY_TOKEN'
+  'OM_GATEWAY_TOKEN',
+  'OM_EMBEDDING_API_KEY'
 ];
 
 const SECRET_PATTERNS: RegExp[] = [
@@ -38,4 +39,27 @@ export function redactSecrets(input: string): string {
   }
 
   return out;
+}
+
+/**
+ * Build a child process environment with sensitive API keys and gateway tokens scrubbed
+ * unless inheritSensitiveEnv is explicitly enabled. Explicit overrides are applied last.
+ */
+export function buildSafeChildEnv(
+  baseEnv: NodeJS.ProcessEnv = process.env,
+  overrides: Record<string, string | undefined> = {},
+  inheritSensitiveEnv = false
+): Record<string, string | undefined> {
+  const childEnv: Record<string, string | undefined> = { ...baseEnv };
+  if (!inheritSensitiveEnv) {
+    for (const key of SENSITIVE_ENV_KEYS) {
+      delete childEnv[key];
+    }
+  }
+  for (const [k, v] of Object.entries(overrides || {})) {
+    if (v !== undefined) {
+      childEnv[k] = v;
+    }
+  }
+  return childEnv;
 }

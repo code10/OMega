@@ -146,7 +146,7 @@ export function loadConfig(overrides: Record<string, any> = {}): OMConfig {
     security: {
       requireConfirmationForShell: true,
       requireConfirmationForTools: ['exec_command', 'http_request'],
-      allowedCommands: ['node', 'git', 'python', 'python3'],
+      allowedCommands: ['git'],
       deniedCommands: ['format', 'rm -rf /', 'del /f /s /q C:\\*'],
       ...(fileConfig.security || {}),
       ...(overrides.security || {})
@@ -184,6 +184,19 @@ export function loadConfig(overrides: Record<string, any> = {}): OMConfig {
   };
 }
 
+function atomicWriteFileSync(targetPath: string, content: string) {
+  const tmpPath = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    fs.writeFileSync(tmpPath, content, 'utf8');
+    fs.renameSync(tmpPath, targetPath);
+  } catch (err) {
+    try {
+      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+    } catch (_) {}
+    throw err;
+  }
+}
+
 /**
  * Persist the active provider and model to om.config.json and .env so it remains active on next launch
  */
@@ -199,7 +212,7 @@ export function persistActiveProvider(provider: string, model?: string) {
           fileConfig.providers[provider].model = model;
         }
       }
-      fs.writeFileSync(configPath, JSON.stringify(fileConfig, null, 2) + '\n', 'utf8');
+      atomicWriteFileSync(configPath, JSON.stringify(fileConfig, null, 2) + '\n');
     } catch (err: any) {
       console.warn(`[OM Config] Warning: Could not persist om.config.json: ${err.message}`);
     }
@@ -225,7 +238,7 @@ export function persistActiveProvider(provider: string, model?: string) {
         process.env.OM_MODEL = model;
       }
 
-      fs.writeFileSync(envPath, envContent, 'utf8');
+      atomicWriteFileSync(envPath, envContent);
     } catch (err: any) {
       console.warn(`[OM Config] Warning: Could not persist .env: ${err.message}`);
     }
@@ -253,7 +266,7 @@ export function saveConfigPatch(
       fileConfig.routing = { ...(fileConfig.routing || {}), ...patch.routing };
     }
 
-    fs.writeFileSync(configPath, JSON.stringify(fileConfig, null, 2) + '\n', 'utf8');
+    atomicWriteFileSync(configPath, JSON.stringify(fileConfig, null, 2) + '\n');
     return true;
   } catch (err: any) {
     console.warn(`[OM Config] Warning: Could not save config patch to om.config.json: ${err.message}`);

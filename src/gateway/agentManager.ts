@@ -51,10 +51,12 @@ export interface AgentRunRecord {
   snapshotRunId: string | null;
   workspaceDir: string;
   agentId: string | null;
+  sessionId?: string | null;
   name: string;
   prompt: string;
   provider: string;
   model: string;
+  requestedModel?: string;
   status: AgentRunStatus;
   liveStatus: string | null;
   startedAt: string;
@@ -218,10 +220,64 @@ export class AgentManager {
       if (fs.existsSync(this.runsStoragePath)) {
         const rawRuns = JSON.parse(fs.readFileSync(this.runsStoragePath, 'utf8'));
         if (Array.isArray(rawRuns?.runs)) {
-          this.runs = rawRuns.runs.slice(0, 50).map((r: any) => ({
-            ...r,
-            status: r.status === 'running' ? 'aborted' : r.status
-          }));
+          const oneOffSessions: any[] = [];
+          try {
+            const sessionsDir = path.join(this.memoryDir, 'sessions');
+            if (fs.existsSync(sessionsDir)) {
+              for (const f of fs.readdirSync(sessionsDir)) {
+                if (f.startsWith('one-off_') && f.endsWith('.json')) {
+                  try {
+                    oneOffSessions.push(JSON.parse(fs.readFileSync(path.join(sessionsDir, f), 'utf8')));
+                  } catch (_) { /* ignore */ }
+                }
+              }
+            }
+          } catch (_) { /* ignore */ }
+
+          this.runs = rawRuns.runs.slice(0, 50).map((r: any) => {
+            const normalized: AgentRunRecord = {
+              ...r,
+              status: r.status === 'running' ? 'aborted' : r.status
+            };
+
+            let sessionData: any = null;
+            let configuredModel: string | null = null;
+            if (normalized.agentId) {
+              const ag = this.persistentAgents.get(normalized.agentId);
+              if (ag?.sessionId) {
+                configuredModel = ag.model || null;
+                sessionData = this.parentAgent?.memory?.loadSession?.(ag.sessionId);
+              }
+            } else {
+              sessionData = normalized.sessionId
+                ? this.parentAgent?.memory?.loadSession?.(normalized.sessionId)
+                : oneOffSessions.find(
+                    (s) =>
+                      (s.history?.[0]?.content && s.history[0].content === normalized.prompt) ||
+                      (s.prompt && s.prompt === normalized.prompt)
+                  );
+            }
+
+            if (sessionData) {
+              const lastAns =
+                Array.isArray(sessionData.answers) && sessionData.answers.length > 0
+                  ? sessionData.answers[sessionData.answers.length - 1]
+                  : null;
+              const actualModel =
+                lastAns?.model ||
+                (sessionData.model && sessionData.model !== 'unknown' ? sessionData.model : null);
+              if (actualModel && actualModel !== normalized.model) {
+                normalized.requestedModel = normalized.requestedModel || configuredModel || normalized.model;
+                normalized.model = actualModel;
+                const actualProvider = lastAns?.provider || sessionData.provider;
+                if (actualProvider) normalized.provider = actualProvider;
+              }
+              if (!normalized.sessionId && sessionData.sessionId) {
+                normalized.sessionId = sessionData.sessionId;
+              }
+            }
+            return normalized;
+          });
         }
       }
     } catch (_) {
@@ -700,8 +756,10 @@ export class AgentManager {
           workspaceDir,
           sessionId: this._getNextPrefixedSessionId('one-off')
         });
+        run.sessionId = child.sessionId;
         run.provider = child.config.provider;
         run.model = child.config.model;
+        run.requestedModel = child.config.model;
         detach = this._attachProgressListener(child, run);
 
         const res = await child.run(prompt, {
@@ -711,6 +769,8 @@ export class AgentManager {
 
         run.finishedAt = new Date().toISOString();
         run.durationMs = Date.now() - startMs;
+        if (res.provider) run.provider = res.provider;
+        if (res.model) run.model = res.model;
         run.snapshotRunId = res.runId || child.lastRunId || null;
         run.stepsCount = Array.isArray(res.steps) ? res.steps.length : 0;
         run.tokensUsed = Number(res.usage?.totalTokens) || 0;
@@ -827,8 +887,10 @@ export class AgentManager {
           }
         }
 
+        run.sessionId = child.sessionId;
         run.provider = child.config.provider;
         run.model = child.config.model;
+        run.requestedModel = child.config.model;
         detach = this._attachProgressListener(child, run);
 
         const res = await child.run(prompt, {
@@ -839,6 +901,8 @@ export class AgentManager {
         const durationMs = Date.now() - startMs;
         run.finishedAt = new Date().toISOString();
         run.durationMs = durationMs;
+        if (res.provider) run.provider = res.provider;
+        if (res.model) run.model = res.model;
         run.snapshotRunId = res.runId || child.lastRunId || null;
         run.stepsCount = Array.isArray(res.steps) ? res.steps.length : 0;
         run.tokensUsed = Number(res.usage?.totalTokens) || 0;
@@ -988,9 +1052,56 @@ export class AgentManager {
     }
     this.liveAgents.clear();
     this.runs = [];
+    this._deleteSessionFilesByPattern(/^(one-off|persistent)_\d+\.json$/i);
     this._save();
     this._saveRuns();
     this._emitUpdate('reset');
+  }
+
+  private _deleteSessionFilesByPattern(pattern: RegExp) {
+    for (const subDir of ['sessions', 'checkpoints']) {
+      const dir = path.join(this.memoryDir, subDir);
+      try {
+        if (fs.existsSync(dir)) {
+          for (const file of fs.readdirSync(dir)) {
+            if (pattern.test(file)) {
+              fs.rmSync(path.join(dir, file), { force: true });
+            }
+          }
+        }
+      } catch (_) {}
+    }
+  }
+
+  clearRuns() {
+    // Keep any currently running executions; clear completed/failed/aborted runs
+    this.runs = this.runs.filter((r) => r.status === 'running');
+    for (const ag of this.persistentAgents.values()) {
+      ag.runCount = this.runs.filter((r) => r.agentId === ag.id).length;
+    }
+    this._save();
+    this._saveRuns();
+    this._emitUpdate('runs_cleared');
+  }
+
+  clearOneOffRuns() {
+    const runningOneOffs = this.runs.filter((r) => !r.agentId && r.status === 'running');
+    this.runs = this.runs.filter((r) => Boolean(r.agentId) || r.status === 'running');
+    if (runningOneOffs.length === 0) {
+      this._deleteSessionFilesByPattern(/^one-off_\d+\.json$/i);
+    }
+    this._saveRuns();
+    this._emitUpdate('oneoff_cleared');
+  }
+
+  clearPersistentAgents() {
+    for (const id of [...this.persistentAgents.keys()]) {
+      this.deletePersistentAgent(id);
+    }
+    this.runs = this.runs.filter((r) => !r.agentId);
+    this._deleteSessionFilesByPattern(/^persistent_\d+\.json$/i);
+    this._saveRuns();
+    this._emitUpdate('persistent_cleared');
   }
 
   dispose() {

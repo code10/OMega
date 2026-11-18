@@ -3,11 +3,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveSafePath } from './filesystem.js';
-import { redactSecrets } from '../utils/redact.js';
+import { buildSafeChildEnv, redactSecrets } from '../utils/redact.js';
 import type { SkillContext } from '../types.js';
 
 const SHELL_CONTROL_PATTERN = /[;|&`<>\r\n]|\$\(/;
-const DEFAULT_ALLOWED_COMMANDS = ['node', 'git', 'python', 'python3'];
+const DEFAULT_ALLOWED_COMMANDS = ['git'];
 
 /**
  * Tokenize a command string into [executable, ...args] respecting single/double quotes.
@@ -199,20 +199,7 @@ export const shellSkills = [
       const shell = os.platform() === 'win32' ? 'powershell.exe' : '/bin/bash';
 
       // Scrub sensitive API keys / gateway tokens from child shell env unless explicitly opted in
-      const childEnv = { ...process.env };
-      if (!security.inheritSensitiveEnv) {
-        delete childEnv.OPENAI_API_KEY;
-        delete childEnv.ANTHROPIC_API_KEY;
-        delete childEnv.GEMINI_API_KEY;
-        delete childEnv.DEEPSEEK_API_KEY;
-        delete childEnv.KIMI_API_KEY;
-        delete childEnv.MOONSHOT_API_KEY;
-        delete childEnv.QWEN_API_KEY;
-        delete childEnv.DASHSCOPE_API_KEY;
-        delete childEnv.GLM_API_KEY;
-        delete childEnv.ZHIPU_API_KEY;
-        delete childEnv.OM_GATEWAY_TOKEN;
-      }
+      const childEnv = buildSafeChildEnv(process.env, {}, Boolean(security.inheritSensitiveEnv));
 
       return new Promise((resolve) => {
         const handleResult = (error: any, stdout: string, stderr: string) => {

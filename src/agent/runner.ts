@@ -177,7 +177,7 @@ export async function executeAgentRun(
 
       await compactHistory(agent);
 
-      const shouldStream = options.stream !== false && (typeof options.onToken === 'function' || agent.listenerCount('token') > 0);
+      const shouldStream = options.stream !== false && !options.responseFormat;
       const onToken = shouldStream
         ? (token: string) => {
             if (typeof options.onToken === 'function') options.onToken(token, currentStep);
@@ -580,6 +580,7 @@ export async function executeAgentRun(
       prompt,
       answer: finalAnswer,
       provider: activeTurnProvider,
+      requestedModel: agent.config.model,
       model: activeTurnModel,
       target,
       fallbackUsed: fallbackEvents.length > 0,

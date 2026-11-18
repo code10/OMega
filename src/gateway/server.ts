@@ -342,7 +342,7 @@ export async function startGateway(options: Record<string, any> = {}) {
     }
 
     // 6e-6g & 7 & 7b: Session, Replay, Compare, Reset, Clear routes
-    if (await handleSessionRoutes({ req, res, pathname, agent })) return;
+    if (await handleSessionRoutes({ req, res, pathname, agent, agentManager })) return;
 
     // 6h. Workspace Snapshots & Rollback (/api/snapshots)
     if (pathname === '/api/snapshots' && req.method === 'GET') {

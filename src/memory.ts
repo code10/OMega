@@ -509,6 +509,16 @@ This file stores persistent facts, user preferences, and important context acros
    */
   clearAllSessions() {
     clearSessionFiles(this.sessionsDir, this.vectorStore);
+    const checkpointsDir = path.join(path.dirname(this.sessionsDir), 'checkpoints');
+    try {
+      if (fs.existsSync(checkpointsDir)) {
+        for (const f of fs.readdirSync(checkpointsDir)) {
+          if (f.endsWith('.json')) {
+            fs.rmSync(path.join(checkpointsDir, f), { force: true });
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   /**

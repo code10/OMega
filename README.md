@@ -3,7 +3,7 @@
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-0-success.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-105%20passed-success.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-113%20passed-success.svg)](tests/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](README.md)
 
 > **OM** is a lightweight, local-first autonomous AI agent runtime built with pure Node.js.  
@@ -191,7 +191,7 @@ Fine-tune agent behavior, routing/failover, paths, security boundaries, provider
   "provider": "glm",
   "model": "glm-4-flash",
   "maxSteps": 15,
-  "temperature": 0.2,
+  "temperature": 0.1,
   "memoryDir": "./memory",
   "skillsDir": "./skills",
   "workspaceDir": "./workspace",
@@ -209,7 +209,7 @@ Fine-tune agent behavior, routing/failover, paths, security boundaries, provider
   "security": {
     "requireConfirmationForShell": true,
     "requireConfirmationForTools": ["exec_command", "http_request"],
-    "allowedCommands": ["node", "git", "python", "python3"],
+    "allowedCommands": ["git"],
     "deniedCommands": ["format", "rm -rf /", "del /f /s /q C:\\*"]
   },
   "gateway": {
@@ -415,6 +415,9 @@ When launched via `npm run gateway`, OM serves a lightweight HTTP server on port
 | `GET` | `/api/agents` | List configured one-off/persistent agents and run history. |
 | `POST` | `/api/agents/run` | Execute a one-off or persistent agent task. |
 | `POST` | `/api/agents/persistent` | Create or update a persistent agent definition. |
+| `POST` | `/api/agents/runs/clear` | Clear agent run history. |
+| `POST` | `/api/agents/oneoff/clear` | Clear one-off agent runs. |
+| `POST` | `/api/agents/persistent/clear` | Clear persistent agent definitions. |
 | `POST` | `/api/agents/reset` | Reset agent state and run history. |
 | `GET` | `/api/sessions` | List recorded sessions with timestamps and step counts. |
 | `POST` | `/api/sessions/switch` | Switch the active session. |
@@ -510,7 +513,7 @@ npm test
 npm run benchmark
 ```
 
-All 105 tests pass using Node's built-in `node:test` runner with zero external test frameworks required.
+All 113 tests pass using Node's built-in `node:test` runner with zero external test frameworks required.
 
 ---
 

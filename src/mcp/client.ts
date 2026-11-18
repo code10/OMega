@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createLogger } from '../utils/logger.js';
 import { fetchWithTimeout } from '../utils/http.js';
+import { buildSafeChildEnv } from '../utils/redact.js';
 
 const log = createLogger('MCPClient');
 
@@ -17,6 +18,7 @@ export class MCPClient {
   command?: string;
   args: string[];
   env: Record<string, string>;
+  inheritSensitiveEnv: boolean;
   cwd: string;
   timeoutMs: number;
   autoReconnect: boolean;
@@ -36,6 +38,7 @@ export class MCPClient {
     this.command = serverConfig.command;
     this.args = Array.isArray(serverConfig.args) ? serverConfig.args : [];
     this.env = serverConfig.env || {};
+    this.inheritSensitiveEnv = Boolean(serverConfig.inheritSensitiveEnv);
     this.cwd = serverConfig.cwd || process.cwd();
     this.timeoutMs = serverConfig.timeoutMs || 15000;
     this.autoReconnect = serverConfig.autoReconnect !== false;
@@ -72,7 +75,7 @@ export class MCPClient {
 
     this.proc = spawn(this.command, this.args, {
       cwd: this.cwd,
-      env: { ...process.env, ...this.env },
+      env: buildSafeChildEnv(process.env, this.env, this.inheritSensitiveEnv),
       stdio: ['pipe', 'pipe', 'pipe']
     });
 
