@@ -21,8 +21,15 @@ dist/
 offload_cache/
 tests/tmp_*/
 .om/
+.cache/
+coverage/
+*.tmp
 *.sqlite
+*.sqlite-wal
+*.sqlite-shm
 *.db
+*.db-wal
+*.db-shm
 
 # Editor & OS Artifacts
 .vscode/
