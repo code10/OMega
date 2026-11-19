@@ -1,4 +1,4 @@
-import { OMProvider, OmegaProvider, MockProvider } from './omega.js';
+import { OMProvider } from './omega.js';
 import { OpenAIProvider } from './openai.js';
 import { AnthropicProvider } from './anthropic.js';
 import { GeminiProvider } from './gemini.js';
@@ -13,6 +13,30 @@ interface OpenAICompatSpec {
   fallbackApiKey?: string;
 }
 
+const KIMI_SPEC: OpenAICompatSpec = {
+  canonical: 'kimi',
+  defaultModel: 'kimi-k2-0711-preview',
+  defaultBaseUrl: 'https://api.moonshot.ai/v1',
+  apiKeyEnvs: ['KIMI_API_KEY', 'MOONSHOT_API_KEY'],
+  baseUrlEnvs: ['KIMI_BASE_URL', 'MOONSHOT_BASE_URL']
+};
+
+const QWEN_SPEC: OpenAICompatSpec = {
+  canonical: 'qwen',
+  defaultModel: 'qwen-plus',
+  defaultBaseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+  apiKeyEnvs: ['QWEN_API_KEY', 'DASHSCOPE_API_KEY'],
+  baseUrlEnvs: ['QWEN_BASE_URL', 'DASHSCOPE_BASE_URL']
+};
+
+const GLM_SPEC: OpenAICompatSpec = {
+  canonical: 'glm',
+  defaultModel: 'glm-4.5-flash',
+  defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+  apiKeyEnvs: ['GLM_API_KEY', 'ZHIPU_API_KEY'],
+  baseUrlEnvs: ['GLM_BASE_URL', 'ZHIPU_BASE_URL']
+};
+
 const OPENAI_COMPAT_PROVIDERS: Record<string, OpenAICompatSpec> = {
   deepseek: {
     canonical: 'deepseek',
@@ -21,48 +45,12 @@ const OPENAI_COMPAT_PROVIDERS: Record<string, OpenAICompatSpec> = {
     apiKeyEnvs: ['DEEPSEEK_API_KEY'],
     baseUrlEnvs: ['DEEPSEEK_BASE_URL']
   },
-  kimi: {
-    canonical: 'kimi',
-    defaultModel: 'kimi-k2-0711-preview',
-    defaultBaseUrl: 'https://api.moonshot.ai/v1',
-    apiKeyEnvs: ['KIMI_API_KEY', 'MOONSHOT_API_KEY'],
-    baseUrlEnvs: ['KIMI_BASE_URL', 'MOONSHOT_BASE_URL']
-  },
-  moonshot: {
-    canonical: 'kimi',
-    defaultModel: 'kimi-k2-0711-preview',
-    defaultBaseUrl: 'https://api.moonshot.ai/v1',
-    apiKeyEnvs: ['KIMI_API_KEY', 'MOONSHOT_API_KEY'],
-    baseUrlEnvs: ['KIMI_BASE_URL', 'MOONSHOT_BASE_URL']
-  },
-  qwen: {
-    canonical: 'qwen',
-    defaultModel: 'qwen-plus',
-    defaultBaseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
-    apiKeyEnvs: ['QWEN_API_KEY', 'DASHSCOPE_API_KEY'],
-    baseUrlEnvs: ['QWEN_BASE_URL', 'DASHSCOPE_BASE_URL']
-  },
-  dashscope: {
-    canonical: 'qwen',
-    defaultModel: 'qwen-plus',
-    defaultBaseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
-    apiKeyEnvs: ['QWEN_API_KEY', 'DASHSCOPE_API_KEY'],
-    baseUrlEnvs: ['QWEN_BASE_URL', 'DASHSCOPE_BASE_URL']
-  },
-  glm: {
-    canonical: 'glm',
-    defaultModel: 'glm-4.5-flash',
-    defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-    apiKeyEnvs: ['GLM_API_KEY', 'ZHIPU_API_KEY'],
-    baseUrlEnvs: ['GLM_BASE_URL', 'ZHIPU_BASE_URL']
-  },
-  zhipu: {
-    canonical: 'glm',
-    defaultModel: 'glm-4.5-flash',
-    defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-    apiKeyEnvs: ['GLM_API_KEY', 'ZHIPU_API_KEY'],
-    baseUrlEnvs: ['GLM_BASE_URL', 'ZHIPU_BASE_URL']
-  },
+  kimi: KIMI_SPEC,
+  moonshot: KIMI_SPEC,
+  qwen: QWEN_SPEC,
+  dashscope: QWEN_SPEC,
+  glm: GLM_SPEC,
+  zhipu: GLM_SPEC,
   lmstudio: {
     canonical: 'lmstudio',
     defaultModel: 'local-model',
@@ -132,8 +120,6 @@ export function createProvider(config: Record<string, any> = {}) {
 
 export {
   OMProvider,
-  OmegaProvider,
-  MockProvider,
   OpenAIProvider,
   AnthropicProvider,
   GeminiProvider,

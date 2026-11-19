@@ -20,15 +20,13 @@
   box-shadow: none;
 }
 
-.topbar,
-.top-bar {
+.topbar {
   background: rgba(15, 16, 19, 0.85);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.055);
 }
 
-.topbar-icon-btn,
-.topbar-btn {
+.topbar-icon-btn {
   border-radius: 7px;
   box-shadow: none;
   transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
@@ -53,23 +51,6 @@
 .session-item.active {
   background: rgba(255, 255, 255, 0.055);
   border-color: rgba(255, 255, 255, 0.1);
-  box-shadow: none;
-}
-
-.input-container,
-.chat-input-box,
-.composer-box {
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: var(--bg-surface);
-  box-shadow: none;
-  transition: border-color 0.16s ease, background-color 0.16s ease;
-}
-
-.input-container:focus-within,
-.chat-input-box:focus-within,
-.composer-box:focus-within {
-  border-color: rgba(255, 255, 255, 0.22);
   box-shadow: none;
 }
 

@@ -1,4 +1,4 @@
-export const SENSITIVE_ENV_KEYS = [
+const SENSITIVE_ENV_KEYS = new Set([
   'OPENAI_API_KEY',
   'ANTHROPIC_API_KEY',
   'GEMINI_API_KEY',
@@ -11,7 +11,7 @@ export const SENSITIVE_ENV_KEYS = [
   'ZHIPU_API_KEY',
   'OM_GATEWAY_TOKEN',
   'OM_EMBEDDING_API_KEY'
-];
+]);
 
 const SECRET_PATTERNS: RegExp[] = [
   /\bsk-ant-[A-Za-z0-9_-]{16,}\b/g,
@@ -35,13 +35,13 @@ export function redactSecrets(input: string): string {
   }
 
   for (const pattern of SECRET_PATTERNS) {
-    out = out.replace(pattern, (match, prefix) => (prefix ? `${prefix}[REDACTED]` : '[REDACTED]'));
+    out = out.replace(pattern, (_match, prefix) => (prefix ? `${prefix}[REDACTED]` : '[REDACTED]'));
   }
 
   return out;
 }
 
-export const SAFE_BASE_ENV_KEYS = new Set([
+const SAFE_BASE_ENV_KEYS = new Set([
   'PATH',
   'Path',
   'PATHEXT',
@@ -102,7 +102,7 @@ export function buildSafeChildEnv(
     const extraSet = new Set(Array.isArray(extraAllowedKeys) ? extraAllowedKeys : []);
     for (const [k, v] of Object.entries(baseEnv || {})) {
       if (v === undefined) continue;
-      if (SENSITIVE_ENV_KEYS.includes(k)) continue;
+      if (SENSITIVE_ENV_KEYS.has(k)) continue;
       if (SAFE_BASE_ENV_KEYS.has(k) || extraSet.has(k)) {
         childEnv[k] = v;
       }

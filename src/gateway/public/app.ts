@@ -83,7 +83,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const topbarSessionTag = byId('topbarSessionTag');
 
   // Top Bar elements
-  const modelLoaderPill = byId('modelLoaderPill');
   const modelDropdownMenu = byId('modelDropdownMenu');
   const dropdownCloseBtn = byId<HTMLButtonElement>('dropdownCloseBtn');
   const topLoadedModel = byId('topLoadedModel');
@@ -91,8 +90,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const modelQuickSearchInput = byId<HTMLInputElement>('modelQuickSearchInput');
   const modelQuickList = byId('modelQuickList');
   const gotoModelsTabBtn = byId<HTMLButtonElement>('gotoModelsTabBtn');
-  const ejectModelBtn = byId<HTMLButtonElement>('ejectModelBtn');
-  const newChatTopBtn = byId<HTMLButtonElement>('newChatTopBtn');
   const toggleParamsBtn = byId<HTMLButtonElement>('toggleParamsBtn');
   const skillsCountBadge = byId('skillsCountBadge');
 
@@ -108,10 +105,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const promptInput = byId<HTMLTextAreaElement>('promptInput');
   const voiceBtn = byId<HTMLButtonElement>('voiceBtn');
   const sendBtn = byId<HTMLButtonElement>('sendBtn');
-  const clearSessionBtn = byId<HTMLButtonElement>('clearSessionBtn');
   const inputModelTag = byId('inputModelTag');
   const inputModelSelectorBtn = byId<HTMLButtonElement>('inputModelSelectorBtn');
-  const welcomeModelLabel = byId('welcomeModelLabel');
 
   // Cloud / Local Mode Toggle in input bar
   const chatModeCloudBtn = byId<HTMLButtonElement>('chatModeCloudBtn');
@@ -187,6 +182,16 @@ document.addEventListener('DOMContentLoaded', () => {
   // --------------------------------------------------------------------------
   // 1. TAB NAVIGATION
   // --------------------------------------------------------------------------
+  const TAB_PANE_IDS: Record<string, string> = {
+    chat: 'paneChat',
+    agents: 'paneAgents',
+    models: 'paneModels',
+    skills: 'paneSkills',
+    memory: 'paneMemory',
+    system: 'paneSystem',
+    device: 'paneDevice'
+  };
+
   function switchTab(tab: string) {
     activeTab = tab;
     railItems.forEach((btn) => {
@@ -195,29 +200,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     tabPanes.forEach((p) => p.classList.remove('active'));
 
-    let targetPane = null;
-    if (tab === 'chat') targetPane = document.getElementById('paneChat');
-    else if (tab === 'agents') targetPane = document.getElementById('paneAgents');
-    else if (tab === 'models') targetPane = document.getElementById('paneModels');
-    else if (tab === 'skills') targetPane = document.getElementById('paneSkills');
-    else if (tab === 'memory') targetPane = document.getElementById('paneMemory');
-    else if (tab === 'system') targetPane = document.getElementById('paneSystem');
-    else if (tab === 'device') targetPane = document.getElementById('paneDevice');
+    const paneId = TAB_PANE_IDS[tab];
+    const targetPane = paneId ? document.getElementById(paneId) : null;
 
     if (targetPane) targetPane.classList.add('active');
     if (viewTitle) viewTitle.textContent = TAB_NAMES[tab] || 'OM Agent Studio';
 
-    if (tab === 'chat') loadSessions();
-    if (tab === 'agents') loadAgents();
-    if (tab === 'models') loadModels();
-    if (tab === 'skills') loadSkills();
-    else if (tab === 'memory') loadMemory();
-    else if (tab === 'system') {
-      loadStatus();
-      loadModels();
-      loadActivityHistory();
-    }
-    else if (tab === 'device') loadDeviceSpecs();
+    const tabLoaders: Record<string, () => void> = {
+      chat: loadSessions,
+      agents: loadAgents,
+      models: loadModels,
+      skills: loadSkills,
+      memory: loadMemory,
+      system: () => { loadStatus(); loadModels(); loadActivityHistory(); },
+      device: loadDeviceSpecs
+    };
+    tabLoaders[tab]?.();
     syncLeftSidebarToggle();
   }
 
@@ -248,7 +246,6 @@ document.addEventListener('DOMContentLoaded', () => {
     loadModels,
     updateModelUsageBar
   } = initModels({
-    modelLoaderPill,
     modelDropdownMenu,
     dropdownCloseBtn,
     topLoadedModel,
@@ -278,21 +275,6 @@ document.addEventListener('DOMContentLoaded', () => {
     closePlusMenu: () => { if (typeof closePlusMenu === 'function') closePlusMenu(); },
     closeInlineSuggestions: () => { if (typeof closeInlineSuggestions === 'function') closeInlineSuggestions(); }
   });
-
-  // Eject / Reload Button
-  if (ejectModelBtn) {
-    ejectModelBtn.addEventListener('click', async () => {
-      if (confirm('Reload active model and start fresh session context?')) {
-        await resetSession();
-      }
-    });
-  }
-
-  if (newChatTopBtn) {
-    newChatTopBtn.addEventListener('click', async () => {
-      await resetSession();
-    });
-  }
 
   createChatBtn.addEventListener('click', async () => {
     await resetSession();
@@ -343,7 +325,6 @@ document.addEventListener('DOMContentLoaded', () => {
     topLoadedModel.textContent = mod;
     topLoadedProvider.textContent = prov;
     inputModelTag.textContent = mod;
-    if (welcomeModelLabel) welcomeModelLabel.textContent = `${mod} loaded`;
 
     const statusChipLive = document.getElementById('statusChipLive');
     if (statusChipLive && window.location.origin) {
@@ -510,7 +491,6 @@ document.addEventListener('DOMContentLoaded', () => {
     topbarSessionTag,
     messagesContainer,
     resetSessionsCounterBtn,
-    clearSessionBtn,
     appendUserMessage,
     createAgentMessageContainer,
     appendCopyAction,

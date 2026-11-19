@@ -464,12 +464,5 @@ In response to your inquiry regarding ${trimmed.replace(/\?$/, '')}, everything 
   async listModels() {
     return ModelService.listOMModels();
   }
-
-  async ListModels() {
-    return this.listModels();
-  }
 }
-
-export const OmegaProvider = OMProvider;
-export const MockProvider = OMProvider;
 

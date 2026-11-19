@@ -337,75 +337,6 @@ body {
   position: relative;
 }
 
-.model-loader-pill {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background-color: var(--bg-surface-elevated);
-  border: 1px solid var(--border-medium);
-  padding: 5px 14px;
-  border-radius: var(--radius-full);
-  cursor: pointer;
-  transition: all 0.2s ease;
-  user-select: none;
-  min-width: 220px;
-  max-width: 380px;
-}
-
-.model-loader-pill:hover {
-  background-color: var(--bg-surface-hover);
-  border-color: rgba(229, 169, 60, 0.5);
-  box-shadow: 0 0 12px rgba(229, 169, 60, 0.2);
-}
-
-.model-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: var(--radius-full);
-  background-color: var(--accent-green);
-  box-shadow: 0 0 8px var(--accent-green);
-  flex-shrink: 0;
-}
-
-.model-info-stack {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.model-loaded-name {
-  font-size: 0.83rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  text-overflow: ellipsis;
-  overflow: hidden;
-}
-
-.model-provider-badge {
-  font-size: 0.65rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  background: rgba(229, 169, 60, 0.14);
-  color: var(--accent-primary);
-  border: 1px solid rgba(229, 169, 60, 0.3);
-  padding: 1px 6px;
-  border-radius: var(--radius-xs);
-  letter-spacing: 0.04em;
-}
-
-.chevron-icon {
-  color: var(--text-muted);
-  transition: transform 0.2s ease;
-  flex-shrink: 0;
-  margin-left: auto;
-}
-
-.model-loader-pill.active .chevron-icon {
-  transform: rotate(180deg);
-}
-
 /* Model Dropdown Menu */
 .input-model-wrap {
   position: relative;
@@ -644,38 +575,6 @@ body {
 .res-val {
   color: var(--accent-primary);
   font-weight: 600;
-}
-
-.topbar-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 12px;
-  font-size: 0.78rem;
-  font-weight: 500;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-medium);
-  background: var(--bg-surface-elevated);
-  color: var(--text-primary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.topbar-btn:hover {
-  background: var(--bg-surface-hover);
-}
-
-.primary-topbar-btn {
-  background: var(--accent-primary);
-  border-color: var(--accent-primary);
-  color: #141518;
-  font-weight: 600;
-}
-
-.primary-topbar-btn:hover {
-  background: var(--accent-primary-hover);
-  border-color: var(--accent-primary-hover);
 }
 
 .topbar-icon-btn {

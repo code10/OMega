@@ -203,7 +203,7 @@ export class BPETokenizer {
   }
 }
 
-export const defaultTokenizer = new BPETokenizer();
+const defaultTokenizer = new BPETokenizer();
 
 /**
  * Look up the default context window (in tokens) for a provider/model pair.
@@ -238,13 +238,6 @@ export function countTokens(text: unknown, model = ''): number {
   const m = String(model || '').toLowerCase();
   const modelFactor = m.includes('claude') ? 1.04 : 1.0;
   return Math.ceil(baseCount * modelFactor);
-}
-
-/**
- * Estimate token count for a string (backed by the built-in BPE tokenizer).
- */
-export function estimateTokens(text: unknown, model = ''): number {
-  return countTokens(text, model);
 }
 
 /**

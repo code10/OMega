@@ -252,8 +252,4 @@ export class GeminiProvider extends BaseProvider {
       onlyGenerative: options.onlyGenerative
     });
   }
-
-  async ListModels(options: Record<string, any> = {}) {
-    return this.listModels(options);
-  }
 }

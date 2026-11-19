@@ -1,7 +1,6 @@
 import { escapeHtml, formatTokens, isLocalProviderName, MODEL_LIMITS_MAP } from './utils.js';
 
 export interface ModelsDeps {
-  modelLoaderPill: HTMLElement | null;
   modelDropdownMenu: HTMLElement;
   dropdownCloseBtn: HTMLButtonElement;
   topLoadedModel: HTMLElement;
@@ -34,7 +33,6 @@ export interface ModelsDeps {
 
 export function initModels(deps: ModelsDeps) {
   const {
-    modelLoaderPill,
     modelDropdownMenu,
     dropdownCloseBtn,
     topLoadedModel,
@@ -77,7 +75,6 @@ export function initModels(deps: ModelsDeps) {
       closePlusMenu();
       closeInlineSuggestions();
       modelDropdownMenu.classList.add('show');
-      if (modelLoaderPill) modelLoaderPill.classList.add('active');
       if (inputModelSelectorBtn) inputModelSelectorBtn.classList.add('active');
       modelQuickSearchInput.focus();
       void populateQuickModelDropdown();
@@ -86,7 +83,6 @@ export function initModels(deps: ModelsDeps) {
 
   function closeModelDropdown() {
     modelDropdownMenu.classList.remove('show');
-    if (modelLoaderPill) modelLoaderPill.classList.remove('active');
     if (inputModelSelectorBtn) inputModelSelectorBtn.classList.remove('active');
   }
 
@@ -390,13 +386,6 @@ export function initModels(deps: ModelsDeps) {
   }
 
   // Event listeners
-  if (modelLoaderPill) {
-    modelLoaderPill.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleModelDropdown();
-    });
-  }
-
   if (chatModeCloudBtn) {
     chatModeCloudBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
@@ -448,7 +437,7 @@ export function initModels(deps: ModelsDeps) {
 
   document.addEventListener('click', (e) => {
     const target = e.target as Node;
-    if (!modelDropdownMenu.contains(target) && (!modelLoaderPill || !modelLoaderPill.contains(target)) && (!inputModelSelectorBtn || !inputModelSelectorBtn.contains(target))) {
+    if (!modelDropdownMenu.contains(target) && (!inputModelSelectorBtn || !inputModelSelectorBtn.contains(target))) {
       closeModelDropdown();
     }
   });

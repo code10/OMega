@@ -107,7 +107,6 @@ export class OMAgent extends EventEmitter {
     else if (options.hooks && typeof options.hooks === 'object') this.hooks.push(options.hooks);
     this._activeAbortController = null;
     this._steeringQueue = [];
-    /** @type {((info: Record<string, any>) => Promise<boolean> | boolean) | null} */
     this.confirmCommand = options.confirmCommand || null;
     this.usageStats = {
       promptTokens: 0,

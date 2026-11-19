@@ -189,8 +189,4 @@ export class AnthropicProvider extends BaseProvider {
       baseUrl: options.baseUrl || this.baseUrl
     });
   }
-
-  async ListModels(options: Record<string, any> = {}) {
-    return this.listModels(options);
-  }
 }

@@ -86,7 +86,7 @@ export function readDistillState(memoryDir: string): DistillState {
   return { ...DEFAULT_STATE };
 }
 
-export function saveDistillState(memoryDir: string, state: DistillState): void {
+function saveDistillState(memoryDir: string, state: DistillState): void {
   const statePath = path.join(memoryDir, 'distill_state.json');
   try {
     fs.mkdirSync(memoryDir, { recursive: true });
@@ -111,7 +111,7 @@ function normalizeHeuristicLine(rawLine: string): string {
 /**
  * Algorithmically extract and score high-signal heuristics from raw text lines (zero LLM tokens).
  */
-export function extractHeuristicsFromLines(lines: string[]): ExtractedHeuristic[] {
+function extractHeuristicsFromLines(lines: string[]): ExtractedHeuristic[] {
   const results: ExtractedHeuristic[] = [];
   for (const raw of lines) {
     const trimmed = String(raw || '').trim();
@@ -174,7 +174,7 @@ function isSemanticallyDuplicate(
  * Prune redundant intermediate turns from a session JSON object while retaining
  * architectural insights, final answers, and a concise distilled summary.
  */
-export function pruneSessionTurns(
+function pruneSessionTurns(
   sess: Record<string, any>,
   maxRetainedTurns = 6
 ): { changed: boolean; turnsPruned: number; summary: string | null } {
@@ -249,7 +249,7 @@ export function pruneSessionTurns(
  * Compress an older daily journal file by replacing verbose raw lines with
  * distilled heuristics while preserving the date header.
  */
-export function compactDailyJournal(filePath: string, heuristics: ExtractedHeuristic[]): { compressed: boolean; bytesSaved: number } {
+function compactDailyJournal(filePath: string, heuristics: ExtractedHeuristic[]): { compressed: boolean; bytesSaved: number } {
   if (!fs.existsSync(filePath)) return { compressed: false, bytesSaved: 0 };
   const raw = fs.readFileSync(filePath, 'utf8');
   if (raw.includes('<!-- DISTILLED -->')) {

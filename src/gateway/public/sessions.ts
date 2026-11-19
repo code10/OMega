@@ -6,7 +6,6 @@ export interface SessionsDeps {
   topbarSessionTag: HTMLElement | null;
   messagesContainer: HTMLElement;
   resetSessionsCounterBtn: HTMLButtonElement | null;
-  clearSessionBtn: HTMLButtonElement | null;
   appendUserMessage: (text: string, attachments?: any[], timestamp?: number | string) => void;
   createAgentMessageContainer: (modelName?: string) => { row: HTMLElement; bubble: HTMLElement };
   appendCopyAction: (parentEl: HTMLElement, getTextFn: () => string, timestamp?: number | string) => void;
@@ -22,7 +21,6 @@ export function initSessions(deps: SessionsDeps) {
     topbarSessionTag,
     messagesContainer,
     resetSessionsCounterBtn,
-    clearSessionBtn,
     appendUserMessage,
     createAgentMessageContainer,
     appendCopyAction,
@@ -290,14 +288,6 @@ export function initSessions(deps: SessionsDeps) {
         }
       } catch (err: any) {
         alert(`Error resetting sessions: ${err?.message || err}`);
-      }
-    });
-  }
-
-  if (clearSessionBtn) {
-    clearSessionBtn.addEventListener('click', async () => {
-      if (confirm('Clear current chat view clean as new?')) {
-        await clearChatPage();
       }
     });
   }

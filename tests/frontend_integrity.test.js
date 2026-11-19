@@ -59,11 +59,6 @@ test('Frontend HTML partials, CSS modules, and DOM IDs integrity', async () => {
 
     // 3. Verify static DOM IDs referenced via byId(...) or getElementById(...) in app.ts and agents.ts exist in HTML
     const optionalLegacyIds = new Set([
-      'modelLoaderPill',
-      'ejectModelBtn',
-      'newChatTopBtn',
-      'clearSessionBtn',
-      'welcomeModelLabel',
       'omApprovalContainer'
     ]);
     const htmlIds = new Set([...html.matchAll(/\bid=["']([^"']+)["']/g)].map((m) => m[1]));
