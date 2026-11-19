@@ -205,8 +205,8 @@ Fine-tune agent behavior, routing/failover, paths, security boundaries, provider
 {
   "name": "OM Agent",
   "version": "1.0.0",
-  "provider": "glm",
-  "model": "glm-4-flash",
+  "provider": "om",
+  "model": "om-v1",
   "maxSteps": 15,
   "temperature": 0.1,
   "memoryDir": "./memory",
@@ -262,7 +262,7 @@ OM provides seamless abstraction across cloud and self-hosted models:
 
 | Provider | Type | Supported Models | Configuration |
 |:---|:---|:---|:---|
-| **Mock / OM** | Offline Simulator | `om-mock-turbo`, `om-reasoning` | Built-in (zero key required) |
+| **Mock / OM** | Offline Simulator | `om-v1`, `om-turbo`, `om-reasoning` | Built-in (zero key required) |
 | **Google Gemini** | Cloud API | `gemini-3.5-flash`, `gemini-3-flash-preview`, `gemini-2.5-flash` | `GEMINI_API_KEY` |
 | **OpenAI** | Cloud API | `gpt-5-mini-2025-08-07`, `gpt-4o`, `gpt-4o-mini`, `o1`, `o3-mini` | `OPENAI_API_KEY` |
 | **Anthropic** | Cloud API | `claude-3-5-sonnet-20241022`, `claude-3-opus` | `ANTHROPIC_API_KEY` |
