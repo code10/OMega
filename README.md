@@ -3,7 +3,7 @@
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-1-blue.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-126%20passed-success.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-127%20passed-success.svg)](tests/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](README.md)
 
 > **OM** is a lightweight, local-first autonomous AI agent runtime built with pure Node.js.  
@@ -581,7 +581,7 @@ npm run check:types
 npm run test:e2e
 ```
 
-All 126 unit & integration tests pass using Node's built-in `node:test` runner with zero external unit-test frameworks required (Playwright is used for `test:e2e`).
+All 127 unit & integration tests pass using Node's built-in `node:test` runner with zero external unit-test frameworks required (Playwright is used for `test:e2e`).
 
 ---
 

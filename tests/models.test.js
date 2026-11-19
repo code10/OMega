@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { ModelService } from '../dist/modelService.js';
 import { OMAgent } from '../dist/agent.js';
 import { SkillRegistry } from '../dist/skills/index.js';
@@ -97,20 +100,26 @@ test('ModelService and ListModels command verification', async (t) => {
   });
 
   await t.test('OMAgent chat command /local and /cloud switch mode directly', async () => {
-    const agent = new OMAgent({
-      provider: 'om',
-      providers: {
-        deepseek: { apiKey: 'test-deepseek-key' },
-        kimi: { apiKey: 'test-kimi-key' },
-        qwen: { apiKey: 'test-qwen-key' },
-        glm: { apiKey: 'test-glm-key' }
-      }
-    });
-    const localRes = await agent.run('/local om-turbo');
-    assert.equal(localRes.success, true);
-    assert.equal(agent.config.provider, 'om');
-    assert.equal(agent.config.model, 'om-turbo');
-    assert.ok(localRes.content.includes('Local'));
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'omega-models-test-'));
+    try {
+      const agent = new OMAgent({
+        rootDir: tmpRoot,
+        provider: 'om',
+        providers: {
+          deepseek: { apiKey: 'test-deepseek-key' },
+          kimi: { apiKey: 'test-kimi-key' },
+          qwen: { apiKey: 'test-qwen-key' },
+          glm: { apiKey: 'test-glm-key' }
+        }
+      });
+      const localRes = await agent.run('/local om-turbo');
+      assert.equal(localRes.success, true);
+      assert.equal(agent.config.provider, 'om');
+      assert.equal(agent.config.model, 'om-turbo');
+      assert.ok(localRes.content.includes('Local'));
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
   });
 
   await t.test('ModelService auto-discovery for LM Studio and vLLM probes local endpoints safely', async () => {
@@ -146,26 +155,32 @@ test('ModelService and ListModels command verification', async (t) => {
       assert.ok(allCloud.some((m) => m.provider === expectedProv), `Expected ${expectedProv} in cloud models`);
     }
 
-    const agent = new OMAgent({
-      provider: 'om',
-      providers: {
-        deepseek: { apiKey: 'test-deepseek-key' },
-        kimi: { apiKey: 'test-kimi-key' },
-        qwen: { apiKey: 'test-qwen-key' },
-        glm: { apiKey: 'test-glm-key' }
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'omega-models-test-'));
+    try {
+      const agent = new OMAgent({
+        rootDir: tmpRoot,
+        provider: 'om',
+        providers: {
+          deepseek: { apiKey: 'test-deepseek-key' },
+          kimi: { apiKey: 'test-kimi-key' },
+          qwen: { apiKey: 'test-qwen-key' },
+          glm: { apiKey: 'test-glm-key' }
+        }
+      });
+      const slashCases = [
+        { cmd: '/cloud deepseek-reasoner', provider: 'deepseek', model: 'deepseek-reasoner' },
+        { cmd: '/cloud kimi-latest', provider: 'kimi', model: 'kimi-latest' },
+        { cmd: '/cloud qwen-max', provider: 'qwen', model: 'qwen-max' },
+        { cmd: '/cloud glm-4-flash', provider: 'glm', model: 'glm-4-flash' }
+      ];
+      for (const sc of slashCases) {
+        const res = await agent.run(sc.cmd);
+        assert.equal(res.success, true);
+        assert.equal(agent.config.provider, sc.provider);
+        assert.equal(agent.config.model, sc.model);
       }
-    });
-    const slashCases = [
-      { cmd: '/cloud deepseek-reasoner', provider: 'deepseek', model: 'deepseek-reasoner' },
-      { cmd: '/cloud kimi-latest', provider: 'kimi', model: 'kimi-latest' },
-      { cmd: '/cloud qwen-max', provider: 'qwen', model: 'qwen-max' },
-      { cmd: '/cloud glm-4-flash', provider: 'glm', model: 'glm-4-flash' }
-    ];
-    for (const sc of slashCases) {
-      const res = await agent.run(sc.cmd);
-      assert.equal(res.success, true);
-      assert.equal(agent.config.provider, sc.provider);
-      assert.equal(agent.config.model, sc.model);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
   });
 });

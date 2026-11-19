@@ -208,7 +208,7 @@ export class OMAgent extends EventEmitter {
     });
     if (persist) {
       this._ignoreWatchUntil = Date.now() + 1000;
-      persistActiveProvider(this.config.provider, this.config.model);
+      persistActiveProvider(this.config.provider, this.config.model, this.config.rootDir);
     }
     this._emitConfigUpdate();
     return this;

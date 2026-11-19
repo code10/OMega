@@ -106,7 +106,7 @@ export function loadConfig(overrides: Record<string, any> = {}): OMConfig {
   return {
     ...fileConfig,
     ...overrides,
-    rootDir: ROOT_DIR,
+    rootDir: overrides.rootDir ? path.resolve(overrides.rootDir) : ROOT_DIR,
     provider,
     model,
     memoryDir: resolvePath(overrides.memoryDir || fileConfig.memoryDir || './memory'),
@@ -200,8 +200,8 @@ function atomicWriteFileSync(targetPath: string, content: string) {
 /**
  * Persist the active provider and model to om.config.json and .env so it remains active on next launch
  */
-export function persistActiveProvider(provider: string, model?: string) {
-  const configPath = path.join(ROOT_DIR, 'om.config.json');
+export function persistActiveProvider(provider: string, model?: string, rootDir: string = ROOT_DIR) {
+  const configPath = path.join(rootDir, 'om.config.json');
   if (fs.existsSync(configPath)) {
     try {
       const fileConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
@@ -218,7 +218,7 @@ export function persistActiveProvider(provider: string, model?: string) {
     }
   }
 
-  const envPath = path.join(ROOT_DIR, '.env');
+  const envPath = path.join(rootDir, '.env');
   if (fs.existsSync(envPath)) {
     try {
       let envContent = fs.readFileSync(envPath, 'utf8');
