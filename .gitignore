@@ -18,8 +18,12 @@ dist/
 /models/
 /workspace/
 .om_snapshots/
+.om_worktrees/
+/tenants/
 offload_cache/
 tests/tmp_*/
+playwright-report/
+test-results/
 .om/
 .cache/
 coverage/
