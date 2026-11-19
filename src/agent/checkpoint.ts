@@ -1,10 +1,24 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { createLogger } from '../utils/logger.js';
 
 const log = createLogger('AgentCheckpoint');
 
 export type CheckpointStatus = 'running' | 'completed' | 'failed' | 'aborted' | 'paused';
+
+export interface CheckpointBudgets {
+  maxTokens?: number;
+  maxDurationMs?: number;
+  maxConsecutiveErrors?: number;
+}
+
+export interface WorkspaceStateSnapshot {
+  head: string | null;
+  dirtyHash: string | null;
+  isGitRepo: boolean;
+}
 
 export interface CheckpointRecord {
   sessionId: string;
@@ -17,8 +31,17 @@ export interface CheckpointRecord {
   provider: string;
   model: string;
   workspaceDir: string;
+  workspaceMode?: 'shared' | 'worktree';
+  swarmId?: string | null;
+  parentSessionId?: string | null;
   currentStep: number;
   maxSteps: number;
+  pendingStep?: number | null;
+  snapshotRunId?: string | null;
+  workspaceHead?: string | null;
+  workspaceDirtyHash?: string | null;
+  pauseReason?: string | null;
+  budgets?: CheckpointBudgets;
   usage: {
     promptTokens: number;
     completionTokens: number;
@@ -34,6 +57,57 @@ export interface CheckpointRecord {
   finishedAt?: string | null;
   pidAlive?: boolean;
   recoverable?: boolean;
+}
+
+/**
+ * Capture a lightweight git HEAD + working-tree digest for stale-world detection on resume.
+ */
+export function captureWorkspaceState(workspaceDir: string): WorkspaceStateSnapshot {
+  const cwd = path.resolve(workspaceDir || process.cwd());
+  try {
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd,
+      encoding: 'utf8',
+      timeout: 1500,
+      stdio: ['ignore', 'pipe', 'ignore']
+    }).trim();
+    const porcelain = execFileSync('git', ['status', '--porcelain'], {
+      cwd,
+      encoding: 'utf8',
+      timeout: 1500,
+      stdio: ['ignore', 'pipe', 'ignore']
+    });
+    const dirtyHash = crypto.createHash('sha256').update(porcelain).digest('hex').slice(0, 12);
+    return { head: head || null, dirtyHash, isGitRepo: true };
+  } catch {
+    return { head: null, dirtyHash: null, isGitRepo: false };
+  }
+}
+
+/**
+ * Compare current workspace git state against a previously checkpointed state.
+ */
+export function detectWorkspaceDrift(
+  workspaceDir: string,
+  prevHead?: string | null,
+  prevDirtyHash?: string | null
+): { drifted: boolean; summary: string; current: WorkspaceStateSnapshot } {
+  const current = captureWorkspaceState(workspaceDir);
+  if (!current.isGitRepo || (!prevHead && !prevDirtyHash)) {
+    return { drifted: false, summary: '', current };
+  }
+  const reasons: string[] = [];
+  if (prevHead && current.head && prevHead !== current.head) {
+    reasons.push(`HEAD changed (${prevHead.slice(0, 7)} -> ${current.head.slice(0, 7)})`);
+  }
+  if (prevDirtyHash && current.dirtyHash && prevDirtyHash !== current.dirtyHash) {
+    reasons.push('working tree files modified');
+  }
+  return {
+    drifted: reasons.length > 0,
+    summary: reasons.join('; '),
+    current
+  };
 }
 
 export function getCheckpointsDir(memoryDir: string): string {

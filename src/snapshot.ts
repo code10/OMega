@@ -25,6 +25,10 @@ export class WorkspaceSnapshotManager {
   }
 
   startRun(runId = `run_${Date.now().toString(36)}`, meta = {}) {
+    const existing = this.loadManifest(runId);
+    if (existing) {
+      return existing;
+    }
     const entry = {
       runId,
       createdAt: new Date().toISOString(),

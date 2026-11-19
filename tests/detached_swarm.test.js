@@ -197,4 +197,143 @@ test('Headless Multi-Session Agent Swarms with Persistent State Recovery', async
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
+
+  await t.test('4. Rolls back partial snapshot mutations when resuming from a mid-step pendingStep crash', async () => {
+    const tmpDir = makeTempDir('omega-crash-rollback-');
+    const memDir = path.join(tmpDir, 'memory');
+    try {
+      const targetFile = path.join(tmpDir, 'data.txt');
+      fs.writeFileSync(targetFile, 'clean-original', 'utf8');
+
+      const agent = new OMAgent({
+        sessionId: 'crash_rollback_session',
+        provider: 'om',
+        model: 'om-turbo',
+        memoryDir: memDir,
+        workspaceDir: tmpDir
+      });
+      await agent.init();
+
+      // Simulate snapshot captured before a mid-step crash mutated data.txt
+      const snapRunId = 'run_crash_snap_1';
+      agent.snapshots.startRun(snapRunId, { sessionId: 'crash_rollback_session' });
+      agent.snapshots.captureBeforeMutation(snapRunId, targetFile);
+      fs.writeFileSync(targetFile, 'corrupted-partial-write', 'utf8');
+
+      const crashedCp = {
+        sessionId: 'crash_rollback_session',
+        runId: snapRunId,
+        snapshotRunId: snapRunId,
+        pid: 999999,
+        detached: true,
+        status: 'paused',
+        prompt: 'Finish task safely',
+        provider: 'om',
+        model: 'om-turbo',
+        workspaceDir: tmpDir,
+        currentStep: 1,
+        pendingStep: 1,
+        maxSteps: 5,
+        usage: { promptTokens: 5, completionTokens: 5, totalTokens: 10 },
+        history: [
+          { role: 'user', content: 'Finish task safely' },
+          { role: 'assistant', content: 'calling tool', toolCalls: [{ id: 'tc1', name: 'write_file', args: {} }] }
+        ],
+        steps: [],
+        answers: [],
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      const res = await agent.run('Finish task safely', { resumeCheckpoint: crashedCp });
+      assert.equal(res.success, true);
+      assert.equal(fs.readFileSync(targetFile, 'utf8'), 'clean-original');
+      await agent.close();
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await t.test('5. Enforces token budget and pauses cleanly with pauseReason', async () => {
+    const tmpDir = makeTempDir('omega-budget-');
+    const memDir = path.join(tmpDir, 'memory');
+    try {
+      const agent = new OMAgent({
+        sessionId: 'budget_pause_session',
+        provider: 'om',
+        model: 'om-turbo',
+        memoryDir: memDir,
+        workspaceDir: tmpDir
+      });
+      await agent.init();
+
+      let calls = 0;
+      agent.router.chat = async () => {
+        calls++;
+        return {
+          content: `step ${calls}`,
+          toolCalls: [{ id: `tc_${calls}`, name: 'nonexistent_tool', args: {} }],
+          usage: { prompt_tokens: 60, completion_tokens: 60, total_tokens: 120 }
+        };
+      };
+
+      const res = await agent.run('Run until token budget', {
+        maxSteps: 10,
+        budgets: { maxTokens: 100 }
+      });
+
+      assert.equal(res.paused, true);
+      assert.equal(res.pauseReason, 'budget_tokens');
+      assert.equal(res.checkpointStatus, 'paused');
+
+      const cp = loadCheckpoint(memDir, 'budget_pause_session');
+      assert.ok(cp);
+      assert.equal(cp.status, 'paused');
+      assert.equal(cp.pauseReason, 'budget_tokens');
+      await agent.close();
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  await t.test('6. DetachedSwarmManager.spawnSwarm launches grouped workers and deleteSession cleans up', async () => {
+    const tmpDir = makeTempDir('omega-swarm-');
+    const memDir = path.join(tmpDir, 'memory');
+    try {
+      const manager = new DetachedSwarmManager({
+        memoryDir: memDir,
+        workspaceDir: tmpDir,
+        provider: 'om',
+        model: 'om-turbo'
+      });
+
+      const { swarmId, workers } = manager.spawnSwarm(
+        [
+          { prompt: 'Worker A task', maxSteps: 2 },
+          { prompt: 'Worker B task', maxSteps: 2 }
+        ],
+        { swarmId: 'test_swarm_1' }
+      );
+
+      assert.equal(swarmId, 'test_swarm_1');
+      assert.equal(workers.length, 2);
+      assert.equal(workers[0].swarmId, 'test_swarm_1');
+
+      // Wait briefly for both workers to finish
+      const deadline = Date.now() + 10000;
+      while (Date.now() < deadline) {
+        const list = manager.listSessions().filter((s) => s.swarmId === 'test_swarm_1');
+        if (list.length === 2 && list.every((s) => s.status === 'completed' || s.status === 'failed')) {
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      const deleted = manager.deleteSession(workers[0].sessionId);
+      assert.equal(deleted, true);
+      assert.equal(loadCheckpoint(memDir, workers[0].sessionId), null);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });

@@ -1,7 +1,13 @@
 import { createProvider } from '../providers/index.js';
 import { compactHistory } from './compaction.js';
 import { OMSelfHealer } from '../selfHeal.js';
-import { saveCheckpoint, type CheckpointStatus } from './checkpoint.js';
+import {
+  captureWorkspaceState,
+  detectWorkspaceDrift,
+  saveCheckpoint,
+  type CheckpointBudgets,
+  type CheckpointStatus
+} from './checkpoint.js';
 import { redactSecrets } from '../utils/redact.js';
 
 /**
@@ -95,12 +101,79 @@ export async function executeAgentRun(
 
   const runId = resumeCp?.runId || `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
   const startedAt = resumeCp?.startedAt || new Date().toISOString();
+  const runWallStart = Date.now();
+  const effectiveBudgets: CheckpointBudgets = {
+    ...(resumeCp?.budgets || {}),
+    ...(options.budgets && typeof options.budgets === 'object' ? options.budgets : {})
+  };
+  const maxBudgetTokens = Number(effectiveBudgets.maxTokens || 0);
+  const maxBudgetDurationMs = Number(
+    effectiveBudgets.maxDurationMs !== undefined
+      ? effectiveBudgets.maxDurationMs
+      : options.detached
+        ? 30 * 60 * 1000
+        : 0
+  );
+  const maxConsecutiveErrors = Number(
+    effectiveBudgets.maxConsecutiveErrors !== undefined
+      ? effectiveBudgets.maxConsecutiveErrors
+      : options.detached
+        ? 4
+        : 0
+  );
+  let consecutiveErrors = 0;
+
   agent.lastRunId = runId;
+
+  // Crash-safe recovery: if previous worker crashed mid-tool-execution, roll back partial mutations
+  if (resumeCp && typeof resumeCp.pendingStep === 'number') {
+    const snapId = resumeCp.snapshotRunId || resumeCp.runId;
+    if (snapId && agent.snapshots?.loadManifest?.(snapId)) {
+      try {
+        agent.snapshots.rollback(snapId);
+        agent._recordActivity('recovery_rollback', { sessionId: agent.sessionId, runId: snapId, crashedStep: resumeCp.pendingStep });
+      } catch (_) {
+        // non-fatal if snapshot files already cleaned up
+      }
+    }
+    // Ensure we don't leave a dangling assistant tool_call without tool results
+    while (agent.history.length > 0 && agent.history[agent.history.length - 1]?.role === 'tool') {
+      agent.history.pop();
+    }
+    if (
+      agent.history.length > 0 &&
+      agent.history[agent.history.length - 1]?.role === 'assistant' &&
+      Array.isArray(agent.history[agent.history.length - 1]?.toolCalls) &&
+      agent.history[agent.history.length - 1].toolCalls.length > 0
+    ) {
+      agent.history.pop();
+    }
+  }
+
   agent.snapshots.startRun(runId, { sessionId: agent.sessionId, prompt: (prompt || effectivePrompt).slice(0, 120) });
+
+  // Stale-world detection on resume: warn agent if git HEAD or working tree drifted while paused
+  if (resumeCp) {
+    const drift = detectWorkspaceDrift(
+      agent.config.workspaceDir || process.cwd(),
+      resumeCp.workspaceHead,
+      resumeCp.workspaceDirtyHash
+    );
+    if (drift.drifted) {
+      agent.history.push({
+        role: 'user',
+        content: `[OM Resume Notice] Workspace changed while this session was paused (${drift.summary}). Re-verify relevant files before assuming prior state.`
+      });
+      agent._recordActivity('workspace_drift', { sessionId: agent.sessionId, summary: drift.summary });
+    }
+  }
 
   const persistCheckpoint = (status: CheckpointStatus, extra: Record<string, any> = {}) => {
     if (options.checkpoint === false || !agent.config?.memoryDir) return;
     try {
+      const wsState = options.detached || status === 'paused'
+        ? captureWorkspaceState(agent.config.workspaceDir || process.cwd())
+        : { head: null, dirtyHash: null, isGitRepo: false };
       saveCheckpoint(agent.config.memoryDir, {
         sessionId: agent.sessionId,
         runId,
@@ -112,8 +185,15 @@ export async function executeAgentRun(
         provider: activeTurnProvider,
         model: activeTurnModel,
         workspaceDir: agent.config.workspaceDir || process.cwd(),
+        workspaceMode: options.workspaceMode || resumeCp?.workspaceMode,
+        swarmId: options.swarmId ?? resumeCp?.swarmId ?? null,
+        parentSessionId: options.parentSessionId ?? resumeCp?.parentSessionId ?? null,
         currentStep,
         maxSteps,
+        snapshotRunId: runId,
+        workspaceHead: wsState.head,
+        workspaceDirtyHash: wsState.dirtyHash,
+        budgets: effectiveBudgets,
         usage: { ...runUsage },
         history: agent.history,
         steps,
@@ -128,7 +208,29 @@ export async function executeAgentRun(
     }
   };
 
-  persistCheckpoint('running');
+  const pauseRun = (pauseReason: string, notice: string) => {
+    persistCheckpoint('paused', { pauseReason, pendingStep: null });
+    agent._recordActivity('paused', { sessionId: agent.sessionId, step: currentStep, pauseReason, reason: notice });
+    agent.emit('paused', { sessionId: agent.sessionId, step: currentStep, pauseReason, reason: notice });
+    return {
+      content: notice,
+      answer: notice,
+      provider: activeTurnProvider,
+      model: activeTurnModel,
+      target: agent._getTarget(activeTurnProvider),
+      usage: runUsage,
+      steps,
+      totalSteps: currentStep,
+      sessionId: agent.sessionId,
+      runId,
+      paused: true,
+      pauseReason,
+      checkpointStatus: 'paused',
+      success: false
+    };
+  };
+
+  persistCheckpoint('running', { pendingStep: null, pauseReason: null });
 
   const runAbortController = new AbortController();
   agent._activeAbortController = runAbortController;
@@ -138,6 +240,25 @@ export async function executeAgentRun(
 
   try {
     while (currentStep < maxSteps) {
+      if (maxBudgetDurationMs > 0 && Date.now() - runWallStart >= maxBudgetDurationMs) {
+        return pauseRun(
+          'budget_time',
+          `[OM Notice] Paused after reaching wall-clock budget (${maxBudgetDurationMs}ms). Resume to continue.`
+        );
+      }
+      if (maxBudgetTokens > 0 && runUsage.totalTokens >= maxBudgetTokens) {
+        return pauseRun(
+          'budget_tokens',
+          `[OM Notice] Paused after reaching token budget (${runUsage.totalTokens}/${maxBudgetTokens} tokens). Resume to continue.`
+        );
+      }
+      if (maxConsecutiveErrors > 0 && consecutiveErrors >= maxConsecutiveErrors) {
+        return pauseRun(
+          'loop_circuit_breaker',
+          `[OM Notice] Paused by loop circuit breaker after ${consecutiveErrors} consecutive tool-error steps.`
+        );
+      }
+
       if (combinedSignal.aborted) {
         persistCheckpoint('aborted', { finishedAt: new Date().toISOString() });
         agent._recordActivity('aborted', { step: currentStep, reason: 'Run aborted' });
@@ -493,6 +614,8 @@ export async function executeAgentRun(
         return { tc, result, durationMs: Date.now() - startTime, repeated: prevCount >= 1 };
       };
 
+      persistCheckpoint('running', { pendingStep: currentStep });
+
       const useParallel = options.parallelToolExecution ?? agent.config.parallelToolExecution ?? true;
       let executionResults;
       if (useParallel && toolCalls.length > 1) {
@@ -559,8 +682,12 @@ export async function executeAgentRun(
         });
       }
 
+      const allToolsFailed =
+        executionResults.length > 0 && executionResults.every((r) => r.result?.success === false);
+      consecutiveErrors = allToolsFailed ? consecutiveErrors + 1 : 0;
+
       steps.push(stepRecord);
-      persistCheckpoint('running');
+      persistCheckpoint('running', { pendingStep: null });
     }
 
     if (currentStep >= maxSteps && !finalAnswer) {

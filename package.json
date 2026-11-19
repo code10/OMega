@@ -22,6 +22,7 @@
     "init": "node bin/om.js init",
     "gateway": "node bin/om.js gateway",
     "test": "npm run build && node --test tests/*.test.js",
+    "test:e2e": "npm run build && node tests/e2e_ui.test.mjs",
     "benchmark": "npm run build && node --test tests/benchmark.test.js",
     "check:types": "tsc --noEmit && tsc -p tsconfig.public.json --noEmit"
   },
@@ -45,6 +46,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "playwright": "^1.65.1",
     "typescript": "^7.0.2"
   },
   "optionalDependencies": {

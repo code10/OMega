@@ -781,6 +781,7 @@ export function initAgents() {
         showError(null);
         renderState(data);
       }
+      await loadDetachedSessions();
     } catch (e: any) {
       showError(e?.message || 'Failed to load agents');
     }
@@ -1181,6 +1182,258 @@ export function initAgents() {
       }
     });
   }
+
+  // --------------------------------------------------------------------------
+  // DETACHED SWARMS & CHECKPOINTS
+  // --------------------------------------------------------------------------
+  const detachedSwarmsListEl = document.getElementById('detachedSwarmsList');
+  const detachedSwarmsCountEl = document.getElementById('detachedSwarmsCount');
+  const toggleDetachedSpawnBtn = document.getElementById('toggleDetachedSpawnBtn');
+  const refreshDetachedBtn = document.getElementById('refreshDetachedBtn');
+  const detachedSpawnFormCard = document.getElementById('detachedSpawnFormCard');
+  const closeDetachedSpawnBtn = document.getElementById('closeDetachedSpawnBtn');
+  const detachedPromptInput = document.getElementById('detachedPromptInput') as HTMLTextAreaElement | null;
+  const detachedWorkspaceModeEl = document.getElementById('detachedWorkspaceMode') as HTMLSelectElement | null;
+  const detachedMaxStepsEl = document.getElementById('detachedMaxSteps') as HTMLInputElement | null;
+  const detachedMaxTokensEl = document.getElementById('detachedMaxTokens') as HTMLInputElement | null;
+  const submitDetachedSpawnBtn = document.getElementById('submitDetachedSpawnBtn') as HTMLButtonElement | null;
+  const detachedInspectPanel = document.getElementById('detachedInspectPanel');
+  const detachedInspectTitle = document.getElementById('detachedInspectTitle');
+  const detachedInspectMeta = document.getElementById('detachedInspectMeta');
+  const detachedLogTail = document.getElementById('detachedLogTail');
+  const detachedInspectRefreshBtn = document.getElementById('detachedInspectRefreshBtn');
+  const detachedInspectCloseBtn = document.getElementById('detachedInspectCloseBtn');
+
+  let inspectedDetachedId: string | null = null;
+
+  function renderDetachedSessions(sessions: Array<Record<string, any>>) {
+    if (!detachedSwarmsListEl) return;
+    if (detachedSwarmsCountEl) detachedSwarmsCountEl.textContent = String(sessions.length);
+
+    if (sessions.length === 0) {
+      detachedSwarmsListEl.innerHTML =
+        '<div class="agents-empty-state">No detached workers or checkpoints yet. Click "+ Spawn Detached" to launch a durable background worker.</div>';
+      return;
+    }
+
+    detachedSwarmsListEl.innerHTML = sessions
+      .map((s) => {
+        const isAlive = Boolean(s.pidAlive);
+        const statusRaw = String(s.status || 'paused');
+        const statusLabel = s.recoverable && statusRaw === 'paused' && !s.pauseReason
+          ? 'CRASHED / RECOVERABLE'
+          : statusRaw.toUpperCase();
+        const statusClass = statusRaw === 'running' && isAlive
+          ? 'running'
+          : statusRaw === 'completed'
+            ? 'completed'
+            : statusRaw === 'failed' || statusRaw === 'aborted'
+              ? 'error'
+              : 'paused';
+        const stepInfo = `Step ${s.currentStep ?? 0}/${s.maxSteps ?? 15}`;
+        const tokInfo = `${s.usage?.totalTokens ?? 0} tok`;
+        const wsMode = s.workspaceMode === 'worktree' ? 'worktree' : 'shared';
+        const reasonTag = s.pauseReason ? `<span class="agent-chip">${escapeHtml(s.pauseReason)}</span>` : '';
+        const swarmTag = s.swarmId ? `<span class="agent-chip">${escapeHtml(s.swarmId)}</span>` : '';
+
+        return `
+          <div class="agent-card">
+            <div class="agent-card-header">
+              <div class="agent-card-title">
+                <strong>${escapeHtml(s.sessionId)}</strong>
+                <span class="agent-status-pill ${statusClass}">${escapeHtml(statusLabel)}</span>
+              </div>
+              <span class="agent-card-meta">${escapeHtml(stepInfo)} · ${escapeHtml(tokInfo)}</span>
+            </div>
+            <p class="agent-card-desc">${escapeHtml((s.prompt || '').slice(0, 140))}</p>
+            <div class="agent-card-chips">
+              <span class="agent-chip">${escapeHtml(wsMode)}</span>
+              ${s.pid ? `<span class="agent-chip">PID ${escapeHtml(String(s.pid))}</span>` : ''}
+              ${swarmTag}
+              ${reasonTag}
+            </div>
+            <div class="agent-card-actions">
+              <button type="button" class="btn-xs ghost-xs" data-detached-inspect="${escapeHtml(s.sessionId)}">Logs</button>
+              ${!isAlive && statusRaw !== 'completed' ? `<button type="button" class="btn-xs primary-xs" data-detached-resume="${escapeHtml(s.sessionId)}">Resume</button>` : ''}
+              <button type="button" class="btn-xs ghost-xs" data-detached-fork="${escapeHtml(s.sessionId)}">Fork</button>
+              ${isAlive ? `<button type="button" class="btn-xs danger-xs" data-detached-stop="${escapeHtml(s.sessionId)}">Stop</button>` : `<button type="button" class="btn-xs ghost-xs" data-detached-delete="${escapeHtml(s.sessionId)}">Delete</button>`}
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+  }
+
+  async function loadDetachedSessions() {
+    try {
+      const res = await fetch('/api/agents/detached');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data?.success && Array.isArray(data.sessions)) {
+        renderDetachedSessions(data.sessions);
+      }
+    } catch (_) {
+      // ignore transient polling errors
+    }
+  }
+
+  async function inspectDetachedSession(sessionId: string) {
+    inspectedDetachedId = sessionId;
+    try {
+      const res = await fetch(`/api/agents/detached/${encodeURIComponent(sessionId)}`);
+      if (!res.ok) {
+        showError(await readErrorMessage(res, 'Failed to inspect detached session'));
+        return;
+      }
+      const data = await res.json();
+      const s = data?.session;
+      if (!s || !detachedInspectPanel) return;
+      detachedInspectPanel.style.display = 'block';
+      if (detachedInspectTitle) detachedInspectTitle.textContent = `Detached Session: ${s.sessionId}`;
+      if (detachedInspectMeta) {
+        detachedInspectMeta.textContent = `status=${s.status} | step=${s.currentStep}/${s.maxSteps} | mode=${s.workspaceMode || 'shared'} | workspace=${s.workspaceDir}`;
+      }
+      if (detachedLogTail) {
+        detachedLogTail.textContent = s.logTail || '(no log output yet)';
+        detachedLogTail.scrollTop = detachedLogTail.scrollHeight;
+      }
+    } catch (e: any) {
+      showError(e?.message || 'Failed to inspect detached session');
+    }
+  }
+
+  toggleDetachedSpawnBtn?.addEventListener('click', () => {
+    if (!detachedSpawnFormCard) return;
+    const isHidden = detachedSpawnFormCard.style.display === 'none';
+    detachedSpawnFormCard.style.display = isHidden ? 'block' : 'none';
+  });
+
+  closeDetachedSpawnBtn?.addEventListener('click', () => {
+    if (detachedSpawnFormCard) detachedSpawnFormCard.style.display = 'none';
+  });
+
+  refreshDetachedBtn?.addEventListener('click', () => {
+    loadDetachedSessions();
+  });
+
+  detachedInspectCloseBtn?.addEventListener('click', () => {
+    inspectedDetachedId = null;
+    if (detachedInspectPanel) detachedInspectPanel.style.display = 'none';
+  });
+
+  detachedInspectRefreshBtn?.addEventListener('click', () => {
+    if (inspectedDetachedId) inspectDetachedSession(inspectedDetachedId);
+  });
+
+  submitDetachedSpawnBtn?.addEventListener('click', async () => {
+    const prompt = (detachedPromptInput?.value || '').trim();
+    if (!prompt) {
+      showError('Detached worker requires a task prompt.');
+      return;
+    }
+    const maxSteps = Number(detachedMaxStepsEl?.value || 15) || 15;
+    const maxTokensVal = Number(detachedMaxTokensEl?.value || 0);
+    const workspaceMode = detachedWorkspaceModeEl?.value === 'worktree' ? 'worktree' : 'shared';
+    const budgets = maxTokensVal > 0 ? { maxTokens: maxTokensVal } : undefined;
+
+    submitDetachedSpawnBtn.disabled = true;
+    try {
+      const res = await fetch('/api/agents/detached/spawn', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, maxSteps, workspaceMode, budgets })
+      });
+      if (!res.ok) {
+        showError(await readErrorMessage(res, 'Failed to spawn detached worker'));
+        return;
+      }
+      if (detachedPromptInput) detachedPromptInput.value = '';
+      if (detachedSpawnFormCard) detachedSpawnFormCard.style.display = 'none';
+      showError(null);
+      await loadDetachedSessions();
+    } finally {
+      submitDetachedSpawnBtn.disabled = false;
+    }
+  });
+
+  detachedSwarmsListEl?.addEventListener('click', async (e) => {
+    const target = e.target as HTMLElement;
+    const inspectBtn = target.closest<HTMLButtonElement>('[data-detached-inspect]');
+    if (inspectBtn) {
+      const id = inspectBtn.dataset.detachedInspect;
+      if (id) await inspectDetachedSession(id);
+      return;
+    }
+
+    const resumeBtn = target.closest<HTMLButtonElement>('[data-detached-resume]');
+    if (resumeBtn) {
+      const id = resumeBtn.dataset.detachedResume;
+      if (!id) return;
+      resumeBtn.disabled = true;
+      try {
+        const res = await fetch(`/api/agents/detached/${encodeURIComponent(id)}/resume`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        if (!res.ok) showError(await readErrorMessage(res, 'Resume failed'));
+        await loadDetachedSessions();
+      } finally {
+        resumeBtn.disabled = false;
+      }
+      return;
+    }
+
+    const forkBtn = target.closest<HTMLButtonElement>('[data-detached-fork]');
+    if (forkBtn) {
+      const id = forkBtn.dataset.detachedFork;
+      if (!id) return;
+      forkBtn.disabled = true;
+      try {
+        const res = await fetch(`/api/agents/detached/${encodeURIComponent(id)}/fork`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ autoStart: false })
+        });
+        if (!res.ok) showError(await readErrorMessage(res, 'Fork failed'));
+        await loadDetachedSessions();
+      } finally {
+        forkBtn.disabled = false;
+      }
+      return;
+    }
+
+    const stopBtn = target.closest<HTMLButtonElement>('[data-detached-stop]');
+    if (stopBtn) {
+      const id = stopBtn.dataset.detachedStop;
+      if (!id) return;
+      stopBtn.disabled = true;
+      try {
+        await fetch(`/api/agents/detached/${encodeURIComponent(id)}/stop`, { method: 'POST' });
+        await loadDetachedSessions();
+      } finally {
+        stopBtn.disabled = false;
+      }
+      return;
+    }
+
+    const delBtn = target.closest<HTMLButtonElement>('[data-detached-delete]');
+    if (delBtn) {
+      const id = delBtn.dataset.detachedDelete;
+      if (!id) return;
+      delBtn.disabled = true;
+      try {
+        await fetch(`/api/agents/detached/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        if (inspectedDetachedId === id && detachedInspectPanel) {
+          inspectedDetachedId = null;
+          detachedInspectPanel.style.display = 'none';
+        }
+        await loadDetachedSessions();
+      } finally {
+        delBtn.disabled = false;
+      }
+    }
+  });
 
   return {
     loadAgents,

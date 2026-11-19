@@ -1,0 +1,309 @@
+        <section class="tab-pane" id="paneAgents">
+          <div class="chat-layout">
+            <!-- LEFT SUB-SIDEBAR: Agents List -->
+            <aside class="chat-sessions-sidebar" id="agentsSidebar">
+              <div class="sessions-header">
+                <h3>Runtime</h3>
+                <div class="sessions-header-actions">
+                  <button class="sessions-action-btn danger-hover" id="refreshAgentsSidebarBtn" title="Clear all agents"
+                    type="button">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"
+                      stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                      <path d="M3 3v5h5"></path>
+                    </svg>
+                  </button>
+                  <div class="agents-add-dropdown-wrap" id="agentsAddWrap">
+                    <button class="sessions-add-btn" id="sidebarNewAgentBtn" title="New Agent" type="button">
+                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                        stroke-width="2.5">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                      </svg>
+                    </button>
+                    <div class="agents-add-menu" id="agentsAddMenu" style="display: none;">
+                      <button type="button" class="agents-add-menu-item" id="menuNewOneOffAgent">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                          stroke-width="2">
+                          <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                        </svg>
+                        <span>One-Off</span>
+                      </button>
+                      <button type="button" class="agents-add-menu-item" id="menuNewPersistentAgent">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                          stroke-width="2">
+                          <rect x="3" y="8" width="18" height="12" rx="2"></rect>
+                          <path d="M12 2v6"></path>
+                        </svg>
+                        <span>Persistent</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="sessions-search-box">
+                <input type="text" id="agentsSearchInput" placeholder="Search..." />
+              </div>
+              <div class="sessions-list" id="agentsSidebarList">
+                <!-- Dynamically populated -->
+              </div>
+              <div class="sessions-sidebar-footer">
+                <div class="sessions-footer-btn agents-sidebar-status-pill" id="agentsSidebarFooter">
+                  <span class="routing-pill-dot healthy" id="agentsSidebarDot"></span>
+                  <span class="routing-pill-label" id="agentsSidebarSummary">0 persistent</span>
+                  <span class="routing-pill-meta" id="agentsSidebarRunning">0 running</span>
+                </div>
+              </div>
+            </aside>
+
+            <!-- MAIN AGENTS WORKSPACE -->
+            <div class="agents-main-area">
+              <div class="pane-content-padded">
+                <div class="section-intro">
+                  <div>
+                    <h3>Agents</h3>
+                    <p>Run one-off or persistent agents.</p>
+                  </div>
+                </div>
+
+                <div class="agent-error-banner" id="agentsErrorBanner" style="display: none;"></div>
+
+                <!-- Quick One-Off Agent Runner Form -->
+                <div class="agent-form-card" id="runAgentFormCard" style="display: none;">
+                  <div class="agent-form-header">
+                    <h4>One-Off Agent</h4>
+                    <button type="button" class="btn-xs ghost-xs" id="closeRunAgentFormBtn">&times;</button>
+                  </div>
+                  <div class="agent-form-grid">
+                    <div class="agent-form-field">
+                      <label for="oneOffAgentName">Agent Name (optional)</label>
+                      <input type="text" id="oneOffAgentName" class="param-input" placeholder="e.g. Code Auditor" />
+                    </div>
+                    <div class="agent-form-field">
+                      <label for="oneOffAgentProvider">Provider</label>
+                      <select id="oneOffAgentProvider" class="param-select">
+                        <option value="">Use Active Chat Provider</option>
+                      </select>
+                    </div>
+                    <div class="agent-form-field">
+                      <label for="oneOffAgentModelSelect">Model</label>
+                      <select id="oneOffAgentModelSelect" class="param-select">
+                        <option value="">Use Provider / Active Default</option>
+                      </select>
+                      <input type="text" id="oneOffAgentModel" class="param-input" placeholder="Custom model ID..."
+                        style="display: none; margin-top: 6px;" />
+                    </div>
+                  </div>
+                  <div class="agent-form-field">
+                    <label for="oneOffAgentSystem">Role (optional)</label>
+                    <input type="text" id="oneOffAgentSystem" class="param-input"
+                      placeholder="e.g. You are a senior TypeScript reviewer..." />
+                  </div>
+                  <div class="agent-form-field">
+                    <label for="oneOffAgentPrompt">Task</label>
+                    <textarea id="oneOffAgentPrompt" class="param-textarea" rows="3"
+                      placeholder="Describe the task you want this agent to complete..."></textarea>
+                  </div>
+                  <div class="agent-form-footer">
+                    <div class="agent-form-inline">
+                      <label for="oneOffAgentMaxSteps">Max Steps</label>
+                      <input type="number" id="oneOffAgentMaxSteps" class="param-input" value="15" min="1" max="50"
+                        style="width: 80px;" />
+                    </div>
+                    <button type="button" class="btn-sm primary-sm" id="submitRunAgentBtn">Launch</button>
+                  </div>
+                </div>
+
+                <!-- Create / Edit Persistent Agent Form -->
+                <div class="agent-form-card" id="newPersistentAgentCard" style="display: none;">
+                  <div class="agent-form-header">
+                    <h4 id="persistFormTitle">Persistent Agent</h4>
+                    <button type="button" class="btn-xs ghost-xs" id="closeNewPersistentAgentBtn">&times;</button>
+                  </div>
+                  <div class="agent-form-grid">
+                    <div class="agent-form-field">
+                      <label for="persistAgentName">Agent Name</label>
+                      <input type="text" id="persistAgentName" class="param-input" placeholder="e.g. Repo Watchdog" />
+                    </div>
+                    <div class="agent-form-field">
+                      <label for="persistAgentDesc">Description (optional)</label>
+                      <input type="text" id="persistAgentDesc" class="param-input"
+                        placeholder="Monitors logs & summarizes issues" />
+                    </div>
+                  </div>
+                  <div class="agent-form-grid">
+                    <div class="agent-form-field">
+                      <label for="persistAgentProvider">Provider</label>
+                      <select id="persistAgentProvider" class="param-select">
+                        <option value="">Use Active Chat Provider</option>
+                      </select>
+                    </div>
+                    <div class="agent-form-field">
+                      <label for="persistAgentModelSelect">Model</label>
+                      <select id="persistAgentModelSelect" class="param-select">
+                        <option value="">Use Provider / Active Default</option>
+                      </select>
+                      <input type="text" id="persistAgentModel" class="param-input" placeholder="Custom model ID..."
+                        style="display: none; margin-top: 6px;" />
+                    </div>
+                    <div class="agent-form-field">
+                      <label for="persistAgentMaxSteps">Max Steps per Run</label>
+                      <input type="number" id="persistAgentMaxSteps" class="param-input" value="25" min="1" max="100" />
+                    </div>
+                  </div>
+                  <div class="agent-form-field">
+                    <label for="persistAgentSystem">Role</label>
+                    <input type="text" id="persistAgentSystem" class="param-input"
+                      placeholder="Persistent instructions for this agent..." />
+                  </div>
+                  <div class="agent-form-field">
+                    <label for="persistAgentTask">Task</label>
+                    <textarea id="persistAgentTask" class="param-textarea" rows="3"
+                      placeholder="What should this persistent agent do?"></textarea>
+                  </div>
+                  <div class="agent-form-grid">
+                    <div class="agent-form-field">
+                      <label for="persistAgentMode">Execution Mode</label>
+                      <select id="persistAgentMode" class="param-select">
+                        <option value="manual">Manual / On-Demand</option>
+                        <option value="continuous">Continuous Loop (Run → Cooldown → Repeat)</option>
+                        <option value="interval">Interval Schedule (Every N sec)</option>
+                        <option value="cron">Cron Schedule (5-field)</option>
+                        <option value="watch">File Watch Trigger</option>
+                      </select>
+                    </div>
+                    <div class="agent-form-field" id="persistIntervalWrap" style="display: none;">
+                      <label for="persistAgentInterval" id="persistIntervalLabel">Interval (seconds)</label>
+                      <input type="number" id="persistAgentInterval" class="param-input" value="60" min="2" />
+                    </div>
+                    <div class="agent-form-field" id="persistCronWrap" style="display: none;">
+                      <label for="persistAgentCron">Cron Expression</label>
+                      <input type="text" id="persistAgentCron" class="param-input" value="*/5 * * * *"
+                        placeholder="*/5 * * * *" />
+                    </div>
+                    <div class="agent-form-field" id="persistWatchWrap" style="display: none;">
+                      <label for="persistAgentWatchPath">Watch Path (relative to workspace)</label>
+                      <input type="text" id="persistAgentWatchPath" class="param-input" value="src" placeholder="src" />
+                    </div>
+                  </div>
+                  <div class="agent-form-grid">
+                    <div class="agent-form-field">
+                      <label for="persistAgentWorkspaceMode">Workspace Isolation</label>
+                      <select id="persistAgentWorkspaceMode" class="param-select">
+                        <option value="shared">Shared Workspace</option>
+                        <option value="worktree">Isolated Git Worktree</option>
+                      </select>
+                    </div>
+                    <div class="agent-form-field">
+                      <label for="persistAgentTokenBudget">Daily Token Budget (optional)</label>
+                      <input type="number" id="persistAgentTokenBudget" class="param-input"
+                        placeholder="Unlimited if blank" min="1000" />
+                    </div>
+                  </div>
+                  <div class="agent-form-footer">
+                    <label class="agent-checkbox-label">
+                      <input type="checkbox" id="persistAgentKeepHistory" checked />
+                      <span>Retain conversation memory across runs</span>
+                    </label>
+                    <button type="button" class="btn-sm primary-sm" id="submitCreatePersistentBtn">Launch</button>
+                  </div>
+                </div>
+
+                <!-- One-Off Agents Section -->
+                <div class="agents-section">
+                  <div class="agents-section-title">
+                    <h4>One-Off</h4>
+                    <span class="session-badge-count" id="oneOffAgentsCount">0</span>
+                  </div>
+                  <div class="agents-grid" id="oneOffAgentsList">
+                    <!-- Populated dynamically -->
+                  </div>
+                </div>
+
+                <!-- Persistent Agents Section -->
+                <div class="agents-section">
+                  <div class="agents-section-title">
+                    <h4>Persistent</h4>
+                    <span class="session-badge-count" id="persistentAgentsCount">0</span>
+                  </div>
+                  <div class="agents-grid" id="persistentAgentsList">
+                    <!-- Populated dynamically -->
+                  </div>
+                </div>
+
+                <!-- Detached Swarms & Checkpoints Section -->
+                <div class="agents-section" id="detachedSwarmsSection">
+                  <div class="agents-section-title">
+                    <h4>Detached Swarms & Checkpoints</h4>
+                    <span class="session-badge-count" id="detachedSwarmsCount">0</span>
+                    <button type="button" class="btn-xs primary-xs" id="toggleDetachedSpawnBtn" style="margin-left: auto;">+ Spawn Detached</button>
+                    <button type="button" class="btn-xs ghost-xs" id="refreshDetachedBtn">Refresh</button>
+                  </div>
+
+                  <div class="agent-form-card" id="detachedSpawnFormCard" style="display: none; margin-bottom: 12px;">
+                    <div class="agent-form-header">
+                      <h4>Spawn Headless Detached Worker</h4>
+                      <button type="button" class="btn-xs ghost-xs" id="closeDetachedSpawnBtn">&times;</button>
+                    </div>
+                    <div class="agent-form-field">
+                      <label for="detachedPromptInput">Task Prompt</label>
+                      <textarea id="detachedPromptInput" class="param-textarea" rows="2"
+                        placeholder="Describe a background task that persists across UI/CLI restarts..."></textarea>
+                    </div>
+                    <div class="agent-form-grid">
+                      <div class="agent-form-field">
+                        <label for="detachedWorkspaceMode">Workspace Mode</label>
+                        <select id="detachedWorkspaceMode" class="param-select">
+                          <option value="shared">Shared Workspace</option>
+                          <option value="worktree">Isolated Git Worktree</option>
+                        </select>
+                      </div>
+                      <div class="agent-form-field">
+                        <label for="detachedMaxSteps">Max Steps</label>
+                        <input type="number" id="detachedMaxSteps" class="param-input" value="15" min="1" max="100" />
+                      </div>
+                      <div class="agent-form-field">
+                        <label for="detachedMaxTokens">Token Budget (optional)</label>
+                        <input type="number" id="detachedMaxTokens" class="param-input" placeholder="Unlimited" min="500" />
+                      </div>
+                    </div>
+                    <div class="agent-form-footer">
+                      <span class="form-help">Checkpoints every ReAct step; auto-rolls back incomplete steps on crash.</span>
+                      <button type="button" class="btn-sm primary-sm" id="submitDetachedSpawnBtn">Spawn Worker</button>
+                    </div>
+                  </div>
+
+                  <div class="agents-grid" id="detachedSwarmsList">
+                    <!-- Populated dynamically -->
+                  </div>
+
+                  <div class="detached-inspect-panel" id="detachedInspectPanel" style="display: none;">
+                    <div class="detached-inspect-header">
+                      <strong id="detachedInspectTitle">Session Log</strong>
+                      <div class="detached-inspect-actions">
+                        <button type="button" class="btn-xs ghost-xs" id="detachedInspectRefreshBtn">Tail</button>
+                        <button type="button" class="btn-xs ghost-xs" id="detachedInspectCloseBtn">&times;</button>
+                      </div>
+                    </div>
+                    <div class="detached-inspect-meta" id="detachedInspectMeta"></div>
+                    <pre class="detached-log-tail" id="detachedLogTail"></pre>
+                  </div>
+                </div>
+
+                <!-- Recent Runs Section -->
+                <div class="agents-section">
+                  <div class="agents-section-title">
+                    <h4>Recent Runs</h4>
+                    <span class="session-badge-count" id="agentRunsCount">0</span>
+                    <button type="button" class="btn-xs ghost-xs" id="clearAgentRunsBtn" style="margin-left: auto;">Clear</button>
+                  </div>
+                  <div class="agent-runs-list" id="agentRunsList">
+                    <!-- Populated dynamically -->
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 2: DISCOVER & MODELS (LM Studio Model Hub) -->

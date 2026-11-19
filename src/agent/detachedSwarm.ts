@@ -1,8 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
+  captureWorkspaceState,
+  deleteCheckpoint,
   forkCheckpoint,
   getCheckpointsDir,
   isPidAlive,
@@ -10,6 +12,7 @@ import {
   loadCheckpoint,
   sanitizeSessionId,
   saveCheckpoint,
+  type CheckpointBudgets,
   type CheckpointRecord
 } from './checkpoint.js';
 
@@ -24,6 +27,10 @@ export interface SpawnDetachedOptions {
   systemPrompt?: string;
   maxSteps?: number;
   workspaceDir?: string;
+  workspaceMode?: 'shared' | 'worktree';
+  swarmId?: string | null;
+  parentSessionId?: string | null;
+  budgets?: CheckpointBudgets;
   memoryDir?: string;
   skillsDir?: string;
   resume?: boolean;
@@ -35,6 +42,9 @@ export interface DetachedSessionHandle {
   pid: number | null;
   logFile: string;
   status: string;
+  swarmId?: string | null;
+  workspaceDir?: string;
+  workspaceMode?: 'shared' | 'worktree';
 }
 
 /**
@@ -69,6 +79,34 @@ export class DetachedSwarmManager {
     return path.resolve(this.workspaceDir, 'dist/agent/detachedWorker.js');
   }
 
+  _prepareWorkspace(
+    baseWorkspace: string,
+    sessionId: string,
+    requestedMode: 'shared' | 'worktree' = 'shared'
+  ): { workspaceDir: string; workspaceMode: 'shared' | 'worktree' } {
+    const resolvedBase = path.resolve(baseWorkspace || this.workspaceDir);
+    if (requestedMode !== 'worktree') {
+      return { workspaceDir: resolvedBase, workspaceMode: 'shared' };
+    }
+    const worktreeDir = path.join(resolvedBase, '.om_worktrees', sanitizeSessionId(sessionId));
+    if (fs.existsSync(worktreeDir)) {
+      return { workspaceDir: worktreeDir, workspaceMode: 'worktree' };
+    }
+    try {
+      fs.mkdirSync(path.dirname(worktreeDir), { recursive: true });
+      const branchName = `om-swarm-${sanitizeSessionId(sessionId)}`;
+      execFileSync('git', ['worktree', 'add', '-b', branchName, worktreeDir, 'HEAD'], {
+        cwd: resolvedBase,
+        timeout: 5000,
+        stdio: ['ignore', 'ignore', 'ignore']
+      });
+      return { workspaceDir: worktreeDir, workspaceMode: 'worktree' };
+    } catch {
+      // Fallback gracefully if not a git repo or HEAD cannot be branched
+      return { workspaceDir: resolvedBase, workspaceMode: 'shared' };
+    }
+  }
+
   /**
    * Spawn a new process-detached background agent daemon (survives parent/UI/CLI exit).
    */
@@ -95,6 +133,17 @@ export class DetachedSwarmManager {
     const jobFile = path.join(cpDir, `${sessionId}.job.json`);
     const runId = existing?.runId || `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
 
+    const requestedMode = options.workspaceMode || existing?.workspaceMode || 'shared';
+    const baseWorkspace = path.resolve(options.workspaceDir || existing?.workspaceDir || this.workspaceDir);
+    const preparedWs = existing?.workspaceDir && options.resume
+      ? { workspaceDir: existing.workspaceDir, workspaceMode: existing.workspaceMode || requestedMode }
+      : this._prepareWorkspace(baseWorkspace, sessionId, requestedMode);
+
+    const effectiveBudgets = options.budgets || existing?.budgets;
+    const effectiveSwarmId = options.swarmId !== undefined ? options.swarmId : existing?.swarmId ?? null;
+    const effectiveParentId = options.parentSessionId !== undefined ? options.parentSessionId : existing?.parentSessionId ?? null;
+    const wsState = captureWorkspaceState(preparedWs.workspaceDir);
+
     const jobPayload = {
       sessionId,
       prompt: effectivePrompt,
@@ -102,7 +151,11 @@ export class DetachedSwarmManager {
       model: options.model || existing?.model || this.defaultModel,
       systemPrompt: options.systemPrompt || existing?.systemPrompt,
       maxSteps: options.maxSteps || existing?.maxSteps || 15,
-      workspaceDir: path.resolve(options.workspaceDir || existing?.workspaceDir || this.workspaceDir),
+      workspaceDir: preparedWs.workspaceDir,
+      workspaceMode: preparedWs.workspaceMode,
+      swarmId: effectiveSwarmId,
+      parentSessionId: effectiveParentId,
+      budgets: effectiveBudgets,
       memoryDir: memDir,
       skillsDir: options.skillsDir || this.skillsDir,
       logFile,
@@ -123,8 +176,17 @@ export class DetachedSwarmManager {
       provider: String(jobPayload.provider || 'om'),
       model: String(jobPayload.model || 'om-turbo'),
       workspaceDir: jobPayload.workspaceDir,
+      workspaceMode: jobPayload.workspaceMode,
+      swarmId: effectiveSwarmId,
+      parentSessionId: effectiveParentId,
       currentStep: existing?.currentStep ?? 0,
       maxSteps: jobPayload.maxSteps,
+      pendingStep: existing?.pendingStep ?? null,
+      snapshotRunId: existing?.snapshotRunId ?? runId,
+      workspaceHead: existing?.workspaceHead ?? wsState.head,
+      workspaceDirtyHash: existing?.workspaceDirtyHash ?? wsState.dirtyHash,
+      pauseReason: null,
+      budgets: effectiveBudgets,
       usage: existing?.usage || { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
       history: existing?.history || [],
       steps: existing?.steps || [],
@@ -159,8 +221,35 @@ export class DetachedSwarmManager {
       runId,
       pid: childPid,
       logFile,
-      status: 'running'
+      status: 'running',
+      swarmId: effectiveSwarmId,
+      workspaceDir: jobPayload.workspaceDir,
+      workspaceMode: jobPayload.workspaceMode
     };
+  }
+
+  /**
+   * Spawn a coordinated multi-worker detached swarm under a shared swarmId.
+   */
+  spawnSwarm(
+    tasks: Array<Pick<SpawnDetachedOptions, 'prompt' | 'sessionId' | 'provider' | 'model' | 'systemPrompt' | 'maxSteps' | 'budgets'>>,
+    sharedOptions: Omit<SpawnDetachedOptions, 'prompt' | 'sessionId'> = {}
+  ): { swarmId: string; workers: DetachedSessionHandle[] } {
+    if (!Array.isArray(tasks) || tasks.length === 0) {
+      throw new Error('spawnSwarm requires at least one task');
+    }
+    const swarmId = sharedOptions.swarmId || `swarm_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
+    const defaultMode = sharedOptions.workspaceMode || (tasks.length > 1 ? 'worktree' : 'shared');
+    const workers = tasks.map((task, idx) =>
+      this.spawnDetached({
+        ...sharedOptions,
+        ...task,
+        swarmId,
+        workspaceMode: defaultMode,
+        sessionId: task.sessionId || `${swarmId}_w${idx + 1}`
+      })
+    );
+    return { swarmId, workers };
   }
 
   /**
@@ -257,5 +346,29 @@ export class DetachedSwarmManager {
       finishedAt: new Date().toISOString()
     });
     return { stopped, pid: cp.pid };
+  }
+
+  /**
+   * Delete a stopped/completed checkpoint and its job/log files.
+   */
+  deleteSession(sessionId: string): boolean {
+    const cp = loadCheckpoint(this.memoryDir, sessionId);
+    if (cp && cp.status === 'running' && isPidAlive(cp.pid)) {
+      this.stopSession(sessionId);
+    }
+    const deleted = deleteCheckpoint(this.memoryDir, sessionId);
+    const cpDir = getCheckpointsDir(this.memoryDir);
+    const safeId = sanitizeSessionId(sessionId);
+    for (const ext of ['.log', '.job.json']) {
+      const p = path.join(cpDir, `${safeId}${ext}`);
+      if (fs.existsSync(p)) {
+        try {
+          fs.unlinkSync(p);
+        } catch (_) {
+          // ignore
+        }
+      }
+    }
+    return deleted;
   }
 }

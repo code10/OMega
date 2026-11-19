@@ -41,19 +41,71 @@ export function redactSecrets(input: string): string {
   return out;
 }
 
+export const SAFE_BASE_ENV_KEYS = new Set([
+  'PATH',
+  'Path',
+  'PATHEXT',
+  'HOME',
+  'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'TMP',
+  'TEMP',
+  'TMPDIR',
+  'SHELL',
+  'ComSpec',
+  'SystemRoot',
+  'WINDIR',
+  'OS',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'TERM',
+  'COLORTERM',
+  'USER',
+  'LOGNAME',
+  'USERNAME',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'PROGRAMDATA',
+  'ProgramFiles',
+  'ProgramFiles(x86)',
+  'CommonProgramFiles',
+  'NODE_ENV',
+  'NO_COLOR',
+  'FORCE_COLOR',
+  'CI',
+  'TZ',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'NODE_EXTRA_CA_CERTS',
+  'GIT_TERMINAL_PROMPT',
+  'GIT_PAGER',
+  'PAGER'
+]);
+
 /**
- * Build a child process environment with sensitive API keys and gateway tokens scrubbed
+ * Build a child process environment using a strict safe-key allowlist by default
+ * (preventing non-OMega secrets like AWS_SECRET_ACCESS_KEY or GITHUB_TOKEN from leaking)
  * unless inheritSensitiveEnv is explicitly enabled. Explicit overrides are applied last.
  */
 export function buildSafeChildEnv(
   baseEnv: NodeJS.ProcessEnv = process.env,
   overrides: Record<string, string | undefined> = {},
-  inheritSensitiveEnv = false
+  inheritSensitiveEnv = false,
+  extraAllowedKeys: string[] = []
 ): Record<string, string | undefined> {
-  const childEnv: Record<string, string | undefined> = { ...baseEnv };
-  if (!inheritSensitiveEnv) {
-    for (const key of SENSITIVE_ENV_KEYS) {
-      delete childEnv[key];
+  const childEnv: Record<string, string | undefined> = {};
+  if (inheritSensitiveEnv) {
+    Object.assign(childEnv, baseEnv);
+  } else {
+    const extraSet = new Set(Array.isArray(extraAllowedKeys) ? extraAllowedKeys : []);
+    for (const [k, v] of Object.entries(baseEnv || {})) {
+      if (v === undefined) continue;
+      if (SENSITIVE_ENV_KEYS.includes(k)) continue;
+      if (SAFE_BASE_ENV_KEYS.has(k) || extraSet.has(k)) {
+        childEnv[k] = v;
+      }
     }
   }
   for (const [k, v] of Object.entries(overrides || {})) {

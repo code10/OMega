@@ -84,6 +84,25 @@ export function readJsonBody(
 }
 
 /**
+ * Resolve `<!-- @include partials/... -->` directives in HTML files across publicDirs
+ * with directory traversal protection.
+ */
+export function resolveHtmlIncludes(html: string, publicDirOrDirs: string | string[]): string {
+  const publicDirs = Array.isArray(publicDirOrDirs) ? publicDirOrDirs : [publicDirOrDirs];
+  return html.replace(/<!--\s*@include\s+([^\s]+)\s*-->/g, (_match, relInclude: string) => {
+    for (const publicDir of publicDirs) {
+      const resolved = path.resolve(publicDir, relInclude);
+      const rel = path.relative(publicDir, resolved);
+      if (rel.startsWith('..') || path.isAbsolute(rel)) continue;
+      if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
+        return fs.readFileSync(resolved, 'utf8');
+      }
+    }
+    return '';
+  });
+}
+
+/**
  * Serve static dashboard files from one or more publicDirs with directory traversal protection.
  */
 export function serveStatic(
@@ -108,6 +127,12 @@ export function serveStatic(
       const ext = path.extname(resolvedFilePath).toLowerCase();
       const mime = MIME_TYPES[ext] || 'application/octet-stream';
       const headers: Record<string, string> = { 'Content-Type': mime };
+      if (ext === '.html') {
+        const rendered = resolveHtmlIncludes(fs.readFileSync(resolvedFilePath, 'utf8'), publicDirs);
+        res.writeHead(200, headers);
+        res.end(rendered);
+        return true;
+      }
       if (['.css', '.js', '.png', '.ico', '.svg', '.jpeg', '.jpg', '.webp'].includes(ext)) {
         headers['Cache-Control'] = 'public, max-age=3600';
       }

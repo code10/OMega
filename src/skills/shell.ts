@@ -1,9 +1,10 @@
-import { exec, execFile } from 'node:child_process';
+import { exec } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveSafePath } from './filesystem.js';
 import { buildSafeChildEnv, redactSecrets } from '../utils/redact.js';
+import { buildSandboxedCommand, spawnSandboxed } from './sandbox.js';
 import type { SkillContext } from '../types.js';
 
 const SHELL_CONTROL_PATTERN = /[;|&`<>\r\n]|\$\(/;
@@ -150,6 +151,36 @@ export const shellSkills = [
             error: `Security violation: Command '${resolvedName}' is not in security.allowedCommands`
           };
         }
+
+        // Security check 2b: Block dangerous git flags that execute arbitrary binaries/hooks
+        if (resolvedStem === 'git') {
+          const isRebase = directArgs.some((a) => a === 'rebase');
+          for (const arg of directArgs) {
+            const lowerArg = String(arg).toLowerCase();
+            if (
+              lowerArg === '-c' ||
+              lowerArg.startsWith('-c=') ||
+              lowerArg === '--config-env' ||
+              lowerArg.startsWith('--config-env=') ||
+              lowerArg === '--exec-path' ||
+              lowerArg.startsWith('--exec-path=') ||
+              lowerArg === '--upload-pack' ||
+              lowerArg.startsWith('--upload-pack=') ||
+              lowerArg === '-u' ||
+              lowerArg === '--receive-pack' ||
+              lowerArg.startsWith('--receive-pack=') ||
+              lowerArg === '--exec' ||
+              lowerArg.startsWith('--exec=') ||
+              lowerArg === '--ext-diff' ||
+              (isRebase && (lowerArg === '-x' || lowerArg.startsWith('-x=')))
+            ) {
+              return {
+                success: false,
+                error: `Security violation: Dangerous git flag '${arg}' is blocked.`
+              };
+            }
+          }
+        }
       }
 
       // Security check 3: Require interactive confirmation if configured
@@ -198,8 +229,9 @@ export const shellSkills = [
       }
       const shell = os.platform() === 'win32' ? 'powershell.exe' : '/bin/bash';
 
-      // Scrub sensitive API keys / gateway tokens from child shell env unless explicitly opted in
-      const childEnv = buildSafeChildEnv(process.env, {}, Boolean(security.inheritSensitiveEnv));
+      // Scrub child shell env via allowlist unless explicitly opted in
+      const allowedEnvVars = Array.isArray(security.allowedEnvVars) ? security.allowedEnvVars : [];
+      const childEnv = buildSafeChildEnv(process.env, {}, Boolean(security.inheritSensitiveEnv), allowedEnvVars);
 
       return new Promise((resolve) => {
         const handleResult = (error: any, stdout: string, stderr: string) => {
@@ -228,24 +260,83 @@ export const shellSkills = [
           const sandboxPrefix = Array.isArray(security.sandboxCommand) && security.sandboxCommand.length > 0
             ? security.sandboxCommand.map((part) => String(part).replaceAll('${cwd}', workingDir))
             : null;
-          const finalExec = sandboxPrefix ? sandboxPrefix[0] : directExecutable;
-          const finalArgs = sandboxPrefix
-            ? [...sandboxPrefix.slice(1), directExecutable, ...directArgs]
-            : directArgs;
 
-          execFile(
-            finalExec,
-            finalArgs,
-            {
-              cwd: workingDir,
-              timeout: safeTimeout,
-              shell: false,
-              env: childEnv,
-              maxBuffer: 10 * 1024 * 1024 // 10MB
-            },
-            handleResult
-          );
+          let invocation;
+          if (sandboxPrefix) {
+            invocation = {
+              backend: 'custom',
+              executable: sandboxPrefix[0],
+              args: [...sandboxPrefix.slice(1), directExecutable, ...directArgs],
+              cleanup: () => {}
+            };
+          } else {
+            try {
+              invocation = buildSandboxedCommand(directExecutable, directArgs, workingDir, security.sandbox || {});
+            } catch (sandboxErr: any) {
+              resolve({ success: false, error: sandboxErr?.message || String(sandboxErr) });
+              return;
+            }
+          }
+
+          spawnSandboxed(invocation.executable, invocation.args, {
+            cwd: workingDir,
+            env: childEnv,
+            timeoutMs: safeTimeout,
+            maxOutputBytes: security.sandbox?.maxOutputBytes,
+            cleanup: invocation.cleanup
+          }).then((res) => {
+            const outStr = redactSecrets((res.stdout || '').trim());
+            const errStr = redactSecrets((res.stderr || '').trim());
+            if (res.errorMessage && !outStr && !errStr) {
+              resolve({
+                success: false,
+                exitCode: res.exitCode,
+                error: redactSecrets(res.errorMessage),
+                sandboxBackend: invocation.backend
+              });
+            } else {
+              resolve({
+                success: res.exitCode === 0 && !res.timedOut && !res.outputTruncated,
+                exitCode: res.exitCode,
+                stdout: outStr || '(no stdout output)',
+                stderr: errStr ? errStr : undefined,
+                timedOut: res.timedOut,
+                outputTruncated: res.outputTruncated || undefined,
+                sandboxBackend: invocation.backend
+              });
+            }
+          });
         } else {
+          if (security.sandbox?.strict || security.sandbox?.mode === 'os' || security.sandbox?.mode === 'container') {
+            const shellFlag = os.platform() === 'win32' ? '-Command' : '-c';
+            let invocation;
+            try {
+              invocation = buildSandboxedCommand(shell, [shellFlag, commandText], workingDir, security.sandbox || {});
+            } catch (sandboxErr: any) {
+              resolve({ success: false, error: sandboxErr?.message || String(sandboxErr) });
+              return;
+            }
+            spawnSandboxed(invocation.executable, invocation.args, {
+              cwd: workingDir,
+              env: childEnv,
+              timeoutMs: safeTimeout,
+              maxOutputBytes: security.sandbox?.maxOutputBytes,
+              cleanup: invocation.cleanup
+            }).then((res) => {
+              const outStr = redactSecrets((res.stdout || '').trim());
+              const errStr = redactSecrets((res.stderr || '').trim());
+              resolve({
+                success: res.exitCode === 0 && !res.timedOut && !res.outputTruncated,
+                exitCode: res.exitCode,
+                stdout: outStr || '(no stdout output)',
+                stderr: errStr ? errStr : undefined,
+                timedOut: res.timedOut,
+                outputTruncated: res.outputTruncated || undefined,
+                sandboxBackend: invocation.backend
+              });
+            });
+            return;
+          }
           exec(
             commandText,
             {

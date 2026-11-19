@@ -1,0 +1,381 @@
+        <section class="tab-pane active" id="paneChat">
+          <div class="chat-layout">
+
+            <!-- LEFT SUB-SIDEBAR: Chat Sessions / History -->
+            <aside class="chat-sessions-sidebar" id="sessionsSidebar">
+              <div class="sessions-header">
+                <h3>Sessions</h3>
+                <div class="sessions-header-actions">
+                  <button class="sessions-action-btn danger-hover" id="resetSessionsCounterBtn"
+                    title="Reset all sessions" type="button">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"
+                      stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                      <path d="M3 3v5h5"></path>
+                    </svg>
+                  </button>
+                  <button class="sessions-add-btn" id="createChatBtn" title="New Session" type="button">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                      stroke-width="2.5">
+                      <line x1="12" y1="5" x2="12" y2="19"></line>
+                      <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div class="sessions-search-box">
+                <input type="text" id="sessionSearchInput" placeholder="Search..." />
+              </div>
+              <div class="sessions-list" id="sessionsListContainer">
+                <!-- Dynamically loaded from /api/sessions -->
+              </div>
+              <div class="sessions-sidebar-footer">
+                <button class="sessions-footer-btn routing-status-pill" id="routingStatusPillBtn" type="button"
+                  title="Routing & Provider Configuration">
+                  <span class="routing-pill-dot healthy" id="routingPillDot"></span>
+                  <span class="routing-pill-label" id="routingPillLabel">Routing: Auto</span>
+                  <span class="routing-pill-meta" id="routingPillMeta"></span>
+                </button>
+              </div>
+            </aside>
+
+            <!-- CENTER: Messages Feed & Bottom Floating Input -->
+            <div class="chat-main-area">
+              <div class="messages-scroll" id="messagesContainer">
+                <!-- Welcome Hero Card -->
+                <div class="welcome-card">
+                  <h2>OMega</h2>
+                  <p>A local-first framework for building and running AI agents.</p>
+                </div>
+              </div>
+
+              <!-- FLOATING PROMPT INPUT -->
+              <div class="input-panel">
+                <!-- Model Context & Token Usage Bar -->
+                <div class="model-usage-bar" id="modelUsageBar">
+                  <div class="usage-bar-meta">
+                    <div class="usage-bar-left">
+                      <span class="usage-status-dot" id="usageStatusDot"></span>
+                      <span class="usage-model-label" id="usageModelLabel" style="display:none;"
+                        title="Click to switch model">om-v1</span>
+                      <span class="usage-mode-tag local" id="usageModeTag" style="display:none;">LOCAL</span>
+                      <span class="usage-meta-sep" style="display:none;">•</span>
+                      <span class="usage-tokens-counter" id="usageTokensCounter">0 / 128k tokens</span>
+                    </div>
+                    <div class="usage-bar-right">
+                      <span class="usage-pct-badge" id="usagePctBadge">0.0%</span>
+                      <span class="usage-limit-label" id="usageLimitLabel">128k context</span>
+                    </div>
+                  </div>
+                  <div class="usage-progress-track">
+                    <div class="usage-progress-fill" id="usageProgressFill" style="width: 0%;"></div>
+                  </div>
+                </div>
+
+                <div class="floating-input-box">
+                  <!-- Attached files & folders preview chips -->
+                  <div class="attached-chips-row" id="attachedChipsRow" style="display: none;"></div>
+
+                  <textarea id="promptInput" placeholder="Ask anything, @ to mention, / for actions..."
+                    rows="1"></textarea>
+
+                  <div class="input-meta-bar">
+                    <div class="input-meta-left">
+                      <!-- Plus Menu Wrapper -->
+                      <div class="input-plus-wrap" id="plusMenuWrap">
+                        <button type="button" class="input-plus-btn" id="inputPlusBtn"
+                          title="Add files, folders, mentions, actions, browser" aria-expanded="false"
+                          aria-haspopup="true">
+                          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+                            stroke-width="2.4" stroke-linecap="round">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                          </svg>
+                        </button>
+
+                        <!-- Plus Menu Dropdown -->
+                        <div class="plus-popover-menu" id="plusPopoverMenu">
+                          <button type="button" class="plus-menu-item" id="menuAddFile">
+                            <span class="plus-menu-icon">
+                              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                <polyline points="14 2 14 8 20 8"></polyline>
+                              </svg>
+                            </span>
+                            <div class="plus-menu-text">
+                              <span class="plus-menu-title">File</span>
+                              <span class="plus-menu-sub">Attach files from computer</span>
+                            </div>
+                          </button>
+
+                          <button type="button" class="plus-menu-item" id="menuAddFolder">
+                            <span class="plus-menu-icon">
+                              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z">
+                                </path>
+                              </svg>
+                            </span>
+                            <div class="plus-menu-text">
+                              <span class="plus-menu-title">Folder</span>
+                              <span class="plus-menu-sub">Attach workspace folder</span>
+                            </div>
+                          </button>
+
+                          <div class="plus-menu-sep"></div>
+
+                          <button type="button" class="plus-menu-item" id="menuMentions">
+                            <span class="plus-menu-icon">
+                              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <circle cx="12" cy="12" r="4"></circle>
+                                <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94"></path>
+                              </svg>
+                            </span>
+                            <div class="plus-menu-text">
+                              <span class="plus-menu-title">Mentions</span>
+                              <span class="plus-menu-sub">Reference context or files</span>
+                            </div>
+                          </button>
+
+                          <button type="button" class="plus-menu-item" id="menuActions">
+                            <span class="plus-menu-icon">
+                              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <polyline points="4 17 10 11 4 5"></polyline>
+                                <line x1="12" y1="19" x2="20" y2="19"></line>
+                              </svg>
+                            </span>
+                            <div class="plus-menu-text">
+                              <span class="plus-menu-title">Actions</span>
+                              <span class="plus-menu-sub">Run commands and skills</span>
+                            </div>
+                          </button>
+
+                          <button type="button" class="plus-menu-item" id="menuBrowser">
+                            <span class="plus-menu-icon">
+                              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="2" y1="12" x2="22" y2="12"></line>
+                                <path
+                                  d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z">
+                                </path>
+                              </svg>
+                            </span>
+                            <div class="plus-menu-text">
+                              <span class="plus-menu-title">Browser</span>
+                              <span class="plus-menu-sub">Web search & URL browse</span>
+                            </div>
+                          </button>
+                        </div>
+
+                        <!-- Inline suggestions popover for @ and / (anchored to the actions button on the left) -->
+                        <div class="model-dropdown-menu inline-suggestions-popover" id="inlineSuggestionsPopover">
+                          <div class="model-dropdown-header">
+                            <span id="suggestionsHeader">Actions & Commands (/)</span>
+                            <button type="button" class="dropdown-close-btn" id="closeSuggestionsBtn"
+                              title="Close suggestions">&times;</button>
+                          </div>
+                          <div class="model-dropdown-list suggestions-list" id="suggestionsList"></div>
+                          <div class="model-dropdown-footer">
+                            <span class="suggestions-hint">Select to insert &bull; <kbd>Esc</kbd> to close</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- Hidden file/folder inputs -->
+                      <input type="file" id="attachFileInput" multiple style="display:none;" />
+                      <input type="file" id="attachFolderInput" webkitdirectory directory style="display:none;" />
+
+                      <!-- Model Selector Wrapper with Dropdown directly above -->
+                      <div class="input-model-wrap" id="modelSelectWrap">
+                        <!-- Cloud / Local Switch Segmented Toggle -->
+                        <div class="chat-mode-toggle" id="chatModeToggle" title="Toggle Cloud / Local mode">
+                          <button type="button" class="chat-mode-btn" id="chatModeCloudBtn" data-mode="cloud"
+                            title="Switch to Cloud models">
+                            <svg class="chat-mode-svg" viewBox="0 0 24 24" width="12" height="12" fill="none"
+                              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                              <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+                            </svg>
+                            <span class="chat-mode-text">Cloud</span>
+                          </button>
+                          <button type="button" class="chat-mode-btn active" id="chatModeLocalBtn" data-mode="local"
+                            title="Switch to Local models">
+                            <svg class="chat-mode-svg" viewBox="0 0 24 24" width="12" height="12" fill="none"
+                              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                              <line x1="8" y1="21" x2="16" y2="21"></line>
+                              <line x1="12" y1="17" x2="12" y2="21"></line>
+                            </svg>
+                            <span class="chat-mode-text">Local</span>
+                          </button>
+                        </div>
+
+                        <button type="button" class="input-model-selector-btn" id="inputModelSelectorBtn"
+                          title="Current active model">
+                          <span class="input-model-target-pill local" id="inputModelTargetPill">LOCAL</span>
+                          <span class="input-model-name" id="inputModelTag">om-v1</span>
+                          <svg class="input-model-caret" viewBox="0 0 24 24" width="11" height="11" fill="none"
+                            stroke="currentColor" stroke-width="2.5">
+                            <polyline points="18 15 12 9 6 15"></polyline>
+                          </svg>
+                        </button>
+
+                        <!-- Quick Switch Dropdown for Model Selector -->
+                        <div class="model-dropdown-menu" id="modelDropdownMenu">
+                          <div class="model-dropdown-header">
+                            <div class="model-dropdown-title-wrap">
+                              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect>
+                                <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path>
+                              </svg>
+                              <span>Select Model</span>
+                            </div>
+                            <button class="dropdown-close-btn" id="dropdownCloseBtn" title="Close" type="button">
+                              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                              </svg>
+                            </button>
+                          </div>
+                          <!-- Dropdown Cloud/Local tabs -->
+                          <div class="dropdown-scope-tabs" id="dropdownScopeTabs">
+                            <button type="button" class="dropdown-scope-btn active" data-scope="all">All Models</button>
+                            <button type="button" class="dropdown-scope-btn" data-scope="cloud">
+                              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+                              </svg>
+                              <span>Cloud</span>
+                            </button>
+                            <button type="button" class="dropdown-scope-btn" data-scope="local">
+                              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                                <line x1="8" y1="21" x2="16" y2="21"></line>
+                                <line x1="12" y1="17" x2="12" y2="21"></line>
+                              </svg>
+                              <span>Local</span>
+                            </button>
+                          </div>
+                          <div class="model-dropdown-search">
+                            <input type="text" id="modelQuickSearchInput" placeholder="Filter models..." />
+                          </div>
+                          <div class="model-dropdown-list" id="modelQuickList">
+                            <div class="dropdown-loading-item">Loading available models...</div>
+                          </div>
+                          <div class="model-dropdown-footer">
+                            <button class="model-dropdown-browse-btn" id="gotoModelsTabBtn" type="button">
+                              <span>Browse Full Models</span>
+                              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor"
+                                stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="9 18 15 12 9 6"></polyline>
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div class="input-meta-right">
+                      <button id="voiceBtn" class="voice-circle-btn" title="Voice Input (Speech-to-Text)" type="button"
+                        aria-label="Voice input">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                          stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                          <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                          <line x1="12" y1="19" x2="12" y2="23"></line>
+                          <line x1="8" y1="23" x2="16" y2="23"></line>
+                        </svg>
+                      </button>
+                      <button id="sendBtn" class="send-circle-btn" title="Send Task" aria-label="Send message">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                          stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                          <line x1="5" y1="12" x2="19" y2="12"></line>
+                          <polyline points="12 5 19 12 12 19"></polyline>
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- RIGHT SUB-SIDEBAR: Parameters & System Settings (LM Studio Inspector) -->
+            <aside class="chat-params-sidebar" id="paramsSidebar">
+              <div class="params-header">
+                <h3>Parameters & System</h3>
+                <button class="params-close-btn" id="closeParamsBtn" title="Close Panel">&times;</button>
+              </div>
+
+              <div class="params-body">
+                <!-- System Prompt -->
+                <div class="param-section">
+                  <div class="param-section-title">
+                    <span>System Prompt</span>
+                    <button class="param-mini-btn" id="saveSystemPromptBtn" style="display:none;">Save</button>
+                  </div>
+                  <textarea id="systemPromptInput" class="param-textarea" rows="5"
+                    placeholder="System prompt..."></textarea>
+                </div>
+
+                <!-- Temperature Slider -->
+                <div class="param-section">
+                  <div class="param-section-title">
+                    <span>Temperature</span>
+                    <span class="param-badge-val" id="tempValBadge">0.2</span>
+                  </div>
+                  <input type="range" id="tempSlider" min="0" max="1" step="0.05" value="0.2" class="param-range" />
+                  <div class="param-slider-legend">
+                    <span>0.0 (Precise)</span>
+                    <span>1.0 (Creative)</span>
+                  </div>
+                </div>
+
+                <!-- Runtime Specs Card -->
+                <div class="param-section">
+                  <div class="param-section-title">
+                    <span>Runtime Specs</span>
+                  </div>
+                  <div class="specs-mini-table">
+                    <div class="spec-mini-row">
+                      <span class="spec-k">Provider</span>
+                      <span class="spec-v" id="metaProvider">gemini</span>
+                    </div>
+                    <div class="spec-mini-row">
+                      <span class="spec-k">Model</span>
+                      <span class="spec-v" id="metaModel">gemini-3.5-flash</span>
+                    </div>
+                    <div class="spec-mini-row">
+                      <span class="spec-k">Memory Dir</span>
+                      <span class="spec-v spec-ellipsis" id="specMemoryDir">./memory</span>
+                    </div>
+                    <div class="spec-mini-row">
+                      <span class="spec-k">Workspace</span>
+                      <span class="spec-v spec-ellipsis" id="specWorkspaceDir">.</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Live Visual Activity Log Stream -->
+                <div class="param-section">
+                  <div class="param-section-title">
+                    <span>Live Activity Stream</span>
+                    <button class="btn-xs ghost-xs" id="clearActivityLogBtn" type="button"
+                      style="padding: 1px 6px; font-size: 0.65rem;">Clear</button>
+                  </div>
+                  <div class="live-activity-feed" id="liveActivityFeed">
+                    <div class="activity-empty">Listening for real-time agent events...</div>
+                  </div>
+                </div>
+              </div>
+            </aside>
+
+          </div>
+        </section>
+
+        <!-- TAB 2: AGENTS & PERSISTENT WORKERS -->

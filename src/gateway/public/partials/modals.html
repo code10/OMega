@@ -1,0 +1,186 @@
+  <!-- REFERENCE VIEWER MODAL -->
+  <div class="modal-backdrop" id="refViewerModal" style="display: none;">
+    <div class="modal-dialog ref-viewer-dialog" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <div class="modal-header-left">
+          <span class="skill-tag workflow-tag" id="refViewerSkillTag">workflow</span>
+          <h3 class="modal-title" id="refViewerTitle">Reference Runbook</h3>
+        </div>
+        <div class="modal-header-actions">
+          <button type="button" class="btn-xs ghost-xs" id="copyRefContentBtn" title="Copy Raw Markdown">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            <span id="copyRefBtnText">Copy</span>
+          </button>
+          <button type="button" class="modal-close-btn" id="closeRefViewerBtn" title="Close Viewer">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="modal-body ref-viewer-body" id="refViewerBody">
+        <div class="markdown-content" id="refViewerContent"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CUSTOM SKILL CREATOR MODAL -->
+  <div class="modal-backdrop" id="skillCreatorModal" style="display: none;">
+    <div class="modal-dialog skill-creator-dialog" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <div class="modal-header-left">
+          <h3 class="modal-title">Create Custom Skill</h3>
+          <span class="modal-subtitle">Scaffold and register a new workflow or JavaScript tool</span>
+        </div>
+        <button type="button" class="modal-close-btn" id="closeSkillCreatorBtn" title="Close">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <form id="createSkillForm" class="modal-form">
+        <div class="form-group">
+          <label class="form-label">Skill Type</label>
+          <div class="skill-type-selector">
+            <button type="button" class="skill-type-btn active" data-type="workflow" id="selectTypeWorkflow">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+              </svg>
+              <span>Workflow (SKILL.md)</span>
+            </button>
+            <button type="button" class="skill-type-btn" data-type="tool" id="selectTypeTool">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="16 18 22 12 16 6"></polyline>
+                <polyline points="8 6 2 12 8 18"></polyline>
+              </svg>
+              <span>JavaScript Tool (.js)</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label class="form-label" for="newSkillName">Skill Name <span class="required-star">*</span></label>
+            <input type="text" id="newSkillName" class="form-input" placeholder="e.g. summarize-doc" required
+              autocomplete="off" />
+            <span class="form-help">Lowercase alphanumeric and hyphens (invoked as /name).</span>
+          </div>
+          <div class="form-group flex-2">
+            <label class="form-label" for="newSkillDescription">Description <span class="required-star">*</span></label>
+            <input type="text" id="newSkillDescription" class="form-input"
+              placeholder="Short description of what this skill does" required />
+          </div>
+        </div>
+
+        <!-- Workflow Fields -->
+        <div id="workflowFieldsContainer">
+          <div class="form-group">
+            <label class="form-label" for="newSkillPrompt">Workflow Directives & Instructions</label>
+            <textarea id="newSkillPrompt" class="form-textarea" rows="6"
+              placeholder="Define the step-by-step instructions and runbook guidelines for this workflow..."></textarea>
+            <span class="form-help">Saved as SKILL.md body and loaded automatically into prompt context when
+              invoked.</span>
+          </div>
+        </div>
+
+        <!-- Tool Fields -->
+        <div id="toolFieldsContainer" style="display: none;">
+          <div class="form-group">
+            <label class="form-label" for="newSkillCode">JavaScript Tool Implementation</label>
+            <textarea id="newSkillCode" class="form-textarea code-editor-font" rows="9" spellcheck="false"></textarea>
+            <span class="form-help">Export an object named 'skill' with name, description, parameters, and an execute
+              function.</span>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <div class="modal-footer-msg" id="skillCreatorStatusMsg"></div>
+          <div class="modal-footer-actions">
+            <button type="button" class="btn-sm ghost-sm" id="cancelSkillCreatorBtn">Cancel</button>
+            <button type="submit" class="btn-sm primary-sm" id="submitCreateSkillBtn">Create & Register</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ROUTING & PROVIDERS MODAL -->
+  <div class="modal-backdrop" id="routingConfigModal" style="display: none;">
+    <div class="modal-dialog routing-config-dialog" role="dialog" aria-modal="true" aria-labelledby="routingModalTitle">
+      <div class="modal-header">
+        <div class="modal-header-left">
+          <span class="routing-pill-dot healthy" id="routingModalDot"></span>
+          <h3 id="routingModalTitle" style="margin:0; font-size:0.95rem;">Routing &amp; Providers</h3>
+        </div>
+        <button class="modal-close-btn" id="closeRoutingModalBtn" type="button" title="Close">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <div class="routing-modal-body">
+        <div class="routing-controls-row">
+          <label class="routing-toggle-label">
+            <input type="checkbox" id="routingEnabledToggle" checked />
+            <span>Auto-Failover</span>
+          </label>
+          <label class="routing-toggle-label">
+            <input type="checkbox" id="routingAutoHandoffToggle" checked />
+            <span>Context Handoff</span>
+          </label>
+          <label class="routing-retries-label">
+            <span>Max Retries</span>
+            <select id="routingMaxRetriesSelect" class="routing-select">
+              <option value="0">0</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="routing-stats-grid" id="routingStatsGrid">
+          <div class="routing-stat-box">
+            <span class="routing-stat-label">Calls</span>
+            <span class="routing-stat-val" id="routingStatCalls">0</span>
+          </div>
+          <div class="routing-stat-box">
+            <span class="routing-stat-label">Fallbacks</span>
+            <span class="routing-stat-val" id="routingStatFallbacks">0</span>
+          </div>
+          <div class="routing-stat-box">
+            <span class="routing-stat-label">Retries</span>
+            <span class="routing-stat-val" id="routingStatRetries">0</span>
+          </div>
+          <div class="routing-stat-box">
+            <span class="routing-stat-label">Est. Cost</span>
+            <span class="routing-stat-val" id="routingStatCost">$0.00</span>
+          </div>
+        </div>
+
+        <div class="routing-section">
+          <div class="routing-section-title">Fallback Chain</div>
+          <div class="routing-chain-list" id="routingFallbackList"></div>
+        </div>
+
+        <div class="routing-section">
+          <div class="routing-section-title">Provider Keys &amp; Endpoints</div>
+          <div class="routing-providers-list" id="routingProvidersList"></div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <div class="modal-footer-msg" id="routingModalStatusMsg"></div>
+        <div class="modal-footer-actions">
+          <button type="button" class="btn-sm ghost-sm" id="doneRoutingModalBtn">Done</button>
+        </div>
+      </div>
+    </div>
+  </div>

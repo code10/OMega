@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { OMGitManager } from './git.js';
+import { buildSafeChildEnv, redactSecrets } from './utils/redact.js';
 import type { SelfHealConfig } from './types.js';
 
 const execAsync = promisify(exec);
@@ -209,20 +210,24 @@ export class OMSelfHealer {
     try {
       const { stdout, stderr } = await execAsync(testCommand, {
         cwd: workspaceDir,
+        env: buildSafeChildEnv(process.env),
+        timeout: 120000,
         maxBuffer: 10 * 1024 * 1024
       });
-      const output = [stdout, stderr].filter(Boolean).join('\n').trim();
+      const safeOut = redactSecrets(stdout || '');
+      const safeErr = redactSecrets(stderr || '');
+      const output = [safeOut, safeErr].filter(Boolean).join('\n').trim();
       return {
         passed: true,
         exitCode: 0,
-        stdout: stdout || '',
-        stderr: stderr || '',
+        stdout: safeOut,
+        stderr: safeErr,
         output,
         durationMs: Date.now() - start
       };
     } catch (err: any) {
-      const stdout = err.stdout || '';
-      const stderr = err.stderr || err.message || '';
+      const stdout = redactSecrets(err.stdout || '');
+      const stderr = redactSecrets(err.stderr || err.message || '');
       const output = [stdout, stderr].filter(Boolean).join('\n').trim();
       return {
         passed: false,

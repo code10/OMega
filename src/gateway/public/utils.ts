@@ -69,41 +69,112 @@ export function escapeHtml(str: unknown): string {
 
 export function formatMarkdown(text: string): string {
   if (!text) return '';
-  let html = escapeHtml(text);
+  let html = escapeHtml(text).replace(/\r\n/g, '\n');
 
-  // Code blocks
-  html = html.replace(/```([a-zA-Z0-9]*)\n([\s\S]*?)```/g, (_: string, lang: string, code: string) => {
-    return `<pre><code class="lang-${lang}">${code}</code></pre>`;
+  // 1. Protect fenced code blocks and inline code from markdown transforms
+  const codeBlocks: string[] = [];
+  html = html.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, (_: string, lang: string, code: string) => {
+    const idx = codeBlocks.length;
+    const cls = lang ? ` class="lang-${lang}"` : '';
+    codeBlocks.push(`<pre><code${cls}>${code.replace(/\n$/, '')}</code></pre>`);
+    return `\u0000CODEBLOCK_${idx}\u0000`;
   });
 
-  // Inline code
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+  const inlineCodes: string[] = [];
+  html = html.replace(/`([^`\n]+)`/g, (_: string, code: string) => {
+    const idx = inlineCodes.length;
+    inlineCodes.push(`<code>${code}</code>`);
+    return `\u0000INLINECODE_${idx}\u0000`;
+  });
 
-  // Bold
-  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  // 2. Render Markdown tables before paragraph/line splitting
+  html = html.replace(
+    /^(\|.+\|)\n(\|[ \t:|-]+\|)\n((?:\|.+\|\n?)+)/gm,
+    (_: string, headerLine: string, _sepLine: string, bodyBlock: string) => {
+      const splitRow = (row: string) =>
+        row
+          .trim()
+          .replace(/^\|/, '')
+          .replace(/\|$/, '')
+          .split('|')
+          .map((c) => c.trim());
 
-  // Italic
-  html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+      const headers = splitRow(headerLine)
+        .map((h) => `<th>${h}</th>`)
+        .join('');
+      const rows = bodyBlock
+        .trim()
+        .split('\n')
+        .filter((r) => r.trim().startsWith('|'))
+        .map((r) => `<tr>${splitRow(r).map((c) => `<td>${c}</td>`).join('')}</tr>`)
+        .join('');
+      return `\n<div class="md-table-wrap"><table class="md-table"><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table></div>\n`;
+    }
+  );
 
-  // Headers
-  html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>');
-  html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>');
-  html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>');
+  // 3. Horizontal rules
+  html = html.replace(/^[ \t]*(?:-{3,}|\*{3,}|_{3,})[ \t]*$/gm, '<hr class="md-hr">');
 
-  // Bullet points
-  html = html.replace(/^\s*-\s+(.*$)/gim, '<li>$1</li>');
-  html = html.replace(/(<li>.*<\/li>)/gim, '<ul>$1</ul>');
-  html = html.replace(/<\/ul>\s*<ul>/g, '');
+  // 4. Headings (h6 -> h1)
+  html = html.replace(/^######[ \t]+(.+)$/gm, '<h6>$1</h6>');
+  html = html.replace(/^#####[ \t]+(.+)$/gm, '<h5>$1</h5>');
+  html = html.replace(/^####[ \t]+(.+)$/gm, '<h4>$1</h4>');
+  html = html.replace(/^###[ \t]+(.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^##[ \t]+(.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^#[ \t]+(.+)$/gm, '<h1>$1</h1>');
 
-  // Paragraphs
+  // 5. Blockquotes
+  html = html.replace(/(?:^&gt;[ \t]?(.*)$\n?)+/gm, (block: string) => {
+    const inner = block
+      .trim()
+      .split('\n')
+      .map((l) => l.replace(/^&gt;[ \t]?/, ''))
+      .join('<br>');
+    return `<blockquote>${inner}</blockquote>\n`;
+  });
+
+  // 6. Unordered (- / * / +) and Ordered (1.) lists
+  html = html.replace(/(?:^[ \t]*[-*+][ \t]+.+$\n?)+/gm, (block: string) => {
+    const items = block
+      .trim()
+      .split('\n')
+      .map((l) => `<li>${l.replace(/^[ \t]*[-*+][ \t]+/, '')}</li>`)
+      .join('');
+    return `<ul>${items}</ul>\n`;
+  });
+
+  html = html.replace(/(?:^[ \t]*\d+\.[ \t]+.+$\n?)+/gm, (block: string) => {
+    const items = block
+      .trim()
+      .split('\n')
+      .map((l) => `<li>${l.replace(/^[ \t]*\d+\.[ \t]+/, '')}</li>`)
+      .join('');
+    return `<ol>${items}</ol>\n`;
+  });
+
+  // 7. Links (safe http/https only), Bold, Italic
+  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  html = html.replace(/\*\*([\s\S]+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/__([\s\S]+?)__/g, '<strong>$1</strong>');
+  html = html.replace(/(^|[^*\w])\*([^*\n][\s\S]*?[^*\n]?)\*(?!\*)/g, '$1<em>$2</em>');
+
+  // 8. Paragraphs
   html = html
-    .split('\n\n')
+    .split(/\n{2,}/)
     .map((p: string) => {
       p = p.trim();
-      if (p.startsWith('<pre>') || p.startsWith('<ul>') || p.startsWith('<h')) return p;
+      if (!p) return '';
+      if (/^<(?:pre|ul|ol|h[1-6]|hr|blockquote|div\b|table\b|\u0000CODEBLOCK_)/i.test(p)) {
+        return p;
+      }
       return `<p>${p.replace(/\n/g, '<br>')}</p>`;
     })
+    .filter(Boolean)
     .join('');
+
+  // 9. Restore inline code & fenced code blocks
+  html = html.replace(/\u0000INLINECODE_(\d+)\u0000/g, (_: string, i: string) => inlineCodes[Number(i)] ?? '');
+  html = html.replace(/\u0000CODEBLOCK_(\d+)\u0000/g, (_: string, i: string) => codeBlocks[Number(i)] ?? '');
 
   return html;
 }

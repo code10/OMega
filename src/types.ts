@@ -159,7 +159,9 @@ export interface OMConfig {
     openBrowser: boolean;
     authToken?: string;
     corsOrigins?: string[];
+    allowedOrigins?: string[];
     allowSkillCreation?: boolean;
+    auth?: Record<string, any>;
   };
 }
 

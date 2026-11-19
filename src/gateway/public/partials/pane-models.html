@@ -1,0 +1,32 @@
+        <section class="tab-pane" id="paneModels">
+          <div class="pane-content-padded">
+            <div class="models-hub-header">
+              <div>
+                <h3>Models</h3>
+                <p>Switch between Local and Cloud models.</p>
+              </div>
+              <div class="models-search-filter">
+                <input type="text" id="modelsFilterInput" placeholder="Filter models..." />
+              </div>
+            </div>
+
+            <div class="provider-filter-pills">
+              <button class="filter-pill active" data-provider="all">All</button>
+              <button class="filter-pill" data-provider="gemini">Gemini</button>
+              <button class="filter-pill" data-provider="openai">GPT</button>
+              <button class="filter-pill" data-provider="anthropic">Claude</button>
+              <button class="filter-pill" data-provider="deepseek">DeepSeek</button>
+              <button class="filter-pill" data-provider="kimi">Kimi</button>
+              <button class="filter-pill" data-provider="qwen">Qwen</button>
+              <button class="filter-pill" data-provider="glm">GLM</button>
+              <button class="filter-pill" data-provider="vllm">Local</button>
+              <button class="filter-pill" data-provider="om">OMega</button>
+            </div>
+
+            <div class="models-grid" id="fullModelsGrid">
+              <!-- Dynamically populated from /api/models -->
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 3: SKILLS CATALOG VIEW -->

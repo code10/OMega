@@ -1,0 +1,47 @@
+        <section class="tab-pane" id="paneDevice">
+          <div class="pane-content-padded">
+            <div class="telemetry-grid">
+              <div class="stat-card">
+                <span class="stat-label">CPU</span>
+                <span class="stat-val" id="devCpuVal">Detecting...</span>
+                <span class="stat-sub" id="devCpuSub">—</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-label">GPU &amp; VRAM</span>
+                <span class="stat-val" id="devGpuVal">Detecting...</span>
+                <span class="stat-sub" id="devGpuSub">—</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-label">NPU</span>
+                <span class="stat-val" id="devNpuVal">Detecting...</span>
+                <span class="stat-sub" id="devNpuSub">—</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-label">System RAM</span>
+                <span class="stat-val" id="devRamVal">Detecting...</span>
+                <span class="stat-sub" id="devRamSub">—</span>
+              </div>
+            </div>
+
+            <div class="specs-card" style="margin-top: 1.5rem;">
+              <div class="specs-card-header">
+                <h4>Core Engine</h4>
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                  <span class="status-chip-online" id="devLayaBadge">● Checking...</span>
+                  <button type="button" class="btn-xs ghost-xs" id="refreshDeviceSpecsBtn">Refresh</button>
+                </div>
+              </div>
+              <div class="config-table" id="devCoreEngineTable">
+                <!-- Dynamically populated via /api/device-specs -->
+              </div>
+            </div>
+
+            <div class="specs-card" style="margin-top: 1.5rem;">
+              <h4>Hardware</h4>
+              <div class="config-table" id="devHardwareTable">
+                <!-- Dynamically populated via /api/device-specs -->
+              </div>
+            </div>
+          </div>
+        </section>
+

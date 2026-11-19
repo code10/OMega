@@ -1,5 +1,6 @@
 import { createProvider } from './index.js';
 import { estimateMessagesTokens, getModelContextLimit } from '../tokenizer.js';
+import { collectDeviceSpecs, type DeviceSpecsSnapshot } from '../deviceSpecs.js';
 
 /**
  * Multi-Model Router & Automatic Failover Engine for OMega.
@@ -18,6 +19,8 @@ export class ModelRouter {
   onEvent: (event: string, payload: any) => void;
   providerFactory: (cfg: Record<string, any>) => any;
   systemOne: any;
+  hardwareSampler: (() => Promise<DeviceSpecsSnapshot>) | null;
+  _cachedHardware: { at: number; specs: DeviceSpecsSnapshot } | null;
   cooldowns: Map<string, number>;
   stats: Record<string, any>;
 
@@ -42,6 +45,8 @@ export class ModelRouter {
     this.onEvent = options.onEvent || (() => {});
     this.providerFactory = options.providerFactory || createProvider;
     this.systemOne = options.systemOne || null;
+    this.hardwareSampler = typeof options.hardwareSampler === 'function' ? options.hardwareSampler : null;
+    this._cachedHardware = null;
     this.cooldowns = new Map();
     this.stats = {
       totalCalls: 0,
@@ -50,10 +55,36 @@ export class ModelRouter {
       contextHandoffs: 0,
       rateLimitFallbacks: 0,
       complexityRoutes: 0,
+      hardwareRoutes: 0,
       totalTokens: 0,
       estimatedCostUsd: 0,
       history: []
     };
+  }
+
+  async _getHardwareSnapshot(options: Record<string, any> = {}, ttlMs = 5000): Promise<DeviceSpecsSnapshot> {
+    if (options.hardwareSpecs) return options.hardwareSpecs;
+    const now = Date.now();
+    if (this._cachedHardware && now - this._cachedHardware.at < ttlMs) {
+      return this._cachedHardware.specs;
+    }
+    const specs = this.hardwareSampler ? await this.hardwareSampler() : await collectDeviceSpecs();
+    this._cachedHardware = { at: now, specs };
+    return specs;
+  }
+
+  _findUsableCloudFallback(): Record<string, any> | null {
+    const chain = this.routingConfig.fallbackChain || [];
+    for (const item of chain) {
+      const cand = typeof item === 'string' ? { provider: item } : { ...item };
+      const pName = (cand.provider || '').toLowerCase();
+      if (ModelRouter.isLocalProvider(pName)) continue;
+      const model = cand.model || this.getDefaultModelForProvider(pName);
+      if (!this.isInCooldown(pName, model) && this.canUseCandidate({ ...cand, provider: pName, model })) {
+        return { provider: pName, model, providerInstance: cand.providerInstance || null };
+      }
+    }
+    return null;
   }
 
   static estimateCost(providerName: string, modelName: string, usage: Record<string, any> = {}) {
@@ -360,6 +391,76 @@ export class ModelRouter {
         this.stats.totalTokens += tok;
         this.stats.estimatedCostUsd += ModelRouter.estimateCost(target.provider, target.model, res.usage);
         return { ...res, routedProvider: target.provider, routedModel: target.model, fallbackUsed: false, complexityRouted: true };
+      }
+    }
+
+    // 0c. Hardware-aware VRAM / RAM / Thermal routing for local inference
+    const hwCfg = options.hardwareRouting || this.routingConfig.hardwareRouting;
+    if (hwCfg?.enabled && isLocal) {
+      const ttlMs = Number(hwCfg.cacheTtlMs ?? 5000);
+      const specs = await this._getHardwareSnapshot(options, ttlMs);
+      const gpus = Array.isArray(specs?.gpus) ? specs.gpus : [];
+      const freeVramList = gpus
+        .map((g) => (typeof g.vramFreeMb === 'number' ? g.vramFreeMb : g.vramTotalMb > 0 && typeof g.vramUsedMb === 'number' ? Math.max(0, g.vramTotalMb - g.vramUsedMb) : null))
+        .filter((v): v is number => typeof v === 'number');
+      const freeVramMb = freeVramList.length > 0 ? Math.max(...freeVramList) : null;
+      const freeRamMb = Math.round(Number(specs?.ram?.freeGb ?? 0) * 1024);
+      const maxTempC = gpus.length > 0 ? Math.max(...gpus.map((g) => Number(g.temperatureC ?? 0))) : 0;
+
+      const minFreeVramMb = Number(hwCfg.minFreeVramMb ?? 1536);
+      const minFreeRamMb = Number(hwCfg.minFreeRamMb ?? 1024);
+      const maxTempLimit = Number(hwCfg.maxTempC ?? 88);
+
+      let hardwareReason: string | null = null;
+      if (minFreeVramMb > 0 && freeVramMb !== null && freeVramMb < minFreeVramMb) {
+        hardwareReason = `hardware_vram_pressure (${freeVramMb}MB < ${minFreeVramMb}MB)`;
+      } else if (minFreeRamMb > 0 && freeRamMb > 0 && freeRamMb < minFreeRamMb) {
+        hardwareReason = `hardware_ram_pressure (${freeRamMb}MB < ${minFreeRamMb}MB)`;
+      } else if (maxTempLimit > 0 && maxTempC >= maxTempLimit) {
+        hardwareReason = `hardware_thermal_pressure (${maxTempC}C >= ${maxTempLimit}C)`;
+      }
+
+      if (hardwareReason) {
+        const cloudTarget =
+          hwCfg.cloudTarget && this.canUseCandidate(hwCfg.cloudTarget)
+            ? hwCfg.cloudTarget
+            : hwCfg.autoCloudFallback !== false
+              ? this._findUsableCloudFallback()
+              : null;
+        const target = cloudTarget || hwCfg.localFallbackTarget || null;
+
+        if (target) {
+          const targetProv = target.providerInstance || this.providerFactory({ ...this.config, ...target });
+          let adaptedTools = chatParams.tools;
+          if (options.getToolsForProvider && target.provider) {
+            adaptedTools = options.getToolsForProvider(target.provider);
+          }
+          this.stats.hardwareRoutes++;
+          this.onEvent('route_decision', {
+            reason: hardwareReason,
+            fromProvider: primaryName,
+            fromModel: primaryModel,
+            toProvider: target.provider,
+            toModel: target.model,
+            freeVramMb,
+            freeRamMb,
+            maxTempC
+          });
+          const res = await targetProv.chat({ ...chatParams, tools: adaptedTools });
+          const tok = Number(res.usage?.total_tokens ?? res.usage?.totalTokenCount ?? 0) || 0;
+          this.stats.totalTokens += tok;
+          if (!ModelRouter.isLocalProvider(target.provider)) {
+            this.stats.estimatedCostUsd += ModelRouter.estimateCost(target.provider, target.model, res.usage);
+          }
+          return {
+            ...res,
+            routedProvider: target.provider,
+            routedModel: target.model,
+            fallbackUsed: true,
+            hardwareRouted: true,
+            hardwareReason
+          };
+        }
       }
     }
 

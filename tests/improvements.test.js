@@ -7,6 +7,8 @@ import { SkillRegistry } from '../dist/skills/index.js';
 import { VectorStore } from '../dist/vectorStore.js';
 import { startGateway } from '../dist/gateway/server.js';
 import { MCPClient } from '../dist/mcp/client.js';
+import { ModelRouter } from '../dist/providers/router.js';
+import { buildSandboxedCommand } from '../dist/skills/sandbox.js';
 
 const TMP_DIR = path.resolve('./tests/tmp_improvements_test');
 
@@ -82,18 +84,31 @@ test('OMega Architectural & Security Improvements', async (t) => {
     assert.equal(unconfirmed.confirmationRequired, true);
 
     const prevKey = process.env.OPENAI_API_KEY;
+    const prevAws = process.env.AWS_SECRET_ACCESS_KEY;
     process.env.OPENAI_API_KEY = 'sk-secret-test-key';
+    process.env.AWS_SECRET_ACCESS_KEY = 'aws-secret-test-key';
     try {
       const envCheck = await registry.execute('exec_command', {
         command: 'node',
         executable: 'node',
-        args: ['-e', "console.log(process.env.OPENAI_API_KEY || 'SCRUBBED')"]
+        args: ['-e', "console.log((process.env.OPENAI_API_KEY || 'SCRUBBED') + ':' + (process.env.AWS_SECRET_ACCESS_KEY || 'SCRUBBED_AWS'))"]
       }, { config: { workspaceDir: TMP_DIR, security: { allowedCommands: ['node'] } } });
       assert.equal(envCheck.success, true);
-      assert.ok(envCheck.stdout.includes('SCRUBBED'));
+      assert.ok(envCheck.stdout.includes('SCRUBBED:SCRUBBED_AWS'));
     } finally {
       if (prevKey === undefined) delete process.env.OPENAI_API_KEY;
       else process.env.OPENAI_API_KEY = prevKey;
+      if (prevAws === undefined) delete process.env.AWS_SECRET_ACCESS_KEY;
+      else process.env.AWS_SECRET_ACCESS_KEY = prevAws;
+    }
+
+    // Block dangerous git flags even when git is in allowedCommands
+    for (const badGit of ['git -c core.fsmonitor=evil status', 'git clone --upload-pack=evil https://example.com/r.git']) {
+      const gitDenied = await registry.execute('exec_command', { command: badGit }, {
+        config: { workspaceDir: TMP_DIR, security: { allowedCommands: ['git'] } }
+      });
+      assert.equal(gitDenied.success, false);
+      assert.ok(gitDenied.error.includes('Dangerous git flag'));
     }
 
     // Reject shell control operators when allowedCommands is active
@@ -487,6 +502,143 @@ test('OMega Architectural & Security Improvements', async (t) => {
       else process.env.OPENAI_API_KEY = prevOpenAI;
       if (prevGateway === undefined) delete process.env.OM_GATEWAY_TOKEN;
       else process.env.OM_GATEWAY_TOKEN = prevGateway;
+    }
+  });
+
+  await t.test('ModelRouter hardware-aware routing shifts local calls to cloud on VRAM pressure', async () => {
+    const events = [];
+    let cloudCalls = 0;
+    let localCalls = 0;
+    const router = new ModelRouter({
+      config: { provider: 'lmstudio', model: 'local-32b' },
+      onEvent: (evt, payload) => events.push({ evt, payload }),
+      hardwareSampler: async () => ({
+        gpus: [{ name: 'Mock GPU', vramTotalMb: 8192, vramUsedMb: 7500, vramFreeMb: 692, utilizationPct: 95, temperatureC: 72 }],
+        ram: { totalGb: 16, usedGb: 12, freeGb: 4, usedPct: 75 }
+      }),
+      providerFactory: () => ({
+        name: 'openai',
+        model: 'gpt-4o',
+        async chat() {
+          cloudCalls++;
+          return { content: 'routed-cloud', usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } };
+        }
+      })
+    });
+
+    const localProv = {
+      name: 'lmstudio',
+      model: 'local-32b',
+      async chat() {
+        localCalls++;
+        return { content: 'local-ok', usage: {} };
+      }
+    };
+
+    const res = await router.chat(
+      localProv,
+      { messages: [{ role: 'user', content: 'hi' }] },
+      {
+        hardwareRouting: {
+          enabled: true,
+          minFreeVramMb: 1536,
+          cloudTarget: { provider: 'openai', model: 'gpt-4o', apiKey: 'sk-test-hw-route' }
+        }
+      }
+    );
+
+    assert.equal(res.hardwareRouted, true);
+    assert.equal(res.routedProvider, 'openai');
+    assert.equal(cloudCalls, 1);
+    assert.equal(localCalls, 0);
+    assert.equal(router.stats.hardwareRoutes, 1);
+    assert.ok(events.some((e) => e.evt === 'route_decision' && String(e.payload.reason).includes('hardware_vram_pressure')));
+  });
+
+  await t.test('OS/container sandbox wrapper builds isolated commands and fails closed when strict', async () => {
+    const linuxBwrap = buildSandboxedCommand(
+      'node',
+      ['-v'],
+      TMP_DIR,
+      { mode: 'os', allowNetwork: false },
+      { platform: 'linux', probe: (bin) => bin === 'bwrap' }
+    );
+    assert.equal(linuxBwrap.backend, 'bwrap');
+    assert.equal(linuxBwrap.executable, 'bwrap');
+    assert.ok(linuxBwrap.args.includes('--unshare-net'));
+    assert.ok(linuxBwrap.args.includes('--bind'));
+
+    const macSandbox = buildSandboxedCommand(
+      'node',
+      ['-v'],
+      TMP_DIR,
+      { mode: 'os', allowNetwork: false },
+      { platform: 'darwin', probe: (bin) => bin.includes('sandbox-exec') }
+    );
+    assert.equal(macSandbox.backend, 'sandbox-exec');
+    assert.equal(macSandbox.args[0], '-f');
+    assert.ok(fs.existsSync(macSandbox.args[1]));
+    macSandbox.cleanup();
+    assert.ok(!fs.existsSync(macSandbox.args[1]));
+
+    const wslBwrap = buildSandboxedCommand(
+      'node',
+      ['-v'],
+      'C:\\Users\\demo\\proj',
+      { mode: 'os', allowNetwork: false },
+      { platform: 'win32', probe: (bin) => bin === 'wsl-bwrap' }
+    );
+    assert.equal(wslBwrap.backend, 'wsl-bwrap');
+    assert.equal(wslBwrap.executable, 'wsl.exe');
+    assert.ok(wslBwrap.args.includes('/mnt/c/Users/demo/proj'));
+    assert.ok(wslBwrap.args.includes('--unshare-net'));
+
+    const winJob = buildSandboxedCommand(
+      'node',
+      ['-v'],
+      TMP_DIR,
+      { mode: 'os', memoryMb: 256, maxProcesses: 8 },
+      { platform: 'win32', probe: (bin) => bin === 'powershell.exe' }
+    );
+    assert.equal(winJob.backend, 'win-job');
+    assert.equal(winJob.executable, 'powershell.exe');
+    const psArgIdx = winJob.args.indexOf('-File');
+    assert.ok(psArgIdx !== -1 && fs.existsSync(winJob.args[psArgIdx + 1]));
+    winJob.cleanup();
+    assert.ok(!fs.existsSync(winJob.args[psArgIdx + 1]));
+
+    const dockerSandbox = buildSandboxedCommand(
+      'node',
+      ['-v'],
+      TMP_DIR,
+      { mode: 'container', allowNetwork: false, containerImage: 'node:22-alpine' },
+      { platform: 'win32', probe: (bin) => bin === 'docker' }
+    );
+    assert.equal(dockerSandbox.backend, 'docker');
+    assert.ok(dockerSandbox.args.includes('--network=none'));
+    assert.ok(dockerSandbox.args.includes('--read-only'));
+
+    assert.throws(
+      () =>
+        buildSandboxedCommand(
+          'node',
+          ['-v'],
+          TMP_DIR,
+          { mode: 'os', strict: true },
+          { platform: 'win32', probe: () => false }
+        ),
+      /strict mode/i
+    );
+
+    const registry = new SkillRegistry();
+    const strictRun = await registry.execute(
+      'exec_command',
+      { command: 'node -v' },
+      { config: { workspaceDir: TMP_DIR, security: { allowedCommands: ['node'], sandbox: { mode: 'os', strict: true } } } }
+    );
+    if (process.platform === 'win32') {
+      assert.equal(strictRun.success, true);
+      assert.ok(['wsl-bwrap', 'win-job'].includes(strictRun.sandboxBackend));
     }
   });
 });

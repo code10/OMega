@@ -1,0 +1,61 @@
+        <section class="tab-pane" id="paneMemory">
+          <div class="pane-content-padded">
+            <!-- Semantic Vector Search Bar -->
+            <div class="vector-search-card">
+              <div class="vector-search-header">
+                <div>
+                  <h4>Semantic Vector Memory Search</h4>
+                  <span class="mem-sub">Query 256-dim local vector embeddings across MEMORY.md, daily journals, and past
+                    sessions</span>
+                </div>
+                <div class="vector-stats-badges">
+                  <span class="vector-stat-pill" id="vectorCountBadge">0 vectors indexed</span>
+                  <button class="btn-xs ghost-xs" id="reindexVectorsBtn" type="button"
+                    title="Rebuild vector embeddings index">Re-index</button>
+                </div>
+              </div>
+              <div class="vector-search-bar-row">
+                <input type="text" id="vectorSearchInput" class="param-input vector-search-input"
+                  placeholder="Search concepts semantically (e.g. 'preferred coding language', 'API architecture')..." />
+                <select id="vectorSearchMode" class="param-select" style="width: 140px;">
+                  <option value="hybrid">Hybrid (Vector + Keyword)</option>
+                  <option value="semantic">Pure Semantic Vector</option>
+                  <option value="exact">Exact Substring</option>
+                </select>
+                <button class="btn-sm primary-sm" id="vectorSearchBtn" type="button">Search Memory</button>
+              </div>
+              <div id="vectorSearchResults" class="vector-search-results" style="display: none;"></div>
+            </div>
+
+            <div class="memory-layout" style="margin-top: 18px;">
+              <div class="memory-card">
+                <div class="memory-header">
+                  <div class="mem-title-grp">
+                    <div>
+                      <h4>Long-Term Memory (MEMORY.md)</h4>
+                      <span class="mem-sub">Persistent knowledge retained across all future sessions</span>
+                    </div>
+                  </div>
+                  <button class="btn-sm primary-sm" id="saveMemoryBtn">Save Changes</button>
+                </div>
+                <textarea id="longTermMemoryEditor" class="memory-editor" spellcheck="false"></textarea>
+              </div>
+
+              <div class="memory-card">
+                <div class="memory-header">
+                  <div class="mem-title-grp">
+                    <div>
+                      <h4>Today's Activity Journal</h4>
+                      <span class="mem-sub">Chronological ledger of user instructions and actions today</span>
+                    </div>
+                  </div>
+                </div>
+                <div id="dailyJournalViewer" class="journal-viewer">
+                  <em>No activity logged yet today.</em>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 5: DEVELOPER & SERVER VIEW (LM Studio Local Server) -->

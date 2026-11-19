@@ -1,0 +1,83 @@
+        <section class="tab-pane" id="paneSystem">
+          <div class="pane-content-padded">
+            <div class="telemetry-grid">
+              <div class="stat-card">
+                <span class="stat-label">Agent State</span>
+                <span class="stat-val status-green" id="sysAgentState">Ready</span>
+                <span class="stat-sub">Loop idle & listening</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-label">Active Provider</span>
+                <span class="stat-val" id="sysProvider">Gemini</span>
+                <span class="stat-sub">Configurable via UI or .env</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-label">Active Model</span>
+                <span class="stat-val" id="sysModel">gemini-3.5-flash</span>
+                <span class="stat-sub">High quota default model</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-label">Installed Skills</span>
+                <span class="stat-val" id="sysSkillsCount">17</span>
+                <span class="stat-sub">Core + dynamic skills</span>
+              </div>
+            </div>
+
+            <!-- LM Studio Local Server Card -->
+            <div class="specs-card" style="margin-top: 1.5rem;">
+              <div class="specs-card-header">
+                <h4>Local Server Endpoints</h4>
+                <span class="status-chip-online" id="statusChipLive">● Live on http://127.0.0.1:3000</span>
+              </div>
+              <div class="endpoint-cards-list">
+                <div class="endpoint-item">
+                  <div class="endpoint-method post">POST</div>
+                  <div class="endpoint-path">/api/chat/stream</div>
+                  <div class="endpoint-desc">Server-Sent Events streaming chat endpoint with real-time reasoning & tool
+                    calls</div>
+                </div>
+                <div class="endpoint-item">
+                  <div class="endpoint-method post">POST</div>
+                  <div class="endpoint-path">/api/chat</div>
+                  <div class="endpoint-desc">Standard JSON agent execution endpoint</div>
+                </div>
+                <div class="endpoint-item">
+                  <div class="endpoint-method get">GET</div>
+                  <div class="endpoint-path">/api/models</div>
+                  <div class="endpoint-desc">List available models from active or specified provider</div>
+                </div>
+                <div class="endpoint-item">
+                  <div class="endpoint-method get">GET</div>
+                  <div class="endpoint-path">/api/status</div>
+                  <div class="endpoint-desc">Query agent status, version, and loaded capabilities</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="specs-card" style="margin-top: 1.5rem;">
+              <div class="specs-card-header">
+                <h4>Visual Activity & Routing Telemetry</h4>
+                <span class="status-chip-online" id="routingStatusBadge">● Multi-Model Failover Active</span>
+              </div>
+              <div id="sysActivityTimeline" class="sys-activity-timeline">
+                <div class="activity-empty">No recent execution events logged yet.</div>
+              </div>
+            </div>
+
+            <div class="specs-card" style="margin-top: 1.5rem;">
+              <h4>Environment & Configuration</h4>
+              <div class="config-table" id="configTable">
+                <!-- Dynamically populated -->
+              </div>
+            </div>
+
+            <div class="specs-card" style="margin-top: 1.5rem;">
+              <h4>Available Models</h4>
+              <div class="config-table" id="modelsTable">
+                <!-- Dynamically populated via /api/models -->
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 7: DEVICE SPECS & CORE ENGINE -->

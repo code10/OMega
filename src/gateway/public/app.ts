@@ -33,21 +33,34 @@ function resolveGatewayToken(): string {
   return sessionStorage.getItem('om_gateway_token') || '';
 }
 
-const gatewayToken = resolveGatewayToken();
-if (gatewayToken) {
-  const originalFetch = window.fetch.bind(window);
-  window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
-    const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-    if (urlStr.startsWith('/api/') || urlStr.startsWith(`${window.location.origin}/api/`)) {
-      const headers = new Headers(init?.headers || (input instanceof Request ? input.headers : undefined));
-      if (!headers.has('Authorization')) {
-        headers.set('Authorization', `Bearer ${gatewayToken}`);
-      }
-      return originalFetch(input, { ...init, headers });
+let gatewayToken = resolveGatewayToken();
+let authPrompted = false;
+const originalFetch = window.fetch.bind(window);
+window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+  const isApi = urlStr.startsWith('/api/') || urlStr.startsWith(`${window.location.origin}/api/`);
+  if (!isApi) return originalFetch(input, init);
+
+  const buildHeaders = (tok: string) => {
+    const headers = new Headers(init?.headers || (input instanceof Request ? input.headers : undefined));
+    if (tok && !headers.has('Authorization')) {
+      headers.set('Authorization', `Bearer ${tok}`);
     }
-    return originalFetch(input, init);
+    return headers;
   };
-}
+
+  let res = await originalFetch(input, { ...init, headers: buildHeaders(gatewayToken) });
+  if (res.status === 401 && !authPrompted) {
+    authPrompted = true;
+    const entered = window.prompt('Enter OMega Bearer token / API key:');
+    if (entered && entered.trim()) {
+      gatewayToken = entered.trim();
+      sessionStorage.setItem('om_gateway_token', gatewayToken);
+      res = await originalFetch(input, { ...init, headers: buildHeaders(gatewayToken) });
+    }
+  }
+  return res;
+};
 
 document.addEventListener('DOMContentLoaded', () => {
   const { appendActivityLogEntry, loadActivityHistory, loadMemory } = initTelemetry();
@@ -156,13 +169,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const sysSkillsCount = byId('sysSkillsCount');
   const configTable = byId('configTable');
   const modelsTable = byId('modelsTable');
-
-  // Export Session Elements
-  const exportDropdownWrap = byId('exportDropdownWrap');
-  const exportChatBtn = byId<HTMLButtonElement>('exportChatBtn');
-  const exportChatMenu = byId('exportChatMenu');
-  const exportMarkdownBtn = byId<HTMLButtonElement>('exportMarkdownBtn');
-  const exportJsonBtn = byId<HTMLButtonElement>('exportJsonBtn');
 
   let isStreaming = false;
   let activeTab = 'chat';
@@ -1274,55 +1280,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Export Chat Session Logic
-  if (exportChatBtn && exportChatMenu) {
-    exportChatBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const isShowing = exportChatMenu.classList.contains('show');
-      if (isShowing) {
-        exportChatMenu.classList.remove('show');
-        exportChatBtn.classList.remove('active');
-      } else {
-        exportChatMenu.classList.add('show');
-        exportChatBtn.classList.add('active');
-      }
-    });
-
-    document.addEventListener('click', (e) => {
-      if (exportDropdownWrap && !exportDropdownWrap.contains(e.target as Node)) {
-        exportChatMenu.classList.remove('show');
-        exportChatBtn.classList.remove('active');
-      }
-    });
-
-    if (exportMarkdownBtn) {
-      exportMarkdownBtn.addEventListener('click', () => {
-        const sessionId = (topbarSessionTag?.textContent || 'session_1').trim();
-        exportChatMenu.classList.remove('show');
-        exportChatBtn.classList.remove('active');
-        window.location.href = `/api/sessions/${encodeURIComponent(sessionId)}/export?format=markdown`;
-      });
-    }
-
-    if (exportJsonBtn) {
-      exportJsonBtn.addEventListener('click', () => {
-        const sessionId = (topbarSessionTag?.textContent || 'session_1').trim();
-        exportChatMenu.classList.remove('show');
-        exportChatBtn.classList.remove('active');
-        window.location.href = `/api/sessions/${encodeURIComponent(sessionId)}/export?format=json`;
-      });
-    }
-  }
-
   // Global keybindings (Escape closes open modals)
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       closeRefViewer();
       closeSkillCreator();
-      if (exportChatMenu) {
-        exportChatMenu.classList.remove('show');
-        exportChatBtn?.classList.remove('active');
-      }
     }
   });
 

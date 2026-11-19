@@ -1,0 +1,357 @@
+/* ========================================================
+   MINIMALIST REFINEMENT LAYER
+   ======================================================== */
+.app-layout {
+  background: var(--bg-base);
+}
+
+.activity-bar {
+  background: var(--bg-activity);
+  border-right: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.rail-item {
+  border-radius: 8px;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.rail-item.active {
+  background: rgba(255, 255, 255, 0.065);
+  box-shadow: none;
+}
+
+.topbar,
+.top-bar {
+  background: rgba(15, 16, 19, 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.topbar-icon-btn,
+.topbar-btn {
+  border-radius: 7px;
+  box-shadow: none;
+  transition: background-color 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.sessions-sidebar,
+.params-sidebar {
+  background: var(--bg-activity);
+  border-color: rgba(255, 255, 255, 0.055);
+}
+
+.session-item {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.session-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.session-item.active {
+  background: rgba(255, 255, 255, 0.055);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: none;
+}
+
+.input-container,
+.chat-input-box,
+.composer-box {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--bg-surface);
+  box-shadow: none;
+  transition: border-color 0.16s ease, background-color 0.16s ease;
+}
+
+.input-container:focus-within,
+.chat-input-box:focus-within,
+.composer-box:focus-within {
+  border-color: rgba(255, 255, 255, 0.22);
+  box-shadow: none;
+}
+
+.user-msg .msg-bubble {
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: none;
+}
+
+.thought-box,
+.tool-trace-card {
+  border-radius: 10px;
+  border-color: rgba(255, 255, 255, 0.06);
+  box-shadow: none;
+}
+
+.model-card-lm,
+.skill-card {
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--bg-surface);
+  box-shadow: none;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.model-card-lm:hover,
+.skill-card:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: var(--bg-surface-elevated);
+}
+
+.send-btn:not(:disabled) {
+  box-shadow: none;
+  transition: opacity 0.14s ease, background-color 0.14s ease;
+}
+
+.send-btn:not(:disabled):hover {
+  opacity: 0.9;
+}
+
+/* ==========================================================================
+   ROUTING STATUS PILL & PROVIDER CONFIG MODAL
+   ========================================================================== */
+.routing-status-pill {
+  justify-content: flex-start;
+  padding: 7px 10px;
+}
+
+.routing-pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--accent-emerald, #22c55e);
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.5);
+}
+
+.routing-pill-dot.warn {
+  background: var(--accent-primary, #f59e0b);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.5);
+}
+
+.routing-pill-dot.off {
+  background: var(--text-muted, #6b7280);
+  box-shadow: none;
+}
+
+.routing-pill-label {
+  color: var(--text-primary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.routing-pill-meta {
+  margin-left: auto;
+  font-size: 0.66rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.routing-config-dialog {
+  width: 620px;
+  max-width: 95vw;
+}
+
+.routing-modal-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.routing-controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 12px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.routing-toggle-label,
+.routing-retries-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.78rem;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.routing-retries-label {
+  margin-left: auto;
+  cursor: default;
+}
+
+.routing-select {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  font-size: 0.76rem;
+}
+
+.routing-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.routing-stat-box {
+  padding: 8px 10px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.routing-stat-label {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.routing-stat-val {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: var(--font-mono, monospace);
+}
+
+.routing-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.routing-section-title {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.routing-chain-list,
+.routing-providers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.routing-chain-item,
+.routing-provider-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 0.76rem;
+}
+
+.routing-chain-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.routing-chain-idx {
+  color: var(--text-muted);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.7rem;
+}
+
+.routing-chain-provider {
+  font-weight: 600;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  font-size: 0.7rem;
+}
+
+.routing-chain-model {
+  color: var(--text-secondary);
+  font-family: var(--font-mono, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routing-badge {
+  font-size: 0.68rem;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.routing-badge.ready {
+  background: rgba(34, 197, 94, 0.14);
+  color: #4ade80;
+}
+
+.routing-badge.missing {
+  background: rgba(245, 158, 11, 0.14);
+  color: #fbbf24;
+}
+
+.routing-badge.local {
+  background: rgba(59, 130, 246, 0.14);
+  color: #60a5fa;
+}
+
+.routing-provider-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.routing-provider-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  font-size: 0.72rem;
+}
+
+.routing-provider-sub {
+  font-size: 0.69rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.routing-provider-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.routing-key-input {
+  width: 170px;
+  padding: 4px 8px;
+  font-size: 0.74rem;
+  font-family: var(--font-mono, monospace);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+}
+
+

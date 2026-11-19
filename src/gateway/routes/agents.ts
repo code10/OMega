@@ -238,9 +238,33 @@ export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boole
         provider: data.provider,
         model: data.model,
         systemPrompt: data.systemPrompt,
-        maxSteps: data.maxSteps
+        maxSteps: data.maxSteps,
+        workspaceMode: data.workspaceMode,
+        swarmId: data.swarmId,
+        parentSessionId: data.parentSessionId,
+        budgets: data.budgets
       });
       sendJson(res, 202, { success: true, ...handle });
+    } catch (err: any) {
+      sendJson(res, 400, { success: false, error: err?.message || String(err) });
+    }
+    return true;
+  }
+
+  if (pathname === '/api/agents/detached/swarm' && req.method === 'POST') {
+    const data: Record<string, any> | null = await readJsonBody(req, res);
+    if (!data) return true;
+    try {
+      const result = getDetachedManager().spawnSwarm(data.tasks || [], {
+        provider: data.provider,
+        model: data.model,
+        systemPrompt: data.systemPrompt,
+        maxSteps: data.maxSteps,
+        workspaceMode: data.workspaceMode,
+        swarmId: data.swarmId,
+        budgets: data.budgets
+      });
+      sendJson(res, 202, { success: true, ...result }, true);
     } catch (err: any) {
       sendJson(res, 400, { success: false, error: err?.message || String(err) });
     }
@@ -256,6 +280,13 @@ export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boole
     } catch (err: any) {
       sendJson(res, 404, { success: false, error: err?.message || String(err) });
     }
+    return true;
+  }
+
+  if (dInspectMatch && req.method === 'DELETE') {
+    const sessionId = decodeURIComponent(dInspectMatch[1]);
+    const deleted = getDetachedManager().deleteSession(sessionId);
+    sendJson(res, deleted ? 200 : 404, { success: deleted, sessionId });
     return true;
   }
 

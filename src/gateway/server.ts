@@ -7,7 +7,7 @@ import { OMAgent } from '../agent.js';
 import { loadConfig } from '../config.js';
 import { SessionManager } from './sessionManager.js';
 import { OMDaemon } from '../daemon.js';
-import { readJsonBody, serveStatic } from './httpUtils.js';
+import { readJsonBody, serveStatic, resolveHtmlIncludes } from './httpUtils.js';
 import { ApprovalManager } from './approvals.js';
 import { handleMemoryRoutes } from './routes/memory.js';
 import { handleSessionRoutes } from './routes/sessions.js';
@@ -15,6 +15,14 @@ import { handleGitRoutes } from './routes/git.js';
 import { handleConfigRoutes } from './routes/config.js';
 import { AgentManager } from './agentManager.js';
 import { handleAgentsRoutes } from './routes/agents.js';
+import {
+  authenticateRequest,
+  getRequiredRole,
+  hasRole,
+  type AuthenticatedUser,
+  type GatewayAuthConfig
+} from './auth.js';
+import { TenantManager } from './tenantManager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,8 +52,17 @@ export async function startGateway(options: Record<string, any> = {}) {
   const isEphemeralToken = !explicitToken;
   const authToken = explicitToken || crypto.randomBytes(24).toString('hex');
   const allowSkillCreation = Boolean(options.allowSkillCreation ?? config.gateway?.allowSkillCreation ?? false);
+  const authConfig: GatewayAuthConfig = {
+    mode: 'local',
+    ...(config.gateway?.auth || {}),
+    ...(options.auth || {})
+  };
+  const isMultiUser = authConfig.mode === 'multiuser';
 
   const getAllowedOrigins = (): string[] => {
+    if (Array.isArray(config.gateway?.allowedOrigins)) {
+      return config.gateway.allowedOrigins;
+    }
     if (Array.isArray(config.gateway?.corsOrigins)) {
       return config.gateway.corsOrigins;
     }
@@ -78,6 +95,17 @@ export async function startGateway(options: Record<string, any> = {}) {
   const gatewayConfirmHandler = approvals.createConfirmHandler() as (info: Record<string, any>) => Promise<boolean>;
   agent.confirmCommand = gatewayConfirmHandler;
   agent.options.confirmCommand = gatewayConfirmHandler;
+
+  const tenantManager = isMultiUser
+    ? new TenantManager({
+        baseConfig: config,
+        tenantsRoot: options.tenantsRoot,
+        idleTtlMs: authConfig.tenantIdleTtlMs,
+        confirmCommand: gatewayConfirmHandler,
+        onActivity: (_uid, entry) => broadcastSSE('activity', entry),
+        onAgentUpdate: (_uid, payload) => broadcastSSE('agent_update', payload)
+      })
+    : null;
 
   agent.on('config_updated', (data) => {
     const payloadObj = {
@@ -132,15 +160,36 @@ export async function startGateway(options: Record<string, any> = {}) {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     const pathname = url.pathname;
 
-    // Enforce Bearer token authentication on /api/*
+    // Enforce Bearer token authentication & RBAC on /api/*
+    let authUser: AuthenticatedUser | null = null;
+    let reqAgent = agent;
+    let reqSessionManager = sessionManager;
+    let reqAgentManager = agentManager;
+
     if (pathname.startsWith('/api/')) {
-      const authHeader = req.headers.authorization || '';
-      const tokenQuery = url.searchParams.get('token');
-      const provided = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : tokenQuery;
-      if (provided !== authToken) {
+      authUser = authenticateRequest(req, url, authConfig, authToken);
+      if (!authUser) {
         res.writeHead(401, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Unauthorized: Valid Bearer token required' }));
         return;
+      }
+
+      const requiredRole = getRequiredRole(pathname, req.method || 'GET');
+      if (!hasRole(authUser.role, requiredRole)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            error: `Forbidden: Role '${authUser.role}' lacks '${requiredRole}' permission`
+          })
+        );
+        return;
+      }
+
+      if (tenantManager) {
+        const tenant = await tenantManager.getTenant(authUser.id);
+        reqAgent = tenant.agent;
+        reqSessionManager = tenant.sessionManager;
+        reqAgentManager = tenant.agentManager;
       }
     }
 
@@ -148,21 +197,23 @@ export async function startGateway(options: Record<string, any> = {}) {
 
     // 1. GET /api/status
     if (pathname === '/api/status' && req.method === 'GET') {
-      const skills = agent.skills.list();
+      const skills = reqAgent.skills.list();
       const status = {
         name: 'OMega',
-        version: agent.config.version || '1.0.0',
-        provider: agent.config.provider,
-        model: agent.config.model,
-        target: agent._getTarget(),
+        version: reqAgent.config.version || '1.0.0',
+        provider: reqAgent.config.provider,
+        model: reqAgent.config.model,
+        target: reqAgent._getTarget(),
         skillsCount: skills.length,
-        sessionId: agent.sessionId,
-        activeSessions: sessionManager.sessions.size,
-        memoryDir: agent.config.memoryDir,
-        workspaceDir: agent.config.workspaceDir,
-        vectorStats: agent.memory.getVectorStats(),
-        routingStats: agent.router?.getStats(),
-        usageStats: agent.usageStats,
+        sessionId: reqAgent.sessionId,
+        activeSessions: reqSessionManager.sessions.size,
+        memoryDir: reqAgent.config.memoryDir,
+        workspaceDir: reqAgent.config.workspaceDir,
+        vectorStats: reqAgent.memory.getVectorStats(),
+        routingStats: reqAgent.router?.getStats(),
+        usageStats: reqAgent.usageStats,
+        authMode: authConfig.mode || 'local',
+        user: authUser,
         timestamp: new Date().toISOString()
       };
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -201,21 +252,21 @@ export async function startGateway(options: Record<string, any> = {}) {
     }
 
     // 3. Memory & Training Routes (/api/memory*, /api/training/export)
-    if (await handleMemoryRoutes({ req, res, pathname, url, agent })) return;
+    if (await handleMemoryRoutes({ req, res, pathname, url, agent: reqAgent })) return;
 
     // 3b. Git Routes (/api/git/status, /api/git/diff)
-    if (handleGitRoutes({ req, res, pathname, url, agent })) return;
+    if (handleGitRoutes({ req, res, pathname, url, agent: reqAgent })) return;
 
     // 3c. Agents Routes (/api/agents*)
-    if (await handleAgentsRoutes({ req, res, pathname, agentManager })) return;
+    if (await handleAgentsRoutes({ req, res, pathname, agentManager: reqAgentManager })) return;
 
     // 3d. GET /api/activity (Live activity trace history & router stats)
     if (pathname === '/api/activity' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
         success: true,
-        activities: agent.activityLog || [],
-        routingStats: agent.router?.getStats() || {}
+        activities: reqAgent.activityLog || [],
+        routingStats: reqAgent.router?.getStats() || {}
       }));
       return;
     }
@@ -244,7 +295,7 @@ export async function startGateway(options: Record<string, any> = {}) {
         }
       };
 
-      await sessionManager.runExclusive(targetSessionId, async (sessionAgent: any) => {
+      await reqSessionManager.runExclusive(targetSessionId, async (sessionAgent: any) => {
         const onStepStart = (d: any) => sendEvent('step_start', d);
         const onThought = (d: any) => sendEvent('thought', d);
         const onToken = (d: any) => sendEvent('token', d);
@@ -298,7 +349,7 @@ export async function startGateway(options: Record<string, any> = {}) {
         return;
       }
       try {
-        const result = await sessionManager.runExclusive(targetSessionId, (sessionAgent: any) =>
+        const result = await reqSessionManager.runExclusive(targetSessionId, (sessionAgent: any) =>
           sessionAgent.run(prompt, { attachments, responseFormat })
         );
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -315,7 +366,7 @@ export async function startGateway(options: Record<string, any> = {}) {
       const data: Record<string, any> | null = await readJsonBody(req, res);
       if (!data) return;
       const targetSessionId = data.sessionId || req.headers['x-session-id'];
-      const targetAgent = sessionManager.getAgent(targetSessionId);
+      const targetAgent = reqSessionManager.getAgent(targetSessionId);
       const aborted = targetAgent.abort(data.reason || 'Aborted via Gateway');
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true, aborted }));
@@ -327,7 +378,7 @@ export async function startGateway(options: Record<string, any> = {}) {
       const data: Record<string, any> | null = await readJsonBody(req, res);
       if (!data) return;
       const targetSessionId = data.sessionId || req.headers['x-session-id'];
-      const targetAgent = sessionManager.getAgent(targetSessionId);
+      const targetAgent = reqSessionManager.getAgent(targetSessionId);
       const queued = targetAgent.steer(data.instruction || data.message || '');
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: queued, queued }));
@@ -342,19 +393,19 @@ export async function startGateway(options: Record<string, any> = {}) {
     }
 
     // 6e-6g & 7 & 7b: Session, Replay, Compare, Reset, Clear routes
-    if (await handleSessionRoutes({ req, res, pathname, agent, agentManager })) return;
+    if (await handleSessionRoutes({ req, res, pathname, agent: reqAgent, agentManager: reqAgentManager })) return;
 
     // 6h. Workspace Snapshots & Rollback (/api/snapshots)
     if (pathname === '/api/snapshots' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true, snapshots: agent.snapshots.listRuns() }, null, 2));
+      res.end(JSON.stringify({ success: true, snapshots: reqAgent.snapshots.listRuns() }, null, 2));
       return;
     }
 
     const snapDiffMatch = pathname.match(/^\/api\/snapshots\/([^/]+)\/diff$/);
     if (snapDiffMatch && req.method === 'GET') {
       const runId = decodeURIComponent(snapDiffMatch[1]);
-      const diff = agent.snapshots.diff(runId);
+      const diff = reqAgent.snapshots.diff(runId);
       res.writeHead(diff ? 200 : 404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(diff ? { success: true, ...diff } : { success: false, error: 'Snapshot not found' }, null, 2));
       return;
@@ -363,7 +414,7 @@ export async function startGateway(options: Record<string, any> = {}) {
     const snapRollbackMatch = pathname.match(/^\/api\/snapshots\/([^/]+)\/rollback$/);
     if (snapRollbackMatch && req.method === 'POST') {
       const runId = decodeURIComponent(snapRollbackMatch[1]);
-      const rb = agent.snapshots.rollback(runId);
+      const rb = reqAgent.snapshots.rollback(runId);
       res.writeHead(rb.success ? 200 : 404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(rb, null, 2));
       return;
@@ -393,7 +444,7 @@ export async function startGateway(options: Record<string, any> = {}) {
     }
 
     // 8-13. Provider, Model, and System Prompt / Temperature routes
-    if (await handleConfigRoutes({ req, res, pathname, url, agent, sessionManager, persistConfig })) {
+    if (await handleConfigRoutes({ req, res, pathname, url, agent: reqAgent, sessionManager: reqSessionManager, persistConfig })) {
       return;
     }
 
@@ -530,11 +581,12 @@ ${prompt && prompt.trim() ? prompt.trim() : `Execute procedure for ${cleanName}.
     }
 
     // --- Static Web Dashboard Files ---
-    if ((pathname === '/' || pathname === '/index.html') && isEphemeralToken && isLocalHostBind && !reqOrigin) {
+    if (!isMultiUser && (pathname === '/' || pathname === '/index.html') && isEphemeralToken && isLocalHostBind && !reqOrigin) {
       for (const dir of PUBLIC_DIRS) {
         const indexPath = path.join(dir, 'index.html');
         if (fs.existsSync(indexPath)) {
-          const html = fs.readFileSync(indexPath, 'utf8').replace(
+          const rawHtml = resolveHtmlIncludes(fs.readFileSync(indexPath, 'utf8'), PUBLIC_DIRS);
+          const html = rawHtml.replace(
             '<head>',
             `<head>\n  <meta name="om-gateway-token" content="${authToken}">`
           );
@@ -555,6 +607,7 @@ ${prompt && prompt.trim() ? prompt.trim() : `Execute procedure for ${cleanName}.
     agentManager.dispose();
     daemon.stop();
     agent.close?.().catch(() => {});
+    tenantManager?.closeAll().catch(() => {});
   });
 
   return new Promise((resolve) => {

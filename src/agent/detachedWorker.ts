@@ -33,6 +33,7 @@ async function main() {
         saveCheckpoint(agent.config.memoryDir, {
           ...latest,
           status: 'paused',
+          pauseReason: 'sigterm',
           pid: null
         });
       }
@@ -49,9 +50,17 @@ async function main() {
       maxSteps: job.maxSteps,
       detached: true,
       logFile: job.logFile,
-      resumeCheckpoint
+      resumeCheckpoint,
+      budgets: job.budgets,
+      swarmId: job.swarmId,
+      parentSessionId: job.parentSessionId,
+      workspaceMode: job.workspaceMode
     });
-    console.log(`[OMDetachedWorker] Session ${job.sessionId} completed (steps=${res.totalSteps}, success=${res.success})`);
+    if (res.paused) {
+      console.log(`[OMDetachedWorker] Session ${job.sessionId} paused (reason=${res.pauseReason}, steps=${res.totalSteps})`);
+    } else {
+      console.log(`[OMDetachedWorker] Session ${job.sessionId} completed (steps=${res.totalSteps}, success=${res.success})`);
+    }
   } catch (err: any) {
     console.error(`[OMDetachedWorker] Session ${job.sessionId} failed: ${err?.message || err}`);
     process.exitCode = 1;
