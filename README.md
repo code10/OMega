@@ -3,7 +3,7 @@
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-1-blue.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-113%20passed-success.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-126%20passed-success.svg)](tests/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](README.md)
 
 > **OM** is a lightweight, local-first autonomous AI agent runtime built with pure Node.js.  
@@ -17,18 +17,24 @@
 - [Key Features](#key-features)
 - [Architecture](#architecture)
 - [Quick Start](#quick-start)
+  - [1. Requirements](#1-requirements)
+  - [2. Initialize a New Project via CLI (`npx omega-agent init`)](#2-initialize-a-new-project-via-cli-npx-omega-agent-init)
+  - [3. Launch Interactive Terminal REPL](#3-launch-interactive-terminal-repl)
+  - [4. Run a One-Shot Autonomous Command](#4-run-a-one-shot-autonomous-command)
+  - [5. Start the Web Dashboard Gateway](#5-start-the-web-dashboard-gateway)
 - [Configuration](#configuration)
-  - [Environment Variables (.env)](#environment-variables-env)
-  - [Application Settings (om.config.json)](#application-settings-omconfigjson)
+  - [Environment Variables (`.env`)](#environment-variables-env)
+  - [Application Settings (`om.config.json`)](#application-settings-omconfigjson)
 - [Model Providers](#model-providers)
 - [Interactive CLI & Slash Commands](#interactive-cli--slash-commands)
 - [Built-in Skills Catalog](#built-in-skills-catalog)
 - [Extending Skills & Workflows](#extending-skills--workflows)
   - [1. JavaScript Tool Modules](#1-javascript-tool-modules)
-  - [2. Markdown Agent Workflows (SKILL.md)](#2-markdown-agent-workflows-skillmd)
+  - [2. Markdown Agent Workflows (`SKILL.md`)](#2-markdown-agent-workflows-skillmd)
 - [Programmatic API](#programmatic-api)
 - [Gateway REST & SSE Endpoints](#gateway-rest--sse-endpoints)
 - [Autonomous Self-Healing & Detached Execution](#autonomous-self-healing--detached-execution)
+- [Security, Sandboxing & Multi-User RBAC](#security-sandboxing--multi-user-rbac)
 - [Project Layout](#project-layout)
 - [Testing & Autonomous Benchmarking](#testing--autonomous-benchmarking)
 - [License](#license)
@@ -485,10 +491,22 @@ When launched via `npm run gateway`, OM serves a lightweight HTTP server on port
 
 ---
 
+## Security, Sandboxing & Multi-User RBAC
+
+- **OS & Container Sandboxing (`src/skills/sandbox.ts`)**: `exec_command` supports configurable sandboxing (`off`, `auto`, `os`, `container`) with automatic backend detection across `bwrap`, `wsl-bwrap`, `win-job`, `sandbox-exec`, `docker`, and `podman`, plus resource caps (`memoryMb`, `cpus`, `maxProcesses`, `maxOutputBytes`) and network isolation (`allowNetwork`).
+- **Multi-User Authentication & RBAC (`src/gateway/auth.ts`)**: The Web Gateway supports `local` and `multiuser` auth modes with SHA-256 hashed tokens, HS256 JWT verification, and role-based access control (`viewer < operator < admin`).
+- **Per-Tenant Storage Isolation (`src/gateway/tenantManager.ts`)**: In multi-user mode, each tenant receives isolated `memoryDir` and `workspaceDir` directories with TTL-based idle instance eviction.
+- **HITL Guardrails & Secret Redaction**: Configurable shell/tool approval prompts (`security.requireConfirmationForShell`, `allowedCommands`, `deniedCommands`) and secret redaction (`src/utils/redact.ts`).
+
+---
+
 ## Project Layout
 
 ```
 OMega/
+├── .github/
+│   └── workflows/
+│       └── ci.yml             # Manual CI workflow (typecheck, build, unit & E2E tests)
 ├── bin/
 │   └── om.js                  # CLI executable and interactive REPL
 ├── src/                       # TypeScript source (compiled to dist/)
@@ -516,9 +534,12 @@ OMega/
 │   ├── vectorStore/           # Local JSON & node:sqlite vector stores
 │   ├── gateway/
 │   │   ├── server.ts          # HTTP REST & SSE Gateway server
+│   │   ├── auth.ts            # Multi-user JWT/token auth & RBAC (viewer/operator/admin)
+│   │   ├── tenantManager.ts   # Per-tenant memory/workspace isolation & TTL eviction
+│   │   ├── httpUtils.ts       # Shared HTTP request/response helpers
 │   │   ├── agentManager.ts    # One-off & persistent agent orchestration
 │   │   ├── routes/            # Modular REST route handlers (agents, config, git, memory, sessions)
-│   │   └── public/            # TypeScript + HTML/CSS assets for the Web Dashboard
+│   │   └── public/            # Modular Web Dashboard (app.ts, agents.ts, partials/, styles/)
 │   ├── providers/             # LLM provider implementations & ModelRouter
 │   │   ├── base.ts            # Base provider interface
 │   │   ├── gemini.ts          # Google Gemini integration
@@ -527,7 +548,8 @@ OMega/
 │   │   ├── omega.ts           # Built-in OMega local/mock provider
 │   │   └── router.ts          # Multi-model routing, budgets & failover
 │   └── skills/                # Built-in tool implementations
-│       ├── shell.ts           # Shell execution
+│       ├── sandbox.ts         # OS & container sandboxing (bwrap, win-job, sandbox-exec, docker, podman)
+│       ├── shell.ts           # Sandboxed shell execution
 │       ├── filesystem.ts      # File reading, writing, patching
 │       ├── git.ts             # Git status, diff, branch tools
 │       ├── subagent.ts        # Subagent spawning with worktree isolation
@@ -539,7 +561,7 @@ OMega/
 ├── skills/                    # Drop-in custom skills and workflows
 ├── memory/                    # Persistent storage (MEMORY.md, daily, sessions)
 ├── workspace/                 # Default sandboxed workspaceDir for agent outputs
-├── tests/                     # Built-in node:test test suite
+├── tests/                     # Built-in node:test suite, frontend integrity & Playwright E2E tests
 ├── om.config.json             # Framework runtime configuration
 └── package.json               # Manifest (ESM, Node.js >= 18)
 ```
@@ -548,15 +570,18 @@ OMega/
 
 ## Testing & Autonomous Benchmarking
 
-Run the TypeScript build and native test/evaluation suite (covering tool-calling accuracy, multi-step planning, error recovery, local-to-cloud model failover, vector semantic search, gateway routes, and security boundaries):
+Run the TypeScript build and native test/evaluation suite (covering tool-calling accuracy, multi-step planning, error recovery, local-to-cloud model failover, vector semantic search, gateway routes, multi-user RBAC, detached swarms, frontend integrity, and security boundaries):
 
 ```bash
 npm test
 # or run the standalone benchmark suite:
 npm run benchmark
+# or run type-checking and Playwright UI E2E tests:
+npm run check:types
+npm run test:e2e
 ```
 
-All 113 tests pass using Node's built-in `node:test` runner with zero external test frameworks required.
+All 126 unit & integration tests pass using Node's built-in `node:test` runner with zero external unit-test frameworks required (Playwright is used for `test:e2e`).
 
 ---
 
