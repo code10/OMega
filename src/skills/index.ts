@@ -9,6 +9,8 @@ import { memorySkills } from './memory.js';
 import { systemSkills } from './system.js';
 import { subagentSkills } from './subagent.js';
 import { gitSkills } from './git.js';
+import { codeIntelSkills } from './codeIntel.js';
+import { browserSkills } from './browser.js';
 
 /**
  * Lightweight frontmatter parser for SKILL.md files
@@ -114,7 +116,9 @@ export class SkillRegistry {
       ...memorySkills,
       ...systemSkills,
       ...subagentSkills,
-      ...gitSkills
+      ...gitSkills,
+      ...codeIntelSkills,
+      ...browserSkills
     ]) {
       this.register({ ...skill, source: 'builtin' }, 'builtin');
     }

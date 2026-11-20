@@ -641,5 +641,30 @@ test('OMega Architectural & Security Improvements', async (t) => {
       assert.ok(['wsl-bwrap', 'win-job'].includes(strictRun.sandboxBackend));
     }
   });
+
+  await t.test('ModelRouter waits and resumes automatically on 429 when no fallback succeeds', async () => {
+    let calls = 0;
+    const primary = {
+      name: 'gemini',
+      model: 'gemini-test',
+      chat: async () => {
+        calls++;
+        if (calls === 1) {
+          const err = new Error('429 Too Many Requests');
+          err.status = 429;
+          err.retryAfterMs = 250;
+          throw err;
+        }
+        return { content: 'resumed ok', toolCalls: [], usage: { total_tokens: 10 } };
+      }
+    };
+    const router = new ModelRouter({
+      routing: { enabled: true, fallbackChain: [], rateLimitCooldownMs: 250, maxRateLimitWaitMs: 2000 }
+    });
+    const res = await router.chat(primary, { messages: [{ role: 'user', content: 'hi' }] });
+    assert.equal(res.content, 'resumed ok');
+    assert.equal(calls, 2);
+    assert.ok(res.rateLimitWaitedMs >= 250);
+  });
 });
 

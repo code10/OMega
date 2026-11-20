@@ -129,6 +129,8 @@ export interface SelfHealConfig {
   }>;
 }
 
+export type ReasoningEffort = 'low' | 'medium' | 'high';
+
 export interface OMConfig {
   rootDir: string;
   provider: string;
@@ -138,6 +140,7 @@ export interface OMConfig {
   workspaceDir: string;
   maxSteps: number;
   temperature?: number;
+  effort?: ReasoningEffort;
   version?: string;
   systemPrompt?: string;
   maxDailyLogLines?: number;
@@ -170,6 +173,7 @@ export interface ProviderChatOptions {
   tools?: SkillDefinition[];
   systemPrompt?: string;
   temperature?: number;
+  effort?: ReasoningEffort;
   maxTokens?: number;
   responseFormat?: Record<string, any>;
   onToken?: (token: string) => void;

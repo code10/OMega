@@ -35,6 +35,12 @@ test('Frontend HTML partials, CSS modules, and DOM IDs integrity', async () => {
       'paneMemory',
       'paneSystem',
       'paneDevice',
+      'chatEffortToggle',
+      'effortLowBtn',
+      'effortMedBtn',
+      'effortHighBtn',
+      'machinePermissionsSection',
+      'grantFullMachineBtn',
       'refViewerModal',
       'skillCreatorModal',
       'routingConfigModal'

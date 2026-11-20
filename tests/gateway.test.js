@@ -329,6 +329,99 @@ test('OM Gateway Server API endpoints', async (t) => {
     assert.equal(updatedCfg.model, 'om-reasoning');
   });
 
+  await t.test('POST /api/system-prompt validates effort and saveConfigPatch persists it', async () => {
+    const badRes = await fetch(`${url}/api/system-prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ effort: 'extreme' })
+    });
+    assert.equal(badRes.status, 400);
+    const badData = await badRes.json();
+    assert.equal(badData.success, false);
+
+    const okRes = await fetch(`${url}/api/system-prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ effort: 'high' })
+    });
+    assert.equal(okRes.status, 200);
+    const okData = await okRes.json();
+    assert.equal(okData.effort, 'high');
+    assert.equal(agent.config.effort, 'high');
+
+    const stepsBadRes = await fetch(`${url}/api/system-prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ maxSteps: -1 })
+    });
+    assert.equal(stepsBadRes.status, 400);
+
+    const stepsOkRes = await fetch(`${url}/api/system-prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ maxSteps: 0 })
+    });
+    assert.equal(stepsOkRes.status, 200);
+    const stepsOkData = await stepsOkRes.json();
+    assert.equal(stepsOkData.maxSteps, 0);
+    assert.equal(agent.config.maxSteps, 0);
+
+    const getRes = await fetch(`${url}/api/system-prompt`);
+    assert.equal(getRes.status, 200);
+    const getData = await getRes.json();
+    assert.equal(getData.effort, 'high');
+
+    const cfgDir = path.join(TEST_DIR, 'cfg_effort_persist');
+    fs.mkdirSync(cfgDir, { recursive: true });
+    const cfgPath = path.join(cfgDir, 'om.config.json');
+    fs.writeFileSync(cfgPath, JSON.stringify({ provider: 'om', model: 'om-reasoning', temperature: 0.2 }, null, 2));
+    const saved = saveConfigPatch({ effort: 'low' }, cfgDir);
+    assert.equal(saved, true);
+    const updatedCfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    assert.equal(updatedCfg.effort, 'low');
+
+    const chatRes = await fetch(`${url}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'Hello', effort: 'low' })
+    });
+    assert.equal(chatRes.status, 200);
+    const chatData = await chatRes.json();
+    assert.equal(chatData.success, true);
+  });
+
+  await t.test('GET and POST /api/permissions manage machine control and explicit approval settings', async () => {
+    const getRes = await fetch(`${url}/api/permissions`);
+    assert.equal(getRes.status, 200);
+    const getData = await getRes.json();
+    assert.equal(getData.success, true);
+    assert.equal(typeof getData.permissions.requireConfirmationForShell, 'boolean');
+
+    const grantRes = await fetch(`${url}/api/permissions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fullMachineAccess: true })
+    });
+    assert.equal(grantRes.status, 200);
+    const grantData = await grantRes.json();
+    assert.equal(grantData.permissions.fullMachineAccess, true);
+    assert.equal(grantData.permissions.allowAllCommands, true);
+    assert.equal(grantData.permissions.allowExternalPaths, true);
+    assert.equal(grantData.permissions.allowPrivateNetwork, true);
+    assert.equal(grantData.permissions.requireConfirmationForShell, true);
+
+    const revokeRes = await fetch(`${url}/api/permissions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fullMachineAccess: false })
+    });
+    assert.equal(revokeRes.status, 200);
+    const revokeData = await revokeRes.json();
+    assert.equal(revokeData.permissions.fullMachineAccess, false);
+    assert.equal(revokeData.permissions.allowAllCommands, false);
+    assert.equal(revokeData.permissions.allowExternalPaths, false);
+  });
+
   await t.test('Agents category UI and /api/agents endpoints support one-off and persistent agents', async () => {
     // 1. UI serves Agents category rail button and pane
     const htmlRes = await fetch(`${url}/`);

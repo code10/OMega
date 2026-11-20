@@ -146,6 +146,36 @@ test('OMAgent initialization, dynamic skills, and execution loop', async (t) => 
   });
 
   // Cleanup
+  await t.test('Per-task git worktree isolation isolates edits and merges cleanly', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const repoDir = path.join(TEST_DIR, 'wt_repo');
+    fs.mkdirSync(repoDir, { recursive: true });
+    execFileSync('git', ['init'], { cwd: repoDir });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoDir });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: repoDir });
+    fs.writeFileSync(path.join(repoDir, 'README.md'), '# Repo\n');
+    execFileSync('git', ['add', '-A'], { cwd: repoDir });
+    execFileSync('git', ['commit', '-m', 'init'], { cwd: repoDir });
+
+    const wtAgent = new OMAgent({
+      provider: 'om',
+      model: 'om-turbo',
+      workspaceDir: repoDir,
+      memoryDir: path.join(TEST_DIR, 'wt_mem'),
+      skillsDir: path.join(TEST_DIR, 'wt_skills')
+    });
+
+    const res = await wtAgent.run('Write file wt_note.txt with content "isolated worktree"', { worktree: true });
+    assert.equal(res.success, true);
+    assert.equal(wtAgent.config.workspaceDir, repoDir);
+    assert.equal(fs.existsSync(path.join(repoDir, 'wt_note.txt')), false);
+    assert.ok(res.worktree && res.worktree.hasChanges);
+
+    const mergeRes = wtAgent.git.mergeWorktree(res.worktree.worktreePath, res.worktree.branch);
+    assert.equal(mergeRes.merged, true);
+    assert.equal(fs.existsSync(path.join(repoDir, 'wt_note.txt')), true);
+  });
+
   try {
     fs.rmSync(TEST_DIR, { recursive: true, force: true });
   } catch (_) {}

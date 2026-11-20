@@ -15,6 +15,20 @@ function makeTempDir(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
+async function cleanupTempDir(dir) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      if (fs.existsSync(dir)) {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+      break;
+    } catch (err) {
+      if (attempt === 4 || (err.code !== 'EBUSY' && err.code !== 'EPERM')) throw err;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  }
+}
+
 test('Headless Multi-Session Agent Swarms with Persistent State Recovery', async (t) => {
   await t.test('1. Checkpoints ReAct state after every step and recovers from mid-flight crash', async () => {
     const tmpDir = makeTempDir('omega-cp-');
@@ -94,7 +108,7 @@ test('Headless Multi-Session Agent Swarms with Persistent State Recovery', async
       await agent.close();
       await resumedAgent.close();
     } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      await cleanupTempDir(tmpDir);
     }
   });
 
@@ -155,7 +169,7 @@ test('Headless Multi-Session Agent Swarms with Persistent State Recovery', async
 
       await agent.close();
     } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      await cleanupTempDir(tmpDir);
     }
   });
 
@@ -194,7 +208,7 @@ test('Headless Multi-Session Agent Swarms with Persistent State Recovery', async
       assert.ok(inspected.steps.length >= 1);
       assert.ok(inspected.logTail.includes('completed'));
     } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      await cleanupTempDir(tmpDir);
     }
   });
 
@@ -250,7 +264,7 @@ test('Headless Multi-Session Agent Swarms with Persistent State Recovery', async
       assert.equal(fs.readFileSync(targetFile, 'utf8'), 'clean-original');
       await agent.close();
     } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      await cleanupTempDir(tmpDir);
     }
   });
 
@@ -292,7 +306,7 @@ test('Headless Multi-Session Agent Swarms with Persistent State Recovery', async
       assert.equal(cp.pauseReason, 'budget_tokens');
       await agent.close();
     } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      await cleanupTempDir(tmpDir);
     }
   });
 
@@ -333,7 +347,7 @@ test('Headless Multi-Session Agent Swarms with Persistent State Recovery', async
       assert.equal(deleted, true);
       assert.equal(loadCheckpoint(memDir, workers[0].sessionId), null);
     } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      await cleanupTempDir(tmpDir);
     }
   });
 });

@@ -22,7 +22,8 @@ export async function executeAgentRun(
   prompt: string,
   options: Record<string, any> = {}
 ): Promise<Record<string, any>> {
-  const maxSteps = options.maxSteps || agent.config.maxSteps || 15;
+  const rawMaxSteps = options.maxSteps ?? agent.config.maxSteps ?? 50;
+  const maxSteps = rawMaxSteps === 0 ? Infinity : Math.max(1, Number(rawMaxSteps) || 50);
   const resumeCp = options.resumeCheckpoint || null;
   const steps: any[] = Array.isArray(resumeCp?.steps) ? [...resumeCp.steps] : [];
   const trimmedPrompt = (prompt || resumeCp?.prompt || '').trim();
@@ -57,7 +58,7 @@ export async function executeAgentRun(
     }
     agent.history.push(userMessage);
   }
-  await agent.memory.logDailyAsync(`User Task: "${(prompt || effectivePrompt).slice(0, 100)}"`);
+  agent.memory.logDailyAsync(`User Task: "${(prompt || effectivePrompt).slice(0, 100)}"`).catch(() => {});
 
   let currentStep = typeof resumeCp?.currentStep === 'number' ? resumeCp.currentStep : 0;
   let finalAnswer = '';
@@ -84,6 +85,22 @@ export async function executeAgentRun(
       ? effectiveSelfHeal.healOnToolFailure !== false
       : effectiveSelfHeal.healOnUnhandledError !== false;
   };
+  const runId = resumeCp?.runId || `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
+  const originalWorkspaceDir = agent.config.workspaceDir;
+  let activeWorktree: { worktreePath: string; branch: string; baseBranch: string } | null = null;
+  const useWorktree = options.worktree === true || (agent.config.worktreeIsolation === true && options.worktree !== false);
+  if (useWorktree && agent.git?.isGitRepo?.()) {
+    try {
+      const baseBranch = agent.git.getCurrentBranch();
+      const wt = agent.git.createWorktree(`.om-worktrees/${runId}`, `om-wt-${runId}`);
+      activeWorktree = { ...wt, baseBranch };
+      agent.config.workspaceDir = wt.worktreePath;
+      agent._recordActivity('worktree_created', { sessionId: agent.sessionId, runId, ...activeWorktree });
+    } catch (wtErr: any) {
+      agent._recordActivity('worktree_error', { sessionId: agent.sessionId, runId, error: wtErr.message });
+    }
+  }
+
   const seenToolSignatures = new Map();
   let activeTools = agent.getFormattedTools();
   if (agent.systemOne?.isConfigured() && effectivePrompt) {
@@ -99,7 +116,6 @@ export async function executeAgentRun(
   agent.emit('start', startPayload);
   agent._recordActivity('start', startPayload);
 
-  const runId = resumeCp?.runId || `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`;
   const startedAt = resumeCp?.startedAt || new Date().toISOString();
   const runWallStart = Date.now();
   const effectiveBudgets: CheckpointBudgets = {
@@ -189,7 +205,7 @@ export async function executeAgentRun(
         swarmId: options.swarmId ?? resumeCp?.swarmId ?? null,
         parentSessionId: options.parentSessionId ?? resumeCp?.parentSessionId ?? null,
         currentStep,
-        maxSteps,
+        maxSteps: Number.isFinite(maxSteps) ? maxSteps : 0,
         snapshotRunId: runId,
         workspaceHead: wsState.head,
         workspaceDirtyHash: wsState.dirtyHash,
@@ -287,7 +303,7 @@ export async function executeAgentRun(
       }
 
       currentStep++;
-      const stepStartPayload = { step: currentStep, maxSteps, provider: activeTurnProvider, model: activeTurnModel };
+      const stepStartPayload = { step: currentStep, maxSteps: Number.isFinite(maxSteps) ? maxSteps : 0, provider: activeTurnProvider, model: activeTurnModel };
       agent.emit('step_start', stepStartPayload);
       agent._recordActivity('step_start', stepStartPayload);
 
@@ -322,6 +338,7 @@ export async function executeAgentRun(
             tools: modelHookCtx.tools,
             systemPrompt: modelHookCtx.systemPrompt,
             temperature: options.temperature ?? agent.config.temperature,
+            effort: options.effort ?? agent.config.effort,
             maxTokens: options.maxTokens,
             responseFormat: options.responseFormat,
             onToken,
@@ -731,6 +748,29 @@ export async function executeAgentRun(
 
     persistCheckpoint('completed', { finishedAt: new Date().toISOString() });
 
+    let worktreeResult: Record<string, any> | undefined;
+    if (activeWorktree && agent.git) {
+      try {
+        const summary = agent.git.getWorktreeSummary(activeWorktree.worktreePath);
+        if (summary.clean) {
+          agent.git.discardWorktree(activeWorktree.worktreePath, activeWorktree.branch);
+          worktreeResult = { ...activeWorktree, hasChanges: false, files: [], cleanedUp: true };
+        } else if (options.autoMergeWorktree) {
+          agent.git.mergeWorktree(activeWorktree.worktreePath, activeWorktree.branch);
+          worktreeResult = { ...activeWorktree, hasChanges: true, files: summary.files, merged: true };
+        } else {
+          worktreeResult = {
+            ...activeWorktree,
+            hasChanges: true,
+            files: summary.files,
+            diff: summary.diff
+          };
+        }
+      } catch (wtErr: any) {
+        worktreeResult = { ...activeWorktree, error: wtErr.message };
+      }
+    }
+
     const completion = {
       content: finalAnswer,
       answer: finalAnswer,
@@ -742,6 +782,7 @@ export async function executeAgentRun(
       fallbackEvents,
       selfHealed: healEvents.length > 0,
       healEvents,
+      ...(worktreeResult ? { worktree: worktreeResult } : {}),
       answers: agent.answers,
       steps,
       totalSteps: currentStep,
@@ -761,6 +802,9 @@ export async function executeAgentRun(
     });
     return completion;
   } finally {
+    if (activeWorktree) {
+      agent.config.workspaceDir = originalWorkspaceDir;
+    }
     if (agent._activeAbortController === runAbortController) {
       agent._activeAbortController = null;
     }

@@ -21,7 +21,7 @@ export class AnthropicProvider extends BaseProvider {
     }
   }
 
-  async chat({ messages, tools, systemPrompt, temperature = 0.2, maxTokens, onToken, signal }: Record<string, any>) {
+  async chat({ messages, tools, systemPrompt, temperature = 0.2, effort, maxTokens, onToken, signal }: Record<string, any>) {
     if (!this.apiKey) {
       throw new Error('ANTHROPIC_API_KEY environment variable is required for Anthropic provider');
     }
@@ -80,11 +80,15 @@ export class AnthropicProvider extends BaseProvider {
     }
 
     const useStream = typeof onToken === 'function';
-    const payload = {
+    const supportsThinking = /claude-(3-7|sonnet-4|opus-4|haiku-4|4)/i.test(this.model);
+    const thinkingBudget = effort === 'low' ? 1024 : effort === 'high' ? 10240 : 4096;
+    const enableThinking = Boolean(supportsThinking && effort);
+    const resolvedMaxTokens = maxTokens || this.maxTokens || (enableThinking ? Math.max(4096, thinkingBudget + 2048) : 4096);
+    const payload: Record<string, any> = {
       model: this.model,
-      max_tokens: maxTokens || this.maxTokens || 4096,
+      max_tokens: resolvedMaxTokens,
       messages: formattedMessages,
-      temperature,
+      ...(enableThinking ? { thinking: { type: 'enabled', budget_tokens: thinkingBudget } } : { temperature }),
       ...(useStream ? { stream: true } : {}),
       ...(systemPrompt ? { system: systemPrompt } : {}),
       ...(tools && tools.length > 0 ? { tools } : {})

@@ -143,7 +143,7 @@ export function initTraceRenderer(deps: TraceRendererDeps) {
     if (!streamState.fallbacks) streamState.fallbacks = [];
 
     let liveTraceWrap = container.querySelector('.live-trace-wrap');
-    if (!liveTraceWrap && (event === 'thought' || event === 'tool_start' || event === 'fallback' || event === 'retry')) {
+    if (!liveTraceWrap && event === 'fallback') {
       liveTraceWrap = document.createElement('div');
       liveTraceWrap.className = 'live-trace-wrap';
       if (runningBadge && runningBadge.parentNode === container) {
@@ -192,34 +192,6 @@ export function initTraceRenderer(deps: TraceRendererDeps) {
       streamState.tools.push(toolEntry);
       const badgeText = runningBadge ? runningBadge.querySelector('.running-status-text') : null;
       if (badgeText) badgeText.textContent = `Executing tool: ${data.name}...`;
-
-      if (liveTraceWrap) {
-        const toolCard = document.createElement('div');
-        toolCard.className = 'tool-trace-card collapsed';
-        toolCard.dataset.toolId = data.id;
-        toolCard.innerHTML = `
-          <div class="tool-trace-header">
-            <div class="tool-trace-left">
-              <span class="tool-trace-status running-dot"></span>
-              <span class="tool-name-badge">${escapeHtml(data.name)}</span>
-              <span class="tool-args-preview">${escapeHtml(JSON.stringify(data.args || {}).slice(0, 65))}</span>
-            </div>
-            <div class="tool-trace-right">
-              <span class="tool-duration" data-dur-id="${escapeHtml(data.id)}">Running...</span>
-              <span class="tool-trace-chevron">▶</span>
-            </div>
-          </div>
-          <div class="tool-trace-body" style="display: none;">
-            <div class="tool-trace-section-label">Arguments:</div>
-            <pre class="tool-trace-code">${escapeHtml(JSON.stringify(data.args || {}, null, 2))}</pre>
-            <div class="tool-trace-section-label">Output:</div>
-            <pre class="tool-trace-code" data-out-id="${escapeHtml(data.id)}">Waiting for execution result...</pre>
-          </div>
-        `;
-        bindCollapsibleToggle(toolCard, '.tool-trace-header', '.tool-trace-chevron', '.tool-trace-body');
-        liveTraceWrap.appendChild(toolCard);
-        scrollToBottom();
-      }
       return;
     }
 
@@ -229,24 +201,6 @@ export function initTraceRenderer(deps: TraceRendererDeps) {
         tool.durationMs = data.durationMs;
         tool.result = data.result;
         tool.status = data.result?.success === false ? 'failed' : 'done';
-      }
-      if (liveTraceWrap) {
-        const card = liveTraceWrap.querySelector(`[data-tool-id="${CSS.escape(data.id)}"]`);
-        if (card) {
-          const isOk = data.result?.success !== false;
-          card.classList.add(isOk ? 'tool-success' : 'tool-fail');
-          const dot = card.querySelector('.tool-trace-status');
-          if (dot) {
-            dot.className = `tool-trace-status ${isOk ? 'ok-dot' : 'err-dot'}`;
-          }
-          const durEl = card.querySelector(`[data-dur-id="${CSS.escape(data.id)}"]`);
-          if (durEl) durEl.textContent = `${data.durationMs ?? 0}ms`;
-          const outEl = card.querySelector(`[data-out-id="${CSS.escape(data.id)}"]`);
-          if (outEl) {
-            const formattedOut = typeof data.result === 'string' ? data.result : JSON.stringify(data.result, null, 2);
-            outEl.textContent = formattedOut.length > 2000 ? formattedOut.slice(0, 2000) + '\n... [truncated]' : formattedOut;
-          }
-        }
       }
       return;
     }

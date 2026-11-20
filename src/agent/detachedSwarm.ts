@@ -107,6 +107,26 @@ export class DetachedSwarmManager {
     }
   }
 
+  _nextDetachedSessionId(memDir: string): string {
+    const cpDir = getCheckpointsDir(memDir);
+    let maxNum = 0;
+    for (const cp of listCheckpoints(memDir)) {
+      const m = /^detached_(\d+)$/.exec(cp.sessionId);
+      if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10));
+    }
+    if (fs.existsSync(cpDir)) {
+      try {
+        for (const file of fs.readdirSync(cpDir)) {
+          const m = /^detached_(\d+)(?:\.json|\.job\.json|\.log)$/.exec(file);
+          if (m) maxNum = Math.max(maxNum, parseInt(m[1], 10));
+        }
+      } catch (_) {
+        // ignore read errors
+      }
+    }
+    return `detached_${maxNum + 1}`;
+  }
+
   /**
    * Spawn a new process-detached background agent daemon (survives parent/UI/CLI exit).
    */
@@ -121,7 +141,7 @@ export class DetachedSwarmManager {
     fs.mkdirSync(cpDir, { recursive: true });
 
     const sessionId = sanitizeSessionId(
-      options.sessionId || `detached_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
+      options.sessionId || this._nextDetachedSessionId(memDir)
     );
     const existing = options.resume ? loadCheckpoint(memDir, sessionId) : null;
     const effectivePrompt = prompt || existing?.prompt || '';
@@ -331,7 +351,7 @@ export class DetachedSwarmManager {
       throw new Error(`Session checkpoint '${sessionId}' not found`);
     }
     let stopped = false;
-    if (cp.pid && isPidAlive(cp.pid)) {
+    if (cp.detached && cp.pid && cp.pid !== process.pid && isPidAlive(cp.pid)) {
       try {
         process.kill(cp.pid, 'SIGTERM');
         stopped = true;

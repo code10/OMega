@@ -32,6 +32,13 @@ export async function fetchWithTimeout(
     }
   };
 
+  const attachTimeoutStatus = (err: any) => {
+    if (err && typeof err === 'object' && (err.name === 'TimeoutError' || err.name === 'AbortError') && !externalSignal?.aborted) {
+      err.status = err.status || 408;
+    }
+    return err;
+  };
+
   try {
     return await runFetch(timeoutMs);
   } catch (err: any) {
@@ -39,9 +46,13 @@ export async function fetchWithTimeout(
     const bodyBytes = typeof rest.body === 'string' ? Buffer.byteLength(rest.body, 'utf8') : 0;
     const remainingBudgetMs = totalMaxTimeoutMs - timeoutMs;
     if (isTimeout && bodyBytes >= 8192 && timeoutMs > 0 && remainingBudgetMs > 0) {
-      return await runFetch(remainingBudgetMs);
+      try {
+        return await runFetch(remainingBudgetMs);
+      } catch (retryErr: any) {
+        throw attachTimeoutStatus(retryErr);
+      }
     }
-    throw err;
+    throw attachTimeoutStatus(err);
   }
 }
 

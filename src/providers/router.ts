@@ -21,7 +21,9 @@ export class ModelRouter {
   systemOne: any;
   hardwareSampler: (() => Promise<DeviceSpecsSnapshot>) | null;
   _cachedHardware: { at: number; specs: DeviceSpecsSnapshot } | null;
+  _providerCache: Map<string, any>;
   cooldowns: Map<string, number>;
+  consecutiveFailures: Map<string, number>;
   stats: Record<string, any>;
 
   constructor(options: Record<string, any> = {}) {
@@ -29,8 +31,11 @@ export class ModelRouter {
     this.routingConfig = {
       enabled: true,
       maxRetries: 1,
-      retryDelayMs: 150,
-      rateLimitCooldownMs: 60000,
+      retryDelayMs: 75,
+      rateLimitCooldownMs: 15000,
+      maxRateLimitWaitMs: 65000,
+      circuitBreakerThreshold: 3,
+      circuitBreakerCooldownMs: 30000,
       autoHandoffOnContextLimit: true,
       fallbackChain: [
         { provider: 'gemini', model: 'gemini-3-flash-preview' },
@@ -47,7 +52,9 @@ export class ModelRouter {
     this.systemOne = options.systemOne || null;
     this.hardwareSampler = typeof options.hardwareSampler === 'function' ? options.hardwareSampler : null;
     this._cachedHardware = null;
+    this._providerCache = new Map();
     this.cooldowns = new Map();
+    this.consecutiveFailures = new Map();
     this.stats = {
       totalCalls: 0,
       retries: 0,
@@ -138,6 +145,24 @@ export class ModelRouter {
     return 'moderate';
   }
 
+  _getOrCreateProvider(target: Record<string, any>) {
+    if (target.providerInstance) return target.providerInstance;
+    const key = this._cooldownKey(target.provider || '', target.model || '');
+    if (this.providerFactory === createProvider && this._providerCache.has(key)) {
+      return this._providerCache.get(key);
+    }
+    const inst = this.providerFactory({ ...this.config, ...target });
+    if (this.providerFactory === createProvider) {
+      this._providerCache.set(key, inst);
+    }
+    return inst;
+  }
+
+  _isNonTransientHttpError(err: any): boolean {
+    const status = Number(err?.status ?? err?.statusCode ?? 0);
+    return status === 400 || status === 401 || status === 403 || status === 404;
+  }
+
   _cooldownKey(provider: string, model?: string) {
     return `${(provider || '').toLowerCase()}/${model || 'default'}`;
   }
@@ -157,6 +182,32 @@ export class ModelRouter {
     const duration = retryAfterMs || this.routingConfig.rateLimitCooldownMs || 60000;
     if (duration <= 0) return;
     this.cooldowns.set(this._cooldownKey(provider, model), Date.now() + duration);
+  }
+
+  /**
+   * Reset consecutive failure count and any active cooldown after a successful call.
+   */
+  recordSuccess(provider: string, model?: string) {
+    const key = this._cooldownKey(provider, model);
+    this.consecutiveFailures.delete(key);
+    this.cooldowns.delete(key);
+  }
+
+  /**
+   * Track consecutive non-429 failures and open a circuit-breaker cooldown once the threshold is reached.
+   */
+  recordFailure(provider: string, model?: string) {
+    const threshold = Number(this.routingConfig.circuitBreakerThreshold ?? 3);
+    if (threshold <= 0) return;
+    const key = this._cooldownKey(provider, model);
+    const nextCount = (this.consecutiveFailures.get(key) || 0) + 1;
+    if (nextCount >= threshold) {
+      this.consecutiveFailures.delete(key);
+      const cooldownMs = Number(this.routingConfig.circuitBreakerCooldownMs ?? 30000);
+      this.markCooldown(provider, model, cooldownMs);
+    } else {
+      this.consecutiveFailures.set(key, nextCount);
+    }
   }
 
   /**
@@ -464,22 +515,26 @@ export class ModelRouter {
       }
     }
 
-    const usage = ModelRouter.estimateContextUsage(chatParams.messages, chatParams.systemPrompt, primaryModel);
-    const contextLimitTokens = options.contextLimitTokens || this.routingConfig.contextLimitTokens || (this.routingConfig.autoDetectContextLimit ? getModelContextLimit(primaryName, primaryModel) : 0);
-
-    // 1. Proactive Context Limit Handoff: if local model has a configured token limit and input exceeds it
+    // 1. Proactive Context Limit Handoff: only tokenize when local auto-handoff is active
     if (
       this.routingConfig.enabled &&
       this.routingConfig.autoHandoffOnContextLimit &&
-      isLocal &&
-      contextLimitTokens > 0 &&
-      usage.estimatedTokens > contextLimitTokens
+      isLocal
     ) {
-      const contextErr: Error & { code?: string } = new Error(
-        `Local model '${primaryModel}' (${primaryName}) context limit exceeded (${usage.estimatedTokens} estimated tokens > ${contextLimitTokens} limit)`
-      );
-      contextErr.code = 'CONTEXT_LIMIT_EXCEEDED';
-      return this._executeFailover(primaryProvider, chatParams, contextErr, 'context_limit_exceeded', options);
+      const contextLimitTokens =
+        options.contextLimitTokens ||
+        this.routingConfig.contextLimitTokens ||
+        (this.routingConfig.autoDetectContextLimit ? getModelContextLimit(primaryName, primaryModel) : 0);
+      if (contextLimitTokens > 0) {
+        const usage = ModelRouter.estimateContextUsage(chatParams.messages, chatParams.systemPrompt, primaryModel);
+        if (usage.estimatedTokens > contextLimitTokens) {
+          const contextErr: Error & { code?: string } = new Error(
+            `Local model '${primaryModel}' (${primaryName}) context limit exceeded (${usage.estimatedTokens} estimated tokens > ${contextLimitTokens} limit)`
+          );
+          contextErr.code = 'CONTEXT_LIMIT_EXCEEDED';
+          return this._executeFailover(primaryProvider, chatParams, contextErr, 'context_limit_exceeded', options);
+        }
+      }
     }
 
     // 1b. Rate-Limit Cooldown Circuit Breaker: skip primary if it recently hit 429
@@ -512,13 +567,16 @@ export class ModelRouter {
             timestamp: new Date().toISOString()
           };
           this.onEvent('retry', retryEvent);
-          const delay = (this.routingConfig.retryDelayMs || 100) * attempt;
-          if (delay > 0) {
-            await new Promise((r) => setTimeout(r, delay));
+          const baseDelay = this.routingConfig.retryDelayMs ?? 100;
+          if (baseDelay > 0) {
+            const expDelay = baseDelay * Math.pow(2, attempt - 1);
+            const jitter = Math.floor(Math.random() * Math.max(10, Math.round(expDelay * 0.35)));
+            await this._sleepWithSignal(expDelay + jitter, chatParams.signal);
           }
         }
 
         const response = await primaryProvider.chat(chatParams);
+        this.recordSuccess(primaryName, primaryModel);
         const tok = Number(response.usage?.total_tokens ?? response.usage?.totalTokenCount ?? 0) || 0;
         this.stats.totalTokens += tok;
         this.stats.estimatedCostUsd += ModelRouter.estimateCost(primaryName, primaryModel, response.usage);
@@ -534,7 +592,7 @@ export class ModelRouter {
         if (err.name === 'AbortError' || chatParams.signal?.aborted) {
           throw err;
         }
-        // Never waste retries on context limit or 429 rate-limit errors — fail over immediately
+        // Never waste retries on context limit, 429 rate-limit, or non-transient 400/401/403/404 errors — fail over immediately
         if (ModelRouter.isContextLimitError(err)) {
           break;
         }
@@ -542,12 +600,22 @@ export class ModelRouter {
           this.markCooldown(primaryName, primaryModel, err.retryAfterMs);
           break;
         }
-        // fetchWithTimeout already performed an extended timeout retry; cool down and fail over immediately
+        if (this._isNonTransientHttpError(err)) {
+          if (err.status === 401 || err.status === 403 || err.status === 404) {
+            this.markCooldown(primaryName, primaryModel);
+          }
+          break;
+        }
+        // fetchWithTimeout / consumeSSEStream timeout — cool down and fail over immediately
         if (err.status === 408) {
           this.markCooldown(primaryName, primaryModel);
           break;
         }
       }
+    }
+
+    if (lastError && !ModelRouter.isContextLimitError(lastError) && !ModelRouter.isRateLimitError(lastError)) {
+      this.recordFailure(primaryName, primaryModel);
     }
 
     // 3. If routing/failover is disabled, rethrow primary error
@@ -564,12 +632,78 @@ export class ModelRouter {
     return this._executeFailover(primaryProvider, chatParams, lastError, reasonType, options);
   }
 
+  async _sleepWithSignal(ms: number, signal?: AbortSignal) {
+    if (ms <= 0) return;
+    if (signal?.aborted) {
+      const err = new Error('The operation was aborted');
+      err.name = 'AbortError';
+      throw err;
+    }
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        clearTimeout(timer);
+        const err = new Error('The operation was aborted');
+        err.name = 'AbortError';
+        reject(err);
+      };
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  async _waitAndResumeRateLimit(primaryProvider: any, chatParams: Record<string, any>, primaryError: any, options: Record<string, any> = {}) {
+    const primaryName = primaryProvider.name || this.config.provider || 'om';
+    const primaryModel = primaryProvider.model || this.config.model || 'default';
+    const maxWaitMs = Number(options.maxRateLimitWaitMs ?? this.routingConfig.maxRateLimitWaitMs ?? 65000);
+    if (options.waitOnRateLimit === false || maxWaitMs <= 0) {
+      throw primaryError;
+    }
+
+    const key = this._cooldownKey(primaryName, primaryModel);
+    const until = this.cooldowns.get(key);
+    const rawWait = until ? Math.max(0, until - Date.now()) : Number(primaryError?.retryAfterMs || this.routingConfig.rateLimitCooldownMs || 15000);
+    const waitMs = Math.min(Math.max(rawWait, 250), maxWaitMs);
+
+    this.stats.retries++;
+    this.onEvent('retry', {
+      attempt: 1,
+      maxRetries: 1,
+      provider: primaryName,
+      model: primaryModel,
+      reason: `Rate limit reached — waiting ${Math.ceil(waitMs / 1000)}s to resume`,
+      waitMs,
+      timestamp: new Date().toISOString()
+    });
+
+    await this._sleepWithSignal(waitMs, chatParams.signal);
+    this.cooldowns.delete(key);
+
+    const response = await primaryProvider.chat(chatParams);
+    this.recordSuccess(primaryName, primaryModel);
+    const tok = Number(response.usage?.total_tokens ?? response.usage?.totalTokenCount ?? 0) || 0;
+    this.stats.totalTokens += tok;
+    this.stats.estimatedCostUsd += ModelRouter.estimateCost(primaryName, primaryModel, response.usage);
+    return {
+      ...response,
+      routedProvider: primaryProvider.name || primaryName,
+      routedModel: primaryProvider.model || primaryModel,
+      fallbackUsed: false,
+      rateLimitWaitedMs: waitMs
+    };
+  }
+
   async _executeFailover(primaryProvider: any, chatParams: Record<string, any>, primaryError: any, reasonType: string, options: Record<string, any> = {}) {
     const primaryName = primaryProvider.name || this.config.provider || 'om';
     const primaryModel = primaryProvider.model || this.config.model || 'default';
     const candidates = this.getFallbackCandidates(primaryName, primaryModel);
 
     if (candidates.length === 0) {
+      if (reasonType.includes('rate_limit')) {
+        return this._waitAndResumeRateLimit(primaryProvider, chatParams, primaryError, options);
+      }
       throw primaryError;
     }
 
@@ -577,11 +711,7 @@ export class ModelRouter {
 
     for (const candidate of candidates) {
       try {
-        const targetProvider = candidate.providerInstance || this.providerFactory({
-          ...this.config,
-          provider: candidate.provider,
-          model: candidate.model
-        });
+        const targetProvider = this._getOrCreateProvider(candidate);
 
         // Reformat tools if switching between provider families (e.g. vLLM/OpenAI -> Gemini/Anthropic)
         let adaptedTools = chatParams.tools;
@@ -614,6 +744,7 @@ export class ModelRouter {
           ...chatParams,
           tools: adaptedTools
         });
+        this.recordSuccess(candidate.provider, candidate.model);
 
         const tok = Number(response.usage?.total_tokens ?? response.usage?.totalTokenCount ?? 0) || 0;
         this.stats.totalTokens += tok;
@@ -627,10 +758,31 @@ export class ModelRouter {
           fallbackInfo: fallbackEvent
         };
       } catch (fallbackErr: any) {
+        if (fallbackErr.name === 'AbortError' || chatParams.signal?.aborted) {
+          throw fallbackErr;
+        }
         if (ModelRouter.isRateLimitError(fallbackErr)) {
           this.markCooldown(candidate.provider, candidate.model, fallbackErr.retryAfterMs);
+        } else if (
+          fallbackErr.status === 408 ||
+          fallbackErr.status === 401 ||
+          fallbackErr.status === 403 ||
+          fallbackErr.status === 404
+        ) {
+          this.markCooldown(candidate.provider, candidate.model);
+        } else if (!ModelRouter.isContextLimitError(fallbackErr)) {
+          this.recordFailure(candidate.provider, candidate.model);
         }
         errors.push(`${candidate.provider}/${candidate.model}: ${fallbackErr.message}`);
+      }
+    }
+
+    if (reasonType.includes('rate_limit') && options.waitOnRateLimit !== false) {
+      try {
+        return await this._waitAndResumeRateLimit(primaryProvider, chatParams, primaryError, options);
+      } catch (waitErr: any) {
+        if (waitErr.name === 'AbortError' || chatParams.signal?.aborted) throw waitErr;
+        errors.push(`rate_limit_wait_retry: ${waitErr.message}`);
       }
     }
 

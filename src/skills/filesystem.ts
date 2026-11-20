@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { SkillContext } from '../types.js';
+import { getFileDiagnostics } from './codeIntel.js';
 
 function resolveRealOrAbs(p: string): string {
   const abs = path.resolve(p);
@@ -175,10 +176,12 @@ export const filesystemSkills = [
       }
 
       fs.writeFileSync(target, content, 'utf8');
+      const diagnostics = await getFileDiagnostics(target, context.config?.workspaceDir || process.cwd(), 10);
       return {
         success: true,
         path: target,
-        bytesWritten: Buffer.byteLength(content, 'utf8')
+        bytesWritten: Buffer.byteLength(content, 'utf8'),
+        ...(diagnostics.length > 0 ? { diagnostics } : {})
       };
     }
   },
@@ -221,17 +224,29 @@ export const filesystemSkills = [
 
   {
     name: 'patch_file',
-    description: 'Replace an exact target snippet in a file with new content without overwriting the whole file.',
+    description: 'Replace one or more exact target snippets in a file without overwriting the whole file.',
     parameters: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Path of the file to modify' },
-        targetText: { type: 'string', description: 'Exact string in the file to replace' },
-        replacementText: { type: 'string', description: 'New string to insert in place of targetText' }
+        targetText: { type: 'string', description: 'Exact string in the file to replace (for single edit)' },
+        replacementText: { type: 'string', description: 'New string to insert in place of targetText' },
+        edits: {
+          type: 'array',
+          description: 'Optional list of { targetText, replacementText } hunks to apply atomically',
+          items: {
+            type: 'object',
+            properties: {
+              targetText: { type: 'string' },
+              replacementText: { type: 'string' }
+            },
+            required: ['targetText', 'replacementText']
+          }
+        }
       },
-      required: ['path', 'targetText', 'replacementText']
+      required: ['path']
     },
-    execute: async ({ path: filePath, targetText, replacementText }: Record<string, any>, context: SkillContext = {}) => {
+    execute: async ({ path: filePath, targetText, replacementText, edits }: Record<string, any>, context: SkillContext = {}) => {
       let target;
       try {
         target = resolveSafePath(filePath, context.config?.workspaceDir, context);
@@ -243,34 +258,64 @@ export const filesystemSkills = [
         return { success: false, error: `File not found: ${filePath}` };
       }
 
-      const content = fs.readFileSync(target, 'utf8');
-      if (!content.includes(targetText)) {
-        return { success: false, error: `targetText not found in ${filePath}` };
+      const hunks: Array<{ targetText: string; replacementText: string }> = Array.isArray(edits) && edits.length > 0
+        ? edits
+        : typeof targetText === 'string' && typeof replacementText === 'string'
+          ? [{ targetText, replacementText }]
+          : [];
+
+      if (hunks.length === 0) {
+        return { success: false, error: 'Either targetText/replacementText or a non-empty edits array is required.' };
       }
 
-      const updated = content.replace(targetText, () => replacementText);
-      fs.writeFileSync(target, updated, 'utf8');
+      const raw = fs.readFileSync(target, 'utf8');
+      const usesCRLF = raw.includes('\r\n');
+      let working = raw;
+
+      for (let i = 0; i < hunks.length; i++) {
+        const { targetText: tText, replacementText: rText } = hunks[i];
+        if (working.includes(tText)) {
+          working = working.replace(tText, () => rText);
+        } else {
+          // Retry with normalized line endings so LF snippets match CRLF files cleanly
+          const normWorking = working.replace(/\r\n/g, '\n');
+          const normTarget = tText.replace(/\r\n/g, '\n');
+          if (!normWorking.includes(normTarget)) {
+            return { success: false, error: `targetText not found in ${filePath}${hunks.length > 1 ? ` (edit #${i + 1})` : ''}` };
+          }
+          const normReplacement = rText.replace(/\r\n/g, '\n');
+          const replaced = normWorking.replace(normTarget, () => normReplacement);
+          working = usesCRLF ? replaced.replace(/\n/g, '\r\n') : replaced;
+        }
+      }
+
+      fs.writeFileSync(target, working, 'utf8');
+      const diagnostics = await getFileDiagnostics(target, context.config?.workspaceDir || process.cwd(), 10);
       return {
         success: true,
         path: target,
-        message: 'File successfully patched.'
+        editsApplied: hunks.length,
+        message: 'File successfully patched.',
+        ...(diagnostics.length > 0 ? { diagnostics } : {})
       };
     }
   },
 
   {
     name: 'search_files',
-    description: 'Search for text matches within files in a directory recursively.',
+    description: 'Search for text or regex matches within files in a directory recursively.',
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Text or keyword to search for' },
+        query: { type: 'string', description: 'Text, keyword, or regex pattern to search for' },
         dir: { type: 'string', description: 'Directory to search inside (default: current workspace)' },
+        filePattern: { type: 'string', description: 'Optional filename/extension filter (e.g. "*.ts" or "router")' },
+        regex: { type: 'boolean', description: 'Interpret query as a regular expression (default: false)' },
         maxResults: { type: 'number', description: 'Max matches to return (default: 20)' }
       },
       required: ['query']
     },
-    execute: async ({ query, dir = '.', maxResults = 20 }: Record<string, any>, context: SkillContext = {}) => {
+    execute: async ({ query, dir = '.', filePattern, regex = false, maxResults = 20 }: Record<string, any>, context: SkillContext = {}) => {
       let targetDir: string;
       try {
         targetDir = resolveSafePath(dir, context.config?.workspaceDir, context);
@@ -279,6 +324,26 @@ export const filesystemSkills = [
       }
       if (!fs.existsSync(targetDir)) {
         return { success: false, error: `Directory not found: ${dir}` };
+      }
+
+      let matcher: RegExp | null = null;
+      if (regex) {
+        try {
+          matcher = new RegExp(query, 'i');
+        } catch (err: any) {
+          return { success: false, error: `Invalid regex: ${err.message}` };
+        }
+      }
+
+      let fileFilter: ((name: string) => boolean) | null = null;
+      if (typeof filePattern === 'string' && filePattern.trim()) {
+        const pat = filePattern.trim().toLowerCase();
+        if (pat.startsWith('*.')) {
+          const suffix = pat.slice(1);
+          fileFilter = (name) => name.toLowerCase().endsWith(suffix);
+        } else {
+          fileFilter = (name) => name.toLowerCase().includes(pat);
+        }
       }
 
       const results: any[] = [];
@@ -305,6 +370,7 @@ export const filesystemSkills = [
           if (entry.isDirectory()) {
             walk(fullPath);
           } else if (entry.isFile()) {
+            if (fileFilter && !fileFilter(entry.name)) continue;
             const ext = path.extname(entry.name).toLowerCase();
             if (BINARY_EXTENSIONS.has(ext)) continue;
 
@@ -318,7 +384,8 @@ export const filesystemSkills = [
 
               const lines = text.split('\n');
               for (let i = 0; i < lines.length; i++) {
-                if (lines[i].toLowerCase().includes(lowerQuery)) {
+                const matched = matcher ? matcher.test(lines[i]) : lines[i].toLowerCase().includes(lowerQuery);
+                if (matched) {
                   results.push({
                     file: path.relative(targetDir, fullPath),
                     line: i + 1,

@@ -1,14 +1,16 @@
+<p align="center">
+  <img src="src/gateway/public/om.png" alt="OM Logo" width="72" height="72" />
+</p>
+
 # OM Framework
 
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-1-blue.svg)](package.json)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-127%20passed-success.svg)](tests/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](README.md)
 
-> **OM** is a lightweight, local-first autonomous AI agent runtime built with pure Node.js.  
-> It empowers developers to execute self-hosted agents that plan, reason, invoke local system tools and external APIs, maintain persistent Markdown memory, and interact via an interactive terminal REPL or real-time Web dashboard.
-
+> Cloud coding agents own your context and require vendor trust. **OM** is a lightweight, auditable autonomous runtime you control completely—running air-gapped on your hardware or routed across your own models, with human-in-the-loop approvals, rollback snapshots, and Git-inspectable memory built in.
 ---
 
 ## Table of Contents
@@ -43,12 +45,12 @@
 
 ## Overview
 
-Modern agentic frameworks often require complex runtime setups, external databases, or heavy Python stacks. **OM** takes a local-first, lightweight Node.js approach:
+Modern agentic frameworks often require complex runtime setups, external databases, or heavy Python stacks. **OM** takes a lightweight Node.js approach:
 
-- **Lightweight Node.js Core**: Operates on standard Node.js built-ins (`node:events`, `node:fs`, `node:http`, `node:readline`, `node:process`, `node:crypto`, `node:sqlite`) with `@huggingface/transformers` (and optional `onnxruntime-node`) for hardware-adaptive local neural inference (`OMSystemOne`), plus TypeScript (`devDependencies` only) compiled to `dist/`.
-- **Local-First & Private**: Works completely offline with local model runners (Ollama, LM Studio, vLLM) or a built-in interactive Mock simulator—no credit cards or API keys required to start.
-- **Transparent Markdown Memory**: Context, long-term facts, and daily journals are stored as human-readable Markdown files that you can inspect, edit, or commit to Git.
-- **Dual Operator Interfaces**: Access the agent via an ANSI-colored interactive terminal REPL or launch a web-based dashboard with Server-Sent Events (SSE) streaming.
+- **Node.js Core**: Operates on standard Node.js built-ins (`node:events`, `node:fs`, `node:http`, `node:readline`, `node:process`, `node:crypto`, `node:sqlite`) with `@huggingface/transformers` (and optional `onnxruntime-node`) for hardware-adaptive local neural inference (`OMSystemOne`), plus TypeScript (`devDependencies` only) compiled to `dist/`.
+- **Private**: Works completely offline with local model runners (Ollama, LM Studio, vLLM) or a built-in interactive Mock simulator—no credit cards or API keys required to start.
+- **Markdown Memory**: Context, long-term facts, and daily journals are stored as human-readable Markdown files that you can inspect, edit, or commit to Git.
+- **Interfaces**: Access the agent via an ANSI-colored interactive terminal REPL or launch a web-based dashboard with Server-Sent Events (SSE) streaming.
 
 ---
 
@@ -56,7 +58,7 @@ Modern agentic frameworks often require complex runtime setups, external databas
 
 - **Autonomous ReAct Loop**: Multi-step reasoning and tool execution engine with configurable step budgets, error recovery, and safety guardrails.
 - **Smarter Multi-Model Routing & Failover**: Automatic retry, rate-limit cooldown, and seamless handoff (`ModelRouter`) across local models (Ollama, LM Studio, vLLM) and cloud providers (Gemini, OpenAI, Anthropic, DeepSeek, Kimi, Qwen, GLM) with complexity-based routing and token/cost budgets.
-- **Universal Model Abstraction**: Unified interface across Google Gemini, OpenAI, Anthropic Claude, DeepSeek, Kimi (Moonshot), Qwen (DashScope), GLM (Zhipu), Ollama, LM Studio, vLLM, and built-in Mock/OM engines.
+- **Universal Model Abstraction**: Unified interface across Google Gemini, OpenAI, Anthropic Claude, DeepSeek, Kimi (Moonshot), Qwen (DashScope), GLM (Zhipu), Ollama, LM Studio, vLLM, and built-in OM engines.
 - **Dynamic Skill Registry & Subagents**: Automatic hot-discovery of custom JavaScript tools (`./skills/*.js`), structured agent workflows (`./skills/*/SKILL.md`), MCP Streamable HTTP tools, and isolated subagents (`spawn_subagent` with optional git worktree isolation).
 - **Comprehensive Built-in Tools**: Shell command execution, file manipulation, surgical patching, directory inspection, git operations (`git_status`, `git_diff`, `git_branch`), web fetching with HTML-to-Markdown conversion, and system telemetry.
 - **Hardware-Adaptive System 1 (`OMSystemOne`)**: Local neural decision engine (`src/systemOne.ts`) with GPU/CPU auto-detection (`src/deviceSpecs.ts`) for complexity-based routing, risk gating, tool shortlisting, and self-heal triage.
@@ -89,7 +91,7 @@ Modern agentic frameworks often require complex runtime setups, external databas
 ┌──────────────┐         ┌───────────────┐ ┌──────────────┐    ┌───────────────┐
 │ ModelRouter  │         │ SkillRegistry │ │ MemoryEngine │    │ Gateway Server│
 ├──────────────┤         ├───────────────┤ ├──────────────┤    ├───────────────┤
-│ • Mock / OM  │         │ • Shell / Git │ │ • MEMORY.md  │    │ • HTTP REST   │
+│ • OM         │         │ • Shell / Git │ │ • MEMORY.md  │    │ • HTTP REST   │
 │ • Gemini     │         │ • Filesystem  │ │ • Daily Logs │    │ • SSE Stream  │
 │ • OpenAI     │         │ • Web Fetcher │ │ • Sessions   │    │ • Agents UI   │
 │ • Anthropic  │         │ • Subagents   │ │ • VectorStore│    │ • Approvals   │
@@ -135,7 +137,7 @@ cd my-agent
 
 ### 3. Launch Interactive Terminal REPL
 
-OM runs immediately using the built-in Mock provider or local models without any API keys:
+OM runs immediately using the built-in provider or local models without any API keys:
 
 ```bash
 # Launch the interactive CLI

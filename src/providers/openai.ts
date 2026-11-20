@@ -23,7 +23,7 @@ export class OpenAIProvider extends BaseProvider {
     }
   }
 
-  async chat({ messages, tools, systemPrompt, temperature = 0.2, maxTokens, responseFormat, onToken, signal }: Record<string, any>) {
+  async chat({ messages, tools, systemPrompt, temperature = 0.2, effort, maxTokens, responseFormat, onToken, signal }: Record<string, any>) {
     if (!this.apiKey) {
       throw new Error(`${this.apiKeyEnv} environment variable is required for ${this.name} provider`);
     }
@@ -66,10 +66,13 @@ export class OpenAIProvider extends BaseProvider {
     }
 
     const useStream = typeof onToken === 'function';
-    const payload = {
+    const isReasoningModel = /^(o\d|gpt-5)/i.test(this.model);
+    const supportsEffort = isReasoningModel || /reason/i.test(this.model);
+    const payload: Record<string, any> = {
       model: this.model,
       messages: formattedMessages,
-      temperature,
+      ...(isReasoningModel ? {} : { temperature }),
+      ...(supportsEffort && effort ? { reasoning_effort: effort } : isReasoningModel ? { reasoning_effort: 'medium' } : {}),
       ...(maxTokens ? { max_tokens: maxTokens } : {}),
       ...(responseFormat ? { response_format: responseFormat } : {}),
       ...(useStream ? { stream: true, stream_options: { include_usage: true } } : {}),

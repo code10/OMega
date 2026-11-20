@@ -147,6 +147,7 @@ export function getRequiredRole(pathname: string, method = 'GET'): UserRole {
   if (
     pathname.startsWith('/api/config') ||
     pathname === '/api/system-prompt' ||
+    pathname === '/api/permissions' ||
     pathname === '/api/skills/create' ||
     pathname.startsWith('/api/daemon') ||
     pathname.startsWith('/api/training') ||

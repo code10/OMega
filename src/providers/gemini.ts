@@ -19,7 +19,7 @@ export class GeminiProvider extends BaseProvider {
     }
   }
 
-  async chat({ messages, tools, systemPrompt, temperature = 0.2, maxTokens, responseFormat, onToken, signal }: Record<string, any>): Promise<any> {
+  async chat({ messages, tools, systemPrompt, temperature = 0.2, effort, maxTokens, responseFormat, onToken, signal }: Record<string, any>): Promise<any> {
     if (!this.apiKey) {
       throw new Error('GEMINI_API_KEY environment variable is required for Gemini provider');
     }
@@ -83,10 +83,13 @@ export class GeminiProvider extends BaseProvider {
       }
     }
 
+    const supportsThinking = /gemini-(2\.5|3|4)/i.test(this.model);
+    const thinkingBudget = effort === 'low' ? 1024 : effort === 'high' ? 8192 : 4096;
     const payload: Record<string, any> = {
       contents,
       generationConfig: {
         temperature,
+        ...(supportsThinking && effort ? { thinkingConfig: { thinkingBudget } } : {}),
         ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
         ...(responseFormat?.type === 'json_object' ? { responseMimeType: 'application/json' } : {}),
         ...(responseFormat?.json_schema?.schema

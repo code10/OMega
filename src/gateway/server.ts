@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { OMAgent } from '../agent.js';
-import { loadConfig } from '../config.js';
+import { loadConfig, saveConfigPatch } from '../config.js';
 import { SessionManager } from './sessionManager.js';
 import { OMDaemon } from '../daemon.js';
 import { readJsonBody, serveStatic, resolveHtmlIncludes } from './httpUtils.js';
@@ -91,7 +91,31 @@ export async function startGateway(options: Record<string, any> = {}) {
   });
 
   // Bridge interactive tool/shell confirmation into SSE + POST /api/approvals/:id
-  const approvals = new ApprovalManager(broadcastSSE);
+  const approvals = new ApprovalManager(
+    broadcastSSE,
+    (toolName: string, rule?: { commandPrefix?: string }) => {
+      const sec = (agent.config.security = agent.config.security || {});
+      if (toolName === 'exec_command' && rule?.commandPrefix) {
+        sec.commandRules = sec.commandRules || { allow: [], deny: [] };
+        const allowList = Array.isArray(sec.commandRules.allow) ? sec.commandRules.allow : [];
+        if (!allowList.includes(rule.commandPrefix)) {
+          allowList.push(rule.commandPrefix);
+        }
+        sec.commandRules.allow = allowList;
+      } else {
+        if (Array.isArray(sec.requireConfirmationForTools)) {
+          sec.requireConfirmationForTools = sec.requireConfirmationForTools.filter((t: string) => t !== toolName);
+        }
+        if (toolName === 'exec_command') {
+          sec.requireConfirmationForShell = false;
+        }
+      }
+      if (persistConfig) {
+        saveConfigPatch({ security: sec }, agent.config.rootDir);
+      }
+    },
+    () => agent.config.security?.commandRules || { allow: [], deny: [] }
+  );
   const gatewayConfirmHandler = approvals.createConfirmHandler() as (info: Record<string, any>) => Promise<boolean>;
   agent.confirmCommand = gatewayConfirmHandler;
   agent.options.confirmCommand = gatewayConfirmHandler;
@@ -255,7 +279,7 @@ export async function startGateway(options: Record<string, any> = {}) {
     if (await handleMemoryRoutes({ req, res, pathname, url, agent: reqAgent })) return;
 
     // 3b. Git Routes (/api/git/status, /api/git/diff)
-    if (handleGitRoutes({ req, res, pathname, url, agent: reqAgent })) return;
+    if (await handleGitRoutes({ req, res, pathname, url, agent: reqAgent })) return;
 
     // 3c. Agents Routes (/api/agents*)
     if (await handleAgentsRoutes({ req, res, pathname, agentManager: reqAgentManager })) return;
@@ -275,7 +299,9 @@ export async function startGateway(options: Record<string, any> = {}) {
     if (pathname === '/api/chat/stream' && req.method === 'POST') {
       const data: Record<string, any> | null = await readJsonBody(req, res);
       if (!data) return;
-      const { prompt, attachments, responseFormat } = data;
+      const { prompt, attachments, responseFormat, effort, worktree } = data;
+      const parsedEffort = effort === 'low' || effort === 'medium' || effort === 'high' ? effort : undefined;
+      const useWorktree = worktree === true;
       const targetSessionId = data.sessionId || req.headers['x-session-id'];
       if (!prompt) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -325,7 +351,13 @@ export async function startGateway(options: Record<string, any> = {}) {
         req.on('close', cleanup);
 
         try {
-          const result = await sessionAgent.run(prompt, { attachments, responseFormat, stream: true });
+          const result = await sessionAgent.run(prompt, {
+            attachments,
+            responseFormat,
+            ...(parsedEffort ? { effort: parsedEffort } : {}),
+            ...(useWorktree ? { worktree: true } : {}),
+            stream: true
+          });
           sendEvent('done', result);
         } catch (err: any) {
           sendEvent('error', { error: err.message });
@@ -341,7 +373,9 @@ export async function startGateway(options: Record<string, any> = {}) {
     if (pathname === '/api/chat' && req.method === 'POST') {
       const data: Record<string, any> | null = await readJsonBody(req, res);
       if (!data) return;
-      const { prompt, attachments, responseFormat } = data;
+      const { prompt, attachments, responseFormat, effort, worktree } = data;
+      const parsedEffort = effort === 'low' || effort === 'medium' || effort === 'high' ? effort : undefined;
+      const useWorktree = worktree === true;
       const targetSessionId = data.sessionId || req.headers['x-session-id'];
       if (!prompt) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -350,7 +384,12 @@ export async function startGateway(options: Record<string, any> = {}) {
       }
       try {
         const result = await reqSessionManager.runExclusive(targetSessionId, (sessionAgent: any) =>
-          sessionAgent.run(prompt, { attachments, responseFormat })
+          sessionAgent.run(prompt, {
+            attachments,
+            responseFormat,
+            ...(parsedEffort ? { effort: parsedEffort } : {}),
+            ...(useWorktree ? { worktree: true } : {})
+          })
         );
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result, null, 2));

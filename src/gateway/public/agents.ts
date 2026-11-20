@@ -1188,6 +1188,7 @@ export function initAgents() {
   // --------------------------------------------------------------------------
   const detachedSwarmsListEl = document.getElementById('detachedSwarmsList');
   const detachedSwarmsCountEl = document.getElementById('detachedSwarmsCount');
+  const toggleChatCheckpointsBtn = document.getElementById('toggleChatCheckpointsBtn');
   const toggleDetachedSpawnBtn = document.getElementById('toggleDetachedSpawnBtn');
   const refreshDetachedBtn = document.getElementById('refreshDetachedBtn');
   const detachedSpawnFormCard = document.getElementById('detachedSpawnFormCard');
@@ -1205,20 +1206,33 @@ export function initAgents() {
   const detachedInspectCloseBtn = document.getElementById('detachedInspectCloseBtn');
 
   let inspectedDetachedId: string | null = null;
+  let showChatCheckpoints = false;
+  let cachedDetachedSessions: Array<Record<string, any>> = [];
 
   function renderDetachedSessions(sessions: Array<Record<string, any>>) {
+    cachedDetachedSessions = sessions;
     if (!detachedSwarmsListEl) return;
-    if (detachedSwarmsCountEl) detachedSwarmsCountEl.textContent = String(sessions.length);
 
-    if (sessions.length === 0) {
+    const visibleSessions = showChatCheckpoints
+      ? sessions
+      : sessions.filter((s) => Boolean(s.detached));
+    const hiddenChatCount = sessions.length - visibleSessions.length;
+
+    if (detachedSwarmsCountEl) detachedSwarmsCountEl.textContent = String(visibleSessions.length);
+
+    if (visibleSessions.length === 0) {
+      const hint = hiddenChatCount > 0
+        ? ` (${hiddenChatCount} chat checkpoint${hiddenChatCount === 1 ? '' : 's'} hidden — click "Chat Checkpoints" to view)`
+        : '';
       detachedSwarmsListEl.innerHTML =
-        '<div class="agents-empty-state">No detached workers or checkpoints yet. Click "+ Spawn Detached" to launch a durable background worker.</div>';
+        `<div class="agents-empty-state">No detached workers yet. Click "+ Spawn Detached" to launch a durable background worker.${escapeHtml(hint)}</div>`;
       return;
     }
 
-    detachedSwarmsListEl.innerHTML = sessions
+    detachedSwarmsListEl.innerHTML = visibleSessions
       .map((s) => {
-        const isAlive = Boolean(s.pidAlive);
+        const isDetached = Boolean(s.detached);
+        const isAlive = isDetached && Boolean(s.pidAlive);
         const statusRaw = String(s.status || 'paused');
         const statusLabel = s.recoverable && statusRaw === 'paused' && !s.pauseReason
           ? 'CRASHED / RECOVERABLE'
@@ -1233,6 +1247,7 @@ export function initAgents() {
         const stepInfo = `Step ${s.currentStep ?? 0}/${s.maxSteps ?? 15}`;
         const tokInfo = `${s.usage?.totalTokens ?? 0} tok`;
         const wsMode = s.workspaceMode === 'worktree' ? 'worktree' : 'shared';
+        const kindChip = isDetached ? 'Detached Worker' : 'Chat Checkpoint';
         const reasonTag = s.pauseReason ? `<span class="agent-chip">${escapeHtml(s.pauseReason)}</span>` : '';
         const swarmTag = s.swarmId ? `<span class="agent-chip">${escapeHtml(s.swarmId)}</span>` : '';
 
@@ -1247,8 +1262,9 @@ export function initAgents() {
             </div>
             <p class="agent-card-desc">${escapeHtml((s.prompt || '').slice(0, 140))}</p>
             <div class="agent-card-chips">
+              <span class="agent-chip">${escapeHtml(kindChip)}</span>
               <span class="agent-chip">${escapeHtml(wsMode)}</span>
-              ${s.pid ? `<span class="agent-chip">PID ${escapeHtml(String(s.pid))}</span>` : ''}
+              ${isDetached && s.pid ? `<span class="agent-chip">PID ${escapeHtml(String(s.pid))}</span>` : ''}
               ${swarmTag}
               ${reasonTag}
             </div>
@@ -1263,6 +1279,14 @@ export function initAgents() {
       })
       .join('');
   }
+
+  toggleChatCheckpointsBtn?.addEventListener('click', () => {
+    showChatCheckpoints = !showChatCheckpoints;
+    toggleChatCheckpointsBtn.setAttribute('aria-pressed', showChatCheckpoints ? 'true' : 'false');
+    toggleChatCheckpointsBtn.classList.toggle('primary-xs', showChatCheckpoints);
+    toggleChatCheckpointsBtn.classList.toggle('ghost-xs', !showChatCheckpoints);
+    renderDetachedSessions(cachedDetachedSessions);
+  });
 
   async function loadDetachedSessions() {
     try {

@@ -112,7 +112,7 @@ export function loadConfig(overrides: Record<string, any> = {}): OMConfig {
     memoryDir: resolvePath(overrides.memoryDir || fileConfig.memoryDir || './memory'),
     skillsDir: resolvePath(overrides.skillsDir || fileConfig.skillsDir || './skills'),
     workspaceDir: resolvePath(overrides.workspaceDir || fileConfig.workspaceDir || './workspace'),
-    maxSteps: Number(overrides.maxSteps || fileConfig.maxSteps || 15),
+    maxSteps: Number(overrides.maxSteps ?? fileConfig.maxSteps ?? 50),
     routing: {
       enabled: true,
       maxRetries: 1,
@@ -148,6 +148,7 @@ export function loadConfig(overrides: Record<string, any> = {}): OMConfig {
       requireConfirmationForTools: ['exec_command', 'http_request'],
       allowedCommands: ['git'],
       deniedCommands: ['format', 'rm -rf /', 'del /f /s /q C:\\*'],
+      commandRules: { allow: [], deny: [] },
       ...(fileConfig.security || {}),
       ...(overrides.security || {})
     },
@@ -250,7 +251,7 @@ export function persistActiveProvider(provider: string, model?: string, rootDir:
  * back to om.config.json when present.
  */
 export function saveConfigPatch(
-  patch: Partial<Pick<OMConfig, 'provider' | 'model' | 'temperature' | 'systemPrompt' | 'routing'>>,
+  patch: Partial<Pick<OMConfig, 'provider' | 'model' | 'temperature' | 'effort' | 'maxSteps' | 'systemPrompt' | 'routing' | 'security'>>,
   rootDir: string = ROOT_DIR
 ): boolean {
   const configPath = path.join(rootDir, 'om.config.json');
@@ -261,9 +262,14 @@ export function saveConfigPatch(
     if (patch.provider !== undefined) fileConfig.provider = patch.provider;
     if (patch.model !== undefined) fileConfig.model = patch.model;
     if (patch.temperature !== undefined) fileConfig.temperature = patch.temperature;
+    if (patch.effort !== undefined) fileConfig.effort = patch.effort;
+    if (patch.maxSteps !== undefined) fileConfig.maxSteps = patch.maxSteps;
     if (patch.systemPrompt !== undefined) fileConfig.systemPrompt = patch.systemPrompt;
     if (patch.routing !== undefined) {
       fileConfig.routing = { ...(fileConfig.routing || {}), ...patch.routing };
+    }
+    if (patch.security !== undefined) {
+      fileConfig.security = { ...(fileConfig.security || {}), ...patch.security };
     }
 
     atomicWriteFileSync(configPath, JSON.stringify(fileConfig, null, 2) + '\n');

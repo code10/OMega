@@ -60,14 +60,9 @@ export async function handleConfigRoutes(ctx: ConfigRouteContext): Promise<boole
     try {
       const providerParam = url.searchParams.get('provider');
       const scopeParam = url.searchParams.get('scope'); // 'cloud' | 'local' | 'all'
+      const refresh = url.searchParams.get('refresh') === '1' || url.searchParams.get('refresh') === 'true';
       const targetProvider = providerParam || 'all';
-      let models = await agent.listModels(targetProvider, { scope: scopeParam });
-
-      if (scopeParam === 'cloud') {
-        models = models.filter((m: any) => m.target === 'cloud');
-      } else if (scopeParam === 'local') {
-        models = models.filter((m: any) => m.target === 'local');
-      }
+      const models = await agent.listModels(targetProvider, { scope: scopeParam, refresh });
 
       sendJson(res, 200, {
         success: true,
@@ -124,6 +119,8 @@ export async function handleConfigRoutes(ctx: ConfigRouteContext): Promise<boole
         success: true,
         systemPrompt: agent.config.systemPrompt,
         temperature: agent.config.temperature ?? 0.2,
+        effort: agent.config.effort ?? 'medium',
+        maxSteps: agent.config.maxSteps ?? 50,
         savedPrompts: readSavedPrompts(),
         savedTo: systemPromptsFile
       });
@@ -133,7 +130,7 @@ export async function handleConfigRoutes(ctx: ConfigRouteContext): Promise<boole
     // POST /api/system-prompt
     const data: Record<string, any> | null = await readJsonBody(req, res);
     if (!data) return true;
-    const { systemPrompt, temperature } = data;
+    const { systemPrompt, temperature, effort, maxSteps } = data;
 
     let parsedTemp: number | undefined;
     if (temperature !== undefined) {
@@ -147,8 +144,34 @@ export async function handleConfigRoutes(ctx: ConfigRouteContext): Promise<boole
       }
     }
 
+    let parsedEffort: 'low' | 'medium' | 'high' | undefined;
+    if (effort !== undefined) {
+      const normalized = String(effort).toLowerCase().trim();
+      if (normalized !== 'low' && normalized !== 'medium' && normalized !== 'high') {
+        sendJson(res, 400, {
+          success: false,
+          error: 'effort must be one of: low, medium, high'
+        });
+        return true;
+      }
+      parsedEffort = normalized;
+    }
+
+    let parsedMaxSteps: number | undefined;
+    if (maxSteps !== undefined) {
+      const num = typeof maxSteps === 'number' ? maxSteps : parseInt(String(maxSteps), 10);
+      if (!Number.isFinite(num) || num < 0 || !Number.isInteger(num)) {
+        sendJson(res, 400, {
+          success: false,
+          error: 'maxSteps must be a non-negative integer (0 for unlimited)'
+        });
+        return true;
+      }
+      parsedMaxSteps = num;
+    }
+
     let savedPrompts = readSavedPrompts();
-    const configPatch: { systemPrompt?: string; temperature?: number } = {};
+    const configPatch: { systemPrompt?: string; temperature?: number; effort?: 'low' | 'medium' | 'high'; maxSteps?: number } = {};
 
     if (systemPrompt !== undefined) {
       agent.config.systemPrompt = String(systemPrompt);
@@ -159,6 +182,14 @@ export async function handleConfigRoutes(ctx: ConfigRouteContext): Promise<boole
       agent.config.temperature = parsedTemp;
       configPatch.temperature = parsedTemp;
     }
+    if (parsedEffort !== undefined) {
+      agent.config.effort = parsedEffort;
+      configPatch.effort = parsedEffort;
+    }
+    if (parsedMaxSteps !== undefined) {
+      agent.config.maxSteps = parsedMaxSteps;
+      configPatch.maxSteps = parsedMaxSteps;
+    }
 
     if (persistConfig && Object.keys(configPatch).length > 0) {
       saveConfigPatch(configPatch, agent.config.rootDir);
@@ -168,6 +199,8 @@ export async function handleConfigRoutes(ctx: ConfigRouteContext): Promise<boole
       success: true,
       systemPrompt: agent.config.systemPrompt,
       temperature: agent.config.temperature ?? 0.2,
+      effort: agent.config.effort ?? 'medium',
+      maxSteps: agent.config.maxSteps ?? 50,
       savedPrompts,
       savedTo: systemPromptsFile
     });
@@ -336,6 +369,105 @@ export async function handleConfigRoutes(ctx: ConfigRouteContext): Promise<boole
       apiKeyEnv: envName,
       hasKey: Boolean(apiKey)
     });
+    return true;
+  }
+
+  // GET / POST /api/permissions (Granular machine-control permissions & explicit approval settings)
+  if (pathname === '/api/permissions' && (req.method === 'GET' || req.method === 'POST')) {
+    const buildPermissionsSnapshot = () => {
+      const sec = agent.config.security || {};
+      const sandbox = sec.sandbox || {};
+      const sandboxMode = ['off', 'auto', 'os', 'container'].includes(String(sandbox.mode || '').toLowerCase())
+        ? String(sandbox.mode).toLowerCase()
+        : 'off';
+      const fullMachineAccess = Boolean(sec.allowAllCommands && sec.allowExternalPaths && sec.allowPrivateNetwork);
+      return {
+        fullMachineAccess,
+        allowAllCommands: Boolean(sec.allowAllCommands),
+        allowExternalPaths: Boolean(sec.allowExternalPaths),
+        allowPrivateNetwork: Boolean(sec.allowPrivateNetwork),
+        allowSelfModification: Boolean(sec.allowSelfModification),
+        requireConfirmationForShell: sec.requireConfirmationForShell !== false,
+        sandboxMode,
+        sandboxStrict: Boolean(sandbox.strict),
+        requireConfirmationForTools: Array.isArray(sec.requireConfirmationForTools) ? sec.requireConfirmationForTools : ['exec_command', 'http_request'],
+        allowedPaths: Array.isArray(sec.allowedPaths) ? sec.allowedPaths : [],
+        allowedCommands: Array.isArray(sec.allowedCommands) ? sec.allowedCommands : []
+      };
+    };
+
+    if (req.method === 'GET') {
+      sendJson(res, 200, { success: true, permissions: buildPermissionsSnapshot() });
+      return true;
+    }
+
+    const data: Record<string, any> | null = await readJsonBody(req, res);
+    if (!data) return true;
+    const sec: Record<string, any> = { ...(agent.config.security || {}) };
+
+    if (data.preset === 'full_machine' || data.fullMachineAccess === true) {
+      sec.allowAllCommands = true;
+      sec.allowExternalPaths = true;
+      sec.allowPrivateNetwork = true;
+      if (typeof data.requireConfirmationForShell !== 'boolean') {
+        sec.requireConfirmationForShell = true;
+      }
+    } else if (data.preset === 'workspace_safe' || data.fullMachineAccess === false) {
+      sec.allowAllCommands = false;
+      sec.allowExternalPaths = false;
+      sec.allowPrivateNetwork = false;
+      sec.allowSelfModification = false;
+      sec.requireConfirmationForShell = true;
+    }
+
+    const boolKeys = [
+      'allowAllCommands',
+      'allowExternalPaths',
+      'allowPrivateNetwork',
+      'allowSelfModification',
+      'requireConfirmationForShell'
+    ] as const;
+    for (const key of boolKeys) {
+      if (typeof data[key] === 'boolean') {
+        sec[key] = data[key];
+      }
+    }
+
+    if (Array.isArray(data.requireConfirmationForTools)) {
+      sec.requireConfirmationForTools = data.requireConfirmationForTools.map(String);
+    }
+    if (Array.isArray(data.allowedPaths)) {
+      sec.allowedPaths = data.allowedPaths.map(String).filter(Boolean);
+    }
+    if (Array.isArray(data.allowedCommands)) {
+      sec.allowedCommands = data.allowedCommands.map(String).filter(Boolean);
+    }
+
+    if (data.sandboxMode !== undefined || typeof data.sandboxStrict === 'boolean') {
+      const nextSandbox: Record<string, any> = { ...(sec.sandbox || {}) };
+      if (data.sandboxMode !== undefined) {
+        const mode = String(data.sandboxMode).toLowerCase().trim();
+        if (!['off', 'auto', 'os', 'container'].includes(mode)) {
+          sendJson(res, 400, {
+            success: false,
+            error: 'sandboxMode must be one of: off, auto, os, container'
+          });
+          return true;
+        }
+        nextSandbox.mode = mode;
+      }
+      if (typeof data.sandboxStrict === 'boolean') {
+        nextSandbox.strict = data.sandboxStrict;
+      }
+      sec.sandbox = nextSandbox;
+    }
+
+    agent.config.security = sec;
+    if (persistConfig) {
+      saveConfigPatch({ security: sec }, agent.config.rootDir);
+    }
+
+    sendJson(res, 200, { success: true, permissions: buildPermissionsSnapshot() });
     return true;
   }
 

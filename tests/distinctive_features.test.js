@@ -28,8 +28,22 @@ function makeTempDir(prefix = 'omega-feat-') {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
+async function cleanupTempDir(dir) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      if (fs.existsSync(dir)) {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+      break;
+    } catch (err) {
+      if (attempt === 4 || (err.code !== 'EBUSY' && err.code !== 'EPERM')) throw err;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  }
+}
+
 describe('OMega Core Reliability & Distinctive Features', () => {
-  it('1. History compaction never orphans tool messages', () => {
+  it('1. History compaction never orphans tool messages', async () => {
     const tmp = makeTempDir();
     try {
       const agent = new OMAgent({
@@ -53,7 +67,7 @@ describe('OMega Core Reliability & Distinctive Features', () => {
       assert.equal(agent.history[0].role, 'user');
       assert.notEqual(agent.history[1].role, 'tool');
     } finally {
-      fs.rmSync(tmp, { recursive: true, force: true });
+      await cleanupTempDir(tmp);
     }
   });
 

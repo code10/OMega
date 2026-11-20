@@ -114,6 +114,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const inputModelTargetPill = byId('inputModelTargetPill');
   const dropdownScopeTabs = byId('dropdownScopeTabs');
 
+  // Reasoning Effort Toggle in input bar
+  const chatEffortToggle = byId('chatEffortToggle');
+  const effortTriggerBtn = byId<HTMLButtonElement>('effortTriggerBtn');
+  const chatEffortOptions = byId('chatEffortOptions');
+  const effortButtons = chatEffortToggle
+    ? Array.from(chatEffortToggle.querySelectorAll<HTMLButtonElement>('.chat-effort-btn'))
+    : [];
+  const worktreeToggleBtn = byId<HTMLButtonElement>('worktreeToggleBtn');
+
   // Model Usage Bar elements
   const modelUsageBar = byId('modelUsageBar');
   const usageModelLabel = byId('usageModelLabel');
@@ -151,6 +160,58 @@ document.addEventListener('DOMContentLoaded', () => {
   const metaModel = byId('metaModel');
   const specMemoryDir = byId('specMemoryDir');
   const specWorkspaceDir = byId('specWorkspaceDir');
+
+  function setSpecDirValue(el: HTMLElement | null, dirPath: string) {
+    if (!el) return;
+    el.dataset.copyPath = dirPath;
+    el.title = `Click to copy: ${dirPath}`;
+    const labelEl = el.querySelector<HTMLElement>('.spec-ellipsis');
+    if (labelEl) {
+      labelEl.textContent = dirPath;
+    } else {
+      el.textContent = dirPath;
+    }
+  }
+
+  function wireSpecDirCopy(el: HTMLElement | null) {
+    if (!el) return;
+    let resetTimer: number | undefined;
+    el.addEventListener('click', async () => {
+      const labelEl = el.querySelector<HTMLElement>('.spec-ellipsis');
+      const rawPath = el.dataset.copyPath || labelEl?.textContent || '';
+      if (!rawPath) return;
+      let copied = false;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(rawPath);
+          copied = true;
+        }
+      } catch (_) { }
+      if (!copied) {
+        const ta = document.createElement('textarea');
+        ta.value = rawPath;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+          copied = document.execCommand('copy');
+        } catch (_) { }
+        document.body.removeChild(ta);
+      }
+      if (!copied) return;
+      if (resetTimer) window.clearTimeout(resetTimer);
+      el.classList.add('copied');
+      if (labelEl) labelEl.textContent = 'Copied!';
+      resetTimer = window.setTimeout(() => {
+        el.classList.remove('copied');
+        if (labelEl) labelEl.textContent = el.dataset.copyPath || rawPath;
+      }, 1400);
+    });
+  }
+
+  wireSpecDirCopy(specMemoryDir);
+  wireSpecDirCopy(specWorkspaceDir);
 
   // Models tab elements
   const modelsFilterInput = byId<HTMLInputElement>('modelsFilterInput');
@@ -364,8 +425,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (sysModel) sysModel.textContent = mod;
     if (sysSkillsCount && data.skillsCount !== undefined) sysSkillsCount.textContent = String(data.skillsCount);
 
-    if (specMemoryDir && data.memoryDir !== undefined) specMemoryDir.textContent = data.memoryDir;
-    if (specWorkspaceDir && data.workspaceDir !== undefined) specWorkspaceDir.textContent = data.workspaceDir;
+    if (data.memoryDir !== undefined) setSpecDirValue(specMemoryDir, data.memoryDir);
+    if (data.workspaceDir !== undefined) setSpecDirValue(specWorkspaceDir, data.workspaceDir);
 
     if (configTable) {
       configTable.innerHTML = `
@@ -444,24 +505,35 @@ document.addEventListener('DOMContentLoaded', () => {
     card.id = `approval-${reqData.id}`;
     card.style.cssText = 'background:#18181b;border:1px solid #f59e0b;border-radius:10px;padding:14px;color:#f4f4f5;box-shadow:0 10px 25px rgba(0,0,0,0.45);font-size:13px;';
     const detail = reqData.command ? reqData.command : JSON.stringify(reqData.args || {});
+    const suggestedPrefix = reqData.tool === 'exec_command' && reqData.suggestedPrefix ? String(reqData.suggestedPrefix) : '';
+    const alwaysLabel = suggestedPrefix ? `Always Allow "${suggestedPrefix}"` : 'Always Allow';
+    const alwaysTitle = suggestedPrefix
+      ? `Grant permanent permission for commands starting with "${suggestedPrefix}"`
+      : 'Grant permanent permission for this tool';
     card.innerHTML = `
       <div style="font-weight:600;color:#fbbf24;margin-bottom:6px;">Approval Required: ${escapeHtml(reqData.tool)}</div>
       <pre style="background:#09090b;padding:8px;border-radius:6px;overflow:auto;max-height:120px;font-size:12px;margin:0 0 10px 0;">${escapeHtml(detail)}</pre>
-      <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
         <button data-act="deny" style="padding:6px 12px;border-radius:6px;border:1px solid #3f3f46;background:#27272a;color:#f4f4f5;cursor:pointer;">Deny</button>
-        <button data-act="approve" style="padding:6px 12px;border-radius:6px;border:none;background:#10b981;color:#09090b;font-weight:600;cursor:pointer;">Approve</button>
+        <button data-act="approve-once" style="padding:6px 12px;border-radius:6px;border:none;background:#10b981;color:#09090b;font-weight:600;cursor:pointer;">Allow Once</button>
+        <button data-act="approve-always" style="padding:6px 12px;border-radius:6px;border:1px solid rgba(59,130,246,0.45);background:rgba(59,130,246,0.18);color:#93c5fd;font-weight:600;cursor:pointer;" title="${escapeHtml(alwaysTitle)}">${escapeHtml(alwaysLabel)}</button>
       </div>
     `;
-    const respond = async (approved: boolean) => {
+    const respond = async (approved: boolean, scope: 'once' | 'always' = 'once') => {
+      const bodyPayload: Record<string, any> = { approved, scope };
+      if (scope === 'always' && suggestedPrefix) {
+        bodyPayload.commandPrefix = suggestedPrefix;
+      }
       await fetch(`/api/approvals/${encodeURIComponent(reqData.id)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ approved })
+        body: JSON.stringify(bodyPayload)
       });
       card.remove();
     };
-    card.querySelector('[data-act="approve"]')?.addEventListener('click', () => respond(true));
-    card.querySelector('[data-act="deny"]')?.addEventListener('click', () => respond(false));
+    card.querySelector('[data-act="approve-once"]')?.addEventListener('click', () => respond(true, 'once'));
+    card.querySelector('[data-act="approve-always"]')?.addEventListener('click', () => respond(true, 'always'));
+    card.querySelector('[data-act="deny"]')?.addEventListener('click', () => respond(false, 'once'));
     container.appendChild(card);
   }
 
@@ -503,13 +575,85 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // --------------------------------------------------------------------------
-  // 6. PARAMETERS SIDEBAR CONTROLS
+  // 6. PARAMETERS SIDEBAR CONTROLS & EFFORT MEASURE
   // --------------------------------------------------------------------------
+  type EffortLevel = 'low' | 'medium' | 'high';
+  const storedEffort = localStorage.getItem('om_chat_effort');
+  let currentEffort: EffortLevel =
+    storedEffort === 'low' || storedEffort === 'medium' || storedEffort === 'high' ? storedEffort : 'medium';
+
+  function setEffortDrawerOpen(isOpen: boolean) {
+    if (!chatEffortToggle) return;
+    chatEffortToggle.classList.toggle('open', isOpen);
+    if (effortTriggerBtn) effortTriggerBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    if (chatEffortOptions) chatEffortOptions.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+  }
+
+  function setActiveEffort(effort: EffortLevel, persist = false) {
+    currentEffort = effort;
+    localStorage.setItem('om_chat_effort', effort);
+    if (effortTriggerBtn) {
+      effortTriggerBtn.title = `Reasoning effort: ${effort} (click to adjust)`;
+    }
+    for (const btn of effortButtons) {
+      const isSelected = btn.dataset.effort === effort;
+      btn.classList.toggle('active', isSelected);
+      btn.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+    }
+    if (persist) {
+      fetch('/api/system-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ effort })
+      }).catch(() => {});
+    }
+  }
+
+  setActiveEffort(currentEffort, false);
+  if (effortTriggerBtn) {
+    effortTriggerBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const nextOpen = !chatEffortToggle?.classList.contains('open');
+      setEffortDrawerOpen(nextOpen);
+    });
+  }
+  for (const btn of effortButtons) {
+    btn.addEventListener('click', () => {
+      const val = btn.dataset.effort;
+      if (val === 'low' || val === 'medium' || val === 'high') {
+        setActiveEffort(val, true);
+        setEffortDrawerOpen(false);
+      }
+    });
+  }
+  document.addEventListener('click', (e) => {
+    if (chatEffortToggle && !chatEffortToggle.contains(e.target as Node)) {
+      setEffortDrawerOpen(false);
+    }
+  });
+
+  let currentWorktree = localStorage.getItem('om_chat_worktree') === 'true';
+  function setWorktreeActive(active: boolean) {
+    currentWorktree = active;
+    localStorage.setItem('om_chat_worktree', active ? 'true' : 'false');
+    if (worktreeToggleBtn) {
+      worktreeToggleBtn.classList.toggle('active', active);
+      worktreeToggleBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
+  }
+  setWorktreeActive(currentWorktree);
+  if (worktreeToggleBtn) {
+    worktreeToggleBtn.addEventListener('click', () => {
+      setWorktreeActive(!currentWorktree);
+    });
+  }
+
   const { loadParameters } = initParametersPanel({
     systemPromptInput,
     saveSystemPromptBtn,
     tempSlider,
-    tempValBadge
+    tempValBadge,
+    onEffortLoaded: (effort) => setActiveEffort(effort, false)
   });
 
   // --------------------------------------------------------------------------
@@ -1132,7 +1276,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const response = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: fullPrompt })
+        body: JSON.stringify({ prompt: fullPrompt, effort: currentEffort, worktree: currentWorktree })
       });
 
       if (!response.ok || !response.body) {
@@ -1161,6 +1305,145 @@ document.addEventListener('DOMContentLoaded', () => {
             payload = rawData;
           }
           handleAgentEvent(eventName, payload, bubble, runningBadge, streamState);
+          if (eventName === 'done' && payload?.worktree?.hasChanges) {
+            const wt = payload.worktree;
+            const wtCard = document.createElement('div');
+            wtCard.className = 'worktree-card';
+            const fileCount = Array.isArray(wt.files) ? wt.files.length : 0;
+
+            const renderDiffPanelHtml = (diffText: string, wtFiles: any[]): string => {
+              const raw = String(diffText || '').trim();
+              if (!raw) {
+                if (!Array.isArray(wtFiles) || wtFiles.length === 0) {
+                  return '<div class="worktree-diff-line diff-meta">No diff output available.</div>';
+                }
+                return wtFiles
+                  .map((f: any) => `<div class="worktree-diff-line diff-meta">${escapeHtml(String(f.status || 'M'))} ${escapeHtml(String(f.path || f))}</div>`)
+                  .join('');
+              }
+              const sections = raw.split(/^diff --git /m).filter((s) => s.trim().length > 0);
+              return sections
+                .map((sec, idx) => {
+                  const lines = sec.split(/\r?\n/);
+                  const headerMatch = lines[0]?.match(/^a\/(.+?)\s+b\/(.+)$/);
+                  const fileName = headerMatch ? headerMatch[2] : (lines.find((l) => l.startsWith('+++ b/'))?.slice(6) || `file-${idx + 1}`);
+                  let adds = 0;
+                  let dels = 0;
+                  const bodyHtml = lines
+                    .slice(1)
+                    .map((line) => {
+                      let cls = 'worktree-diff-line';
+                      if (line.startsWith('+') && !line.startsWith('+++')) {
+                        cls += ' diff-add';
+                        adds++;
+                      } else if (line.startsWith('-') && !line.startsWith('---')) {
+                        cls += ' diff-del';
+                        dels++;
+                      } else if (line.startsWith('@@')) {
+                        cls += ' diff-hunk';
+                      } else if (
+                        line.startsWith('index ') ||
+                        line.startsWith('--- ') ||
+                        line.startsWith('+++ ') ||
+                        line.startsWith('new file') ||
+                        line.startsWith('deleted file')
+                      ) {
+                        cls += ' diff-meta';
+                      }
+                      return `<span class="${cls}">${escapeHtml(line)}</span>`;
+                    })
+                    .join('');
+                  const openAttr = idx < 3 ? ' open' : '';
+                  return `
+                    <details class="worktree-diff-file"${openAttr}>
+                      <summary class="worktree-diff-file-header">
+                        <span>${escapeHtml(fileName)}</span>
+                        <span class="worktree-diff-stats">
+                          <span class="stat-add">+${adds}</span>
+                          <span class="stat-del">-${dels}</span>
+                        </span>
+                      </summary>
+                      <pre class="worktree-diff-code">${bodyHtml}</pre>
+                    </details>
+                  `;
+                })
+                .join('');
+            };
+
+            wtCard.innerHTML = `
+              <div class="worktree-card-header">
+                <div>
+                  <strong>Isolated Worktree:</strong> <code>${escapeHtml(wt.branch || '')}</code>
+                  (${fileCount} file${fileCount === 1 ? '' : 's'} changed)
+                </div>
+                <div class="worktree-card-actions">
+                  <button type="button" class="btn-xs" data-wt-act="toggle-diff">Review Diff</button>
+                  <button type="button" class="btn-xs" data-wt-act="discard">Discard</button>
+                  <button type="button" class="btn-xs primary" data-wt-act="merge">Merge &amp; Apply</button>
+                </div>
+              </div>
+              <div class="worktree-diff-panel" hidden></div>
+            `;
+
+            const diffPanel = wtCard.querySelector('.worktree-diff-panel') as HTMLElement | null;
+            const toggleDiffBtn = wtCard.querySelector('[data-wt-act="toggle-diff"]') as HTMLButtonElement | null;
+            let diffRendered = false;
+
+            toggleDiffBtn?.addEventListener('click', async () => {
+              if (!diffPanel) return;
+              const willShow = diffPanel.hasAttribute('hidden');
+              if (willShow) {
+                if (!diffRendered) {
+                  let diffText = wt.diff;
+                  let wtFiles = wt.files;
+                  if (diffText === undefined && wt.worktreePath) {
+                    try {
+                      const res = await fetch(`/api/git/worktree/diff?worktreePath=${encodeURIComponent(wt.worktreePath)}`);
+                      if (res.ok) {
+                        const data = await res.json();
+                        diffText = data.diff;
+                        wtFiles = data.files || wtFiles;
+                      }
+                    } catch (_) {
+                      // Fall back to file list
+                    }
+                  }
+                  diffPanel.innerHTML = renderDiffPanelHtml(diffText || '', wtFiles || []);
+                  diffRendered = true;
+                }
+                diffPanel.removeAttribute('hidden');
+                if (toggleDiffBtn) toggleDiffBtn.textContent = 'Hide Diff';
+              } else {
+                diffPanel.setAttribute('hidden', '');
+                if (toggleDiffBtn) toggleDiffBtn.textContent = 'Review Diff';
+              }
+            });
+
+            wtCard.querySelector('[data-wt-act="merge"]')?.addEventListener('click', async () => {
+              const res = await fetch('/api/git/worktree/merge', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ worktreePath: wt.worktreePath, branch: wt.branch })
+              });
+              if (res.ok) {
+                wtCard.innerHTML = `<span>Merged <code>${escapeHtml(wt.branch || '')}</code> into workspace and cleaned up worktree.</span>`;
+              } else {
+                const err = await res.json().catch(() => ({}));
+                wtCard.insertAdjacentHTML('beforeend', `<div style="color:#f87171;">Merge failed: ${escapeHtml(err.error || res.statusText)}</div>`);
+              }
+            });
+            wtCard.querySelector('[data-wt-act="discard"]')?.addEventListener('click', async () => {
+              const res = await fetch('/api/git/worktree/discard', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ worktreePath: wt.worktreePath, branch: wt.branch })
+              });
+              if (res.ok) {
+                wtCard.innerHTML = `<span>Discarded isolated worktree <code>${escapeHtml(wt.branch || '')}</code>.</span>`;
+              }
+            });
+            bubble.appendChild(wtCard);
+          }
         }
       };
 

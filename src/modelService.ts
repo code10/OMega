@@ -20,6 +20,9 @@ export type { ModelCatalogEntry };
  */
 export class ModelService {
   config: Record<string, any>;
+  private static _catalogCache = new Map<string, { at: number; models: ModelCatalogEntry[] }>();
+  private static _inFlightCatalog = new Map<string, Promise<ModelCatalogEntry[]>>();
+  private static readonly CATALOG_TTL_MS = 30000;
 
   constructor(config: Record<string, any> = {}) {
     this.config = config;
@@ -136,92 +139,129 @@ export class ModelService {
   }
 
   static async listAllModels(options: Record<string, any> = {}) {
-    const config = options.config || loadConfig();
-    const models: ModelCatalogEntry[] = [
-      ...ModelService.listOMModels(),
-      ...ModelService.listLocalSafetensorsModels(options)
-    ];
+    const scope = options.scope === 'cloud' || options.scope === 'local' ? options.scope : 'all';
+    const hasCustomEndpoint = Boolean(options.apiKey || options.lmStudioBaseUrl || options.vllmBaseUrl || options.modelsDir);
+    const useCache = !options.refresh && !hasCustomEndpoint;
 
-    const tasks: Array<Promise<ModelCatalogEntry[]>> = [
-      (async () => {
-        try {
-          const lmUrl = options.lmStudioBaseUrl || config.providers?.lmstudio?.baseUrl || process.env.LMSTUDIO_BASE_URL || 'http://127.0.0.1:1234/v1';
-          return await ModelService.listLMStudioModels({ baseUrl: lmUrl });
-        } catch {
-          return [];
-        }
-      })(),
-      (async () => {
-        try {
-          const vllmUrl = options.vllmBaseUrl || config.providers?.vllm?.baseUrl || process.env.VLLM_BASE_URL || 'http://127.0.0.1:8000/v1';
-          return await ModelService.listVLLMModels({ baseUrl: vllmUrl });
-        } catch {
-          return [];
-        }
-      })(),
-      (async () => {
-        try {
-          const geminiKey = options.apiKey || config.providers?.gemini?.apiKey || process.env.GEMINI_API_KEY;
-          if (geminiKey) {
-            return await ModelService.listGeminiModels({ apiKey: geminiKey, onlyGenerative: true });
-          }
-          return [
-            { id: 'gemini-3.5-flash', name: 'gemini-3.5-flash', displayName: 'Gemini 3.5 Flash', description: 'Next-generation multimodal model built for speed and coding', supportedGenerationMethods: ['generateContent'], provider: 'gemini', target: 'cloud', canGenerate: true },
-            { id: 'gemini-3.8-flash', name: 'gemini-3.8-flash', displayName: 'Gemini 3.8 Flash', description: 'Balanced high-efficiency Gemini cloud model', supportedGenerationMethods: ['generateContent'], provider: 'gemini', target: 'cloud', canGenerate: true },
-            { id: 'gemini-3.8-pro', name: 'gemini-3.8-pro', displayName: 'Gemini 3.8 Pro', description: 'Deep reasoning and complex architecture synthesis', supportedGenerationMethods: ['generateContent'], provider: 'gemini', target: 'cloud', canGenerate: true }
-          ];
-        } catch {
-          return [
-            { id: 'gemini-3.5-flash', name: 'gemini-3.5-flash', displayName: 'Gemini 3.5 Flash', description: 'Next-generation multimodal model built for speed and coding', supportedGenerationMethods: ['generateContent'], provider: 'gemini', target: 'cloud', canGenerate: true }
-          ];
-        }
-      })(),
-      (async () => {
-        try {
-          const openAiKey = config.providers?.openai?.apiKey || process.env.OPENAI_API_KEY;
-          if (openAiKey) {
-            return await ModelService.listOpenAIModels({ apiKey: openAiKey, onlyGenerative: true });
-          }
-          return [
-            { id: 'gpt-4o', name: 'gpt-4o', displayName: 'GPT-4o', description: 'High-intelligence flagship OpenAI cloud model', supportedGenerationMethods: ['generateContent', 'chat'], provider: 'openai', target: 'cloud', canGenerate: true },
-            { id: 'gpt-4o-mini', name: 'gpt-4o-mini', displayName: 'GPT-4o Mini', description: 'Fast, lightweight intelligence for everyday tasks', supportedGenerationMethods: ['generateContent', 'chat'], provider: 'openai', target: 'cloud', canGenerate: true },
-            { id: 'o3-mini', name: 'o3-mini', displayName: 'o3-mini', description: 'High-speed reasoning model for coding and STEM', supportedGenerationMethods: ['generateContent', 'chat'], provider: 'openai', target: 'cloud', canGenerate: true }
-          ];
-        } catch {
-          return [];
-        }
-      })(),
-      (async () => {
-        try {
-          const anthropicKey = config.providers?.anthropic?.apiKey || process.env.ANTHROPIC_API_KEY;
-          return await ModelService.listAnthropicModels({ apiKey: anthropicKey });
-        } catch {
-          return [
-            { id: 'claude-3-5-sonnet-20241022', name: 'claude-3-5-sonnet-20241022', displayName: 'Claude 3.5 Sonnet', description: 'Flagship reasoning and coding model by Anthropic', supportedGenerationMethods: ['generateContent'], provider: 'anthropic', target: 'cloud', canGenerate: true },
-            { id: 'claude-3-5-haiku-20241022', name: 'claude-3-5-haiku-20241022', displayName: 'Claude 3.5 Haiku', description: 'Fastest Claude model for rapid iteration', supportedGenerationMethods: ['generateContent'], provider: 'anthropic', target: 'cloud', canGenerate: true }
-          ];
-        }
-      })(),
-      ...(['deepseek', 'kimi', 'qwen', 'glm'] as const).map((prov) =>
-        ModelService.listCompatCloudModels(prov, { config, onlyGenerative: true }).catch(() => [] as ModelCatalogEntry[])
-      )
-    ];
-
-    const results = await Promise.allSettled(tasks);
-    for (const r of results) {
-      if (r.status === 'fulfilled' && Array.isArray(r.value)) {
-        models.push(...r.value);
+    if (useCache) {
+      const cached = ModelService._catalogCache.get(scope);
+      if (cached && Date.now() - cached.at < ModelService.CATALOG_TTL_MS) {
+        return cached.models;
+      }
+      const inFlight = ModelService._inFlightCatalog.get(scope);
+      if (inFlight) {
+        return inFlight;
       }
     }
 
-    if (options.scope === 'cloud') {
-      return models.filter((m) => m.target === 'cloud');
-    }
-    if (options.scope === 'local') {
-      return models.filter((m) => m.target === 'local');
+    const fetchPromise = (async () => {
+      const config = options.config || loadConfig();
+      const models: ModelCatalogEntry[] = [];
+      const tasks: Array<Promise<ModelCatalogEntry[]>> = [];
+
+      if (scope !== 'cloud') {
+        models.push(...ModelService.listOMModels(), ...ModelService.listLocalSafetensorsModels(options));
+        tasks.push(
+          (async () => {
+            try {
+              const lmUrl = options.lmStudioBaseUrl || config.providers?.lmstudio?.baseUrl || process.env.LMSTUDIO_BASE_URL || 'http://127.0.0.1:1234/v1';
+              return await ModelService.listLMStudioModels({ baseUrl: lmUrl });
+            } catch {
+              return [];
+            }
+          })(),
+          (async () => {
+            try {
+              const vllmUrl = options.vllmBaseUrl || config.providers?.vllm?.baseUrl || process.env.VLLM_BASE_URL || 'http://127.0.0.1:8000/v1';
+              return await ModelService.listVLLMModels({ baseUrl: vllmUrl });
+            } catch {
+              return [];
+            }
+          })()
+        );
+      }
+
+      if (scope !== 'local') {
+        tasks.push(
+          (async () => {
+            try {
+              const geminiKey = options.apiKey || config.providers?.gemini?.apiKey || process.env.GEMINI_API_KEY;
+              if (geminiKey) {
+                return await ModelService.listGeminiModels({ apiKey: geminiKey, onlyGenerative: true });
+              }
+              return [
+                { id: 'gemini-3.5-flash', name: 'gemini-3.5-flash', displayName: 'Gemini 3.5 Flash', description: 'Next-generation multimodal model built for speed and coding', supportedGenerationMethods: ['generateContent'], provider: 'gemini', target: 'cloud', canGenerate: true },
+                { id: 'gemini-3.8-flash', name: 'gemini-3.8-flash', displayName: 'Gemini 3.8 Flash', description: 'Balanced high-efficiency Gemini cloud model', supportedGenerationMethods: ['generateContent'], provider: 'gemini', target: 'cloud', canGenerate: true },
+                { id: 'gemini-3.8-pro', name: 'gemini-3.8-pro', displayName: 'Gemini 3.8 Pro', description: 'Deep reasoning and complex architecture synthesis', supportedGenerationMethods: ['generateContent'], provider: 'gemini', target: 'cloud', canGenerate: true }
+              ];
+            } catch {
+              return [
+                { id: 'gemini-3.5-flash', name: 'gemini-3.5-flash', displayName: 'Gemini 3.5 Flash', description: 'Next-generation multimodal model built for speed and coding', supportedGenerationMethods: ['generateContent'], provider: 'gemini', target: 'cloud', canGenerate: true }
+              ];
+            }
+          })(),
+          (async () => {
+            try {
+              const openAiKey = config.providers?.openai?.apiKey || process.env.OPENAI_API_KEY;
+              if (openAiKey) {
+                return await ModelService.listOpenAIModels({ apiKey: openAiKey, onlyGenerative: true });
+              }
+              return [
+                { id: 'gpt-4o', name: 'gpt-4o', displayName: 'GPT-4o', description: 'High-intelligence flagship OpenAI cloud model', supportedGenerationMethods: ['generateContent', 'chat'], provider: 'openai', target: 'cloud', canGenerate: true },
+                { id: 'gpt-4o-mini', name: 'gpt-4o-mini', displayName: 'GPT-4o Mini', description: 'Fast, lightweight intelligence for everyday tasks', supportedGenerationMethods: ['generateContent', 'chat'], provider: 'openai', target: 'cloud', canGenerate: true },
+                { id: 'o3-mini', name: 'o3-mini', displayName: 'o3-mini', description: 'High-speed reasoning model for coding and STEM', supportedGenerationMethods: ['generateContent', 'chat'], provider: 'openai', target: 'cloud', canGenerate: true }
+              ];
+            } catch {
+              return [];
+            }
+          })(),
+          (async () => {
+            try {
+              const anthropicKey = config.providers?.anthropic?.apiKey || process.env.ANTHROPIC_API_KEY;
+              return await ModelService.listAnthropicModels({ apiKey: anthropicKey });
+            } catch {
+              return [
+                { id: 'claude-3-5-sonnet-20241022', name: 'claude-3-5-sonnet-20241022', displayName: 'Claude 3.5 Sonnet', description: 'Flagship reasoning and coding model by Anthropic', supportedGenerationMethods: ['generateContent'], provider: 'anthropic', target: 'cloud', canGenerate: true },
+                { id: 'claude-3-5-haiku-20241022', name: 'claude-3-5-haiku-20241022', displayName: 'Claude 3.5 Haiku', description: 'Fastest Claude model for rapid iteration', supportedGenerationMethods: ['generateContent'], provider: 'anthropic', target: 'cloud', canGenerate: true }
+              ];
+            }
+          })(),
+          ...(['deepseek', 'kimi', 'qwen', 'glm'] as const).map((prov) =>
+            ModelService.listCompatCloudModels(prov, { config, onlyGenerative: true }).catch(() => [] as ModelCatalogEntry[])
+          )
+        );
+      }
+
+      const results = await Promise.allSettled(tasks);
+      for (const r of results) {
+        if (r.status === 'fulfilled' && Array.isArray(r.value)) {
+          models.push(...r.value);
+        }
+      }
+
+      const filtered =
+        scope === 'cloud'
+          ? models.filter((m) => m.target === 'cloud')
+          : scope === 'local'
+            ? models.filter((m) => m.target === 'local')
+            : models;
+
+      if (useCache) {
+        ModelService._catalogCache.set(scope, { at: Date.now(), models: filtered });
+      }
+      return filtered;
+    })();
+
+    if (useCache) {
+      ModelService._inFlightCatalog.set(scope, fetchPromise);
+      try {
+        return await fetchPromise;
+      } finally {
+        ModelService._inFlightCatalog.delete(scope);
+      }
     }
 
-    return models;
+    return fetchPromise;
   }
 
   static async listCompatCloudModels(provider: 'deepseek' | 'kimi' | 'qwen' | 'glm', options: Record<string, any> = {}) {

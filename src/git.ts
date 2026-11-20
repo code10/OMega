@@ -118,7 +118,44 @@ export class OMGitManager {
     const absPath = path.resolve(this.workspaceDir, worktreePath);
     fs.mkdirSync(path.dirname(absPath), { recursive: true });
     this._exec(['worktree', 'add', '-b', branchName, absPath]);
+    this._linkWorktreeDependencies(absPath);
     return { worktreePath: absPath, branch: branchName };
+  }
+
+  /**
+   * Link untracked node_modules from the main workspace into an isolated worktree
+   * so builds and tests (tsc, npm test) run without a fresh install.
+   */
+  _linkWorktreeDependencies(absWorktreePath: string) {
+    const mainNodeModules = path.join(this.workspaceDir, 'node_modules');
+    const wtNodeModules = path.join(absWorktreePath, 'node_modules');
+    if (fs.existsSync(mainNodeModules) && !fs.existsSync(wtNodeModules)) {
+      try {
+        const linkType = process.platform === 'win32' ? 'junction' : 'dir';
+        fs.symlinkSync(mainNodeModules, wtNodeModules, linkType);
+      } catch (_) {
+        // Best-effort; worktree still functions if symlink/junction is unsupported
+      }
+    }
+  }
+
+  /**
+   * Unlink any junction/symlinked node_modules before removing a worktree.
+   */
+  _unlinkWorktreeDependencies(absWorktreePath: string) {
+    const wtNodeModules = path.join(absWorktreePath, 'node_modules');
+    try {
+      const stat = fs.lstatSync(wtNodeModules);
+      if (stat.isSymbolicLink()) {
+        if (process.platform === 'win32') {
+          fs.rmdirSync(wtNodeModules);
+        } else {
+          fs.unlinkSync(wtNodeModules);
+        }
+      }
+    } catch (_) {
+      // Ignore if not present
+    }
   }
 
   /**
@@ -128,8 +165,91 @@ export class OMGitManager {
    */
   removeWorktree(worktreePath: string, force = true) {
     const absPath = path.resolve(this.workspaceDir, worktreePath);
+    this._unlinkWorktreeDependencies(absPath);
     const args = force ? ['worktree', 'remove', '--force', absPath] : ['worktree', 'remove', absPath];
     this._exec(args);
+  }
+
+  /**
+   * Summarize uncommitted changes inside a worktree, including untracked new files.
+   */
+  getWorktreeSummary(worktreePath: string) {
+    const absPath = path.resolve(this.workspaceDir, worktreePath);
+    const wtGit = new OMGitManager(absPath);
+    const status = wtGit.getStatus();
+    let diff = '';
+    try {
+      diff = wtGit._exec(['diff', 'HEAD']);
+    } catch (_) {
+      diff = wtGit.getDiff();
+    }
+
+    // Include untracked new files as synthetic unified diff blocks for UI preview
+    const untrackedFiles = (status.files || []).filter((f: any) => f.status === '??' && f.path && !f.path.startsWith('node_modules'));
+    for (const f of untrackedFiles) {
+      const fullPath = path.join(absPath, f.path);
+      try {
+        const stat = fs.statSync(fullPath);
+        if (!stat.isFile() || stat.size > 32768) continue;
+        const content = fs.readFileSync(fullPath, 'utf8');
+        if (content.includes('\u0000')) continue; // skip binary
+        const lines = content.split(/\r?\n/);
+        const hunkBody = lines.map((l) => `+${l}`).join('\n');
+        const synthetic = `diff --git a/${f.path} b/${f.path}\nnew file mode 100644\n--- /dev/null\n+++ b/${f.path}\n@@ -0,0 +1,${lines.length} @@\n${hunkBody}\n`;
+        diff = diff ? `${diff}\n${synthetic}` : synthetic;
+      } catch (_) {
+        // Ignore unreadable untracked files
+      }
+    }
+
+    const MAX_DIFF_CHARS = 200000;
+    const diffTruncated = diff.length > MAX_DIFF_CHARS;
+    if (diffTruncated) {
+      diff = diff.slice(0, MAX_DIFF_CHARS) + '\n... [diff truncated]';
+    }
+
+    return {
+      worktreePath: absPath,
+      branch: status.branch,
+      clean: status.clean,
+      files: status.files,
+      diff,
+      diffTruncated
+    };
+  }
+
+  /**
+   * Commit any pending worktree edits, merge the worktree branch into the main workspace,
+   * and remove the temporary worktree and branch.
+   */
+  mergeWorktree(worktreePath: string, branchName: string, commitMessage = `OMega task merge (${branchName})`) {
+    const absPath = path.resolve(this.workspaceDir, worktreePath);
+    const wtGit = new OMGitManager(absPath);
+    const wtStatus = wtGit.getStatus();
+    if (!wtStatus.clean) {
+      wtGit.commit(commitMessage);
+    }
+    this._exec(['merge', '--no-ff', branchName, '-m', commitMessage]);
+    this.discardWorktree(absPath, branchName);
+    return { merged: true, branch: branchName };
+  }
+
+  /**
+   * Remove an isolated worktree and optionally delete its temporary branch.
+   */
+  discardWorktree(worktreePath: string, branchName?: string) {
+    const absPath = path.resolve(this.workspaceDir, worktreePath);
+    if (fs.existsSync(absPath)) {
+      this.removeWorktree(absPath, true);
+    }
+    if (branchName && branchName !== 'HEAD') {
+      try {
+        this._exec(['branch', '-D', branchName]);
+      } catch (_) {
+        // Ignore if branch was already deleted or doesn't exist
+      }
+    }
+    return { discarded: true, branch: branchName || null };
   }
 
   /**

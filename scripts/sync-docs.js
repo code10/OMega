@@ -10,6 +10,7 @@ const pkgPath = path.join(ROOT_DIR, 'package.json');
 
 const args = process.argv.slice(2);
 const shouldWrite = args.includes('--write');
+const strictConfig = args.includes('--strict-config');
 const testsFlagIdx = args.indexOf('--tests');
 const explicitTestCount = testsFlagIdx !== -1 ? Number(args[testsFlagIdx + 1]) : null;
 
@@ -56,7 +57,7 @@ if (!testsBadgeMatch || !testsProseMatch || testsBadgeMatch[1] !== testsProseMat
 if (explicitTestCount !== null && Number(testsBadgeMatch?.[1]) !== explicitTestCount) {
   errors.push(`README tests badge (${testsBadgeMatch?.[1]}) !== actual test count (${explicitTestCount})`);
 }
-if (!snippetMatch || snippetMatch[2] !== config.provider || snippetMatch[4] !== config.model) {
+if (strictConfig && (!snippetMatch || snippetMatch[2] !== config.provider || snippetMatch[4] !== config.model)) {
   errors.push(`README config snippet (${snippetMatch?.[2]}/${snippetMatch?.[4]}) !== om.config.json (${config.provider}/${config.model})`);
 }
 

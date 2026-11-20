@@ -279,6 +279,41 @@
                           </div>
                         </div>
                       </div>
+
+                      <!-- Reasoning Effort Measure Toggle -->
+                      <div class="chat-effort-toggle" id="chatEffortToggle" role="group" aria-label="Reasoning effort">
+                        <button type="button" class="chat-effort-trigger" id="effortTriggerBtn"
+                          aria-expanded="false" aria-controls="chatEffortOptions"
+                          title="Reasoning effort (click to adjust)">
+                          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="m12 14 4-4"></path>
+                            <path d="M3.34 19a10 10 0 1 1 17.32 0"></path>
+                          </svg>
+                          <span>Effort</span>
+                        </button>
+                        <div class="chat-effort-options" id="chatEffortOptions" aria-hidden="true">
+                          <button type="button" class="chat-effort-btn" id="effortLowBtn" data-effort="low"
+                            aria-pressed="false" title="Low effort — fast, minimal reasoning">Low</button>
+                          <button type="button" class="chat-effort-btn active" id="effortMedBtn" data-effort="medium"
+                            aria-pressed="true" title="Medium effort — balanced reasoning">Med</button>
+                          <button type="button" class="chat-effort-btn" id="effortHighBtn" data-effort="high"
+                            aria-pressed="false" title="High effort — deep, thorough reasoning">High</button>
+                        </div>
+                      </div>
+
+                      <!-- Per-Task Git Worktree Isolation Toggle -->
+                      <button type="button" class="chat-worktree-btn" id="worktreeToggleBtn" aria-pressed="false"
+                        title="Isolate task edits in a temporary git worktree branch (click to toggle)">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                          stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <line x1="6" y1="3" x2="6" y2="15"></line>
+                          <circle cx="18" cy="6" r="3"></circle>
+                          <circle cx="6" cy="18" r="3"></circle>
+                          <path d="M18 9a9 9 0 0 1-9 9"></path>
+                        </svg>
+                        <span>Worktree</span>
+                      </button>
                     </div>
 
                     <div class="input-meta-right">
@@ -336,6 +371,37 @@
                   </div>
                 </div>
 
+                <!-- Max Autonomous Steps -->
+                <div class="param-section">
+                  <div class="param-section-title">
+                    <span>Max Steps</span>
+                    <span class="param-badge-val" id="maxStepsBadge">50</span>
+                  </div>
+                  <div class="param-steps-row">
+                    <div class="param-stepper" id="maxStepsStepper">
+                      <button type="button" class="param-stepper-btn" id="maxStepsDecBtn"
+                        aria-label="Decrease max steps" title="Decrease by 5">
+                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor"
+                          stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+                          <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                      </button>
+                      <input type="number" id="maxStepsInput" min="0" max="500" step="5" value="50"
+                        class="param-number-input" title="Maximum steps per run (0 = Unlimited)" />
+                      <button type="button" class="param-stepper-btn" id="maxStepsIncBtn"
+                        aria-label="Increase max steps" title="Increase by 5">
+                        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor"
+                          stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+                          <line x1="12" y1="5" x2="12" y2="19"></line>
+                          <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                      </button>
+                    </div>
+                    <button type="button" class="param-toggle-pill" id="maxStepsUnlimitedBtn"
+                      aria-pressed="false" title="Allow unlimited autonomous steps">Unlimited</button>
+                  </div>
+                </div>
+
                 <!-- Runtime Specs Card -->
                 <div class="param-section">
                   <div class="param-section-title">
@@ -352,12 +418,92 @@
                     </div>
                     <div class="spec-mini-row">
                       <span class="spec-k">Memory Dir</span>
-                      <span class="spec-v spec-ellipsis" id="specMemoryDir">./memory</span>
+                      <button type="button" class="spec-v spec-copy-btn" id="specMemoryDir" title="Click to copy path">
+                        <span class="spec-ellipsis">./memory</span>
+                        <svg class="spec-copy-icon" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor"
+                          stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                      </button>
                     </div>
                     <div class="spec-mini-row">
                       <span class="spec-k">Workspace</span>
-                      <span class="spec-v spec-ellipsis" id="specWorkspaceDir">.</span>
+                      <button type="button" class="spec-v spec-copy-btn" id="specWorkspaceDir" title="Click to copy path">
+                        <span class="spec-ellipsis">.</span>
+                        <svg class="spec-copy-icon" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor"
+                          stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                      </button>
                     </div>
+                  </div>
+                </div>
+
+                <!-- Machine Permissions & Explicit Approval -->
+                <div class="param-section" id="machinePermissionsSection">
+                  <div class="param-section-title">
+                    <span>Machine Permissions</span>
+                    <button class="param-mini-btn" id="grantFullMachineBtn" type="button"
+                      title="Grant full machine control with explicit approval">Full Control</button>
+                  </div>
+                  <div class="perm-toggle-list">
+                    <label class="perm-toggle-row" title="Allow any shell command (still respects approval setting)">
+                      <span>Unrestricted Shell</span>
+                      <input type="checkbox" id="permAllowAllCommands" data-perm="allowAllCommands" />
+                    </label>
+                    <label class="perm-toggle-row" title="Read &amp; write files outside the workspace">
+                      <span>External Filesystem</span>
+                      <input type="checkbox" id="permAllowExternalPaths" data-perm="allowExternalPaths" />
+                    </label>
+                    <label class="perm-toggle-row" title="Allow HTTP requests to localhost &amp; private LAN">
+                      <span>Local / Private Net</span>
+                      <input type="checkbox" id="permAllowPrivateNetwork" data-perm="allowPrivateNetwork" />
+                    </label>
+                    <label class="perm-toggle-row" title="Allow editing OMega framework source files">
+                      <span>Self-Modification</span>
+                      <input type="checkbox" id="permAllowSelfModification" data-perm="allowSelfModification" />
+                    </label>
+                    <label class="perm-toggle-row" title="Prompt for explicit approval before shell execution">
+                      <span>Require Shell Approval</span>
+                      <input type="checkbox" id="permRequireShellApproval" data-perm="requireConfirmationForShell" checked />
+                    </label>
+                    <div class="perm-toggle-row perm-select-row" title="Isolate shell commands using OS sandbox (bwrap/sandbox-exec/win-job) or container (Docker/Podman)">
+                      <span>Shell Sandbox</span>
+                      <div class="perm-dropdown" id="permSandboxDropdown" data-value="off">
+                        <button type="button" class="perm-dropdown-trigger" id="permSandboxTrigger"
+                          aria-haspopup="listbox" aria-expanded="false" aria-label="Shell Sandbox Mode">
+                          <span class="perm-dropdown-label" id="permSandboxLabel">Off</span>
+                          <svg class="perm-dropdown-chevron" viewBox="0 0 24 24" width="12" height="12" fill="none"
+                            stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                          </svg>
+                        </button>
+                        <div class="perm-dropdown-menu" id="permSandboxMenu" role="listbox" aria-label="Shell Sandbox Mode">
+                          <button type="button" class="perm-dropdown-option active" role="option" aria-selected="true" data-value="off">
+                            <span>Off</span>
+                            <span class="perm-dropdown-check" aria-hidden="true">✓</span>
+                          </button>
+                          <button type="button" class="perm-dropdown-option" role="option" aria-selected="false" data-value="auto">
+                            <span>Auto</span>
+                            <span class="perm-dropdown-check" aria-hidden="true">✓</span>
+                          </button>
+                          <button type="button" class="perm-dropdown-option" role="option" aria-selected="false" data-value="os">
+                            <span>OS</span>
+                            <span class="perm-dropdown-check" aria-hidden="true">✓</span>
+                          </button>
+                          <button type="button" class="perm-dropdown-option" role="option" aria-selected="false" data-value="container">
+                            <span>Container</span>
+                            <span class="perm-dropdown-check" aria-hidden="true">✓</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <label class="perm-toggle-row" title="Fail closed if the selected sandbox backend is unavailable">
+                      <span>Strict Sandbox</span>
+                      <input type="checkbox" id="permSandboxStrict" data-perm="sandboxStrict" />
+                    </label>
                   </div>
                 </div>
 
