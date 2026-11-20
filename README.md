@@ -6,11 +6,11 @@
 
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-1-blue.svg)](package.json)
-[[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-127%20passed-success.svg)](tests/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](README.md)
 
-> Cloud coding agents own your context and require vendor trust. **OM** is a lightweight, auditable autonomous runtime you control completely—running air-gapped on your hardware or routed across your own models, with human-in-the-loop approvals, rollback snapshots, and Git-inspectable memory built in.
+> Cloud coding agents own your context and require vendor trust. **OM** is a lightweight, auditable autonomous runtime you control completely, running air-gapped on your hardware or routed across your own models, with human-in-the-loop approvals, rollback snapshots, and Git-inspectable memory built in.
 ---
 
 ## Table of Contents
