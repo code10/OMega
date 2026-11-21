@@ -1,3 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none">
-  <path fill="#de9422" fill-rule="evenodd" d="M0 0h16v16H0v-3h12v-1H0V9h12V8H0V0zm4 3v2h8V3H4z"/>
+  <defs>
+    <linearGradient id="om-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f5b547"/>
+      <stop offset="50%" stop-color="#de9422"/>
+      <stop offset="100%" stop-color="#b56e0c"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#om-grad)" fill-rule="evenodd" d="M1.6 0h12.8A1.6 1.6 0 0 1 16 1.6v12.8a1.6 1.6 0 0 1-1.6 1.6H1.6A1.6 1.6 0 0 1 0 14.4V13h12v-1H0V9h12V8H0V1.6A1.6 1.6 0 0 1 1.6 0zM4 3v2h8V3H4z"/>
 </svg>
