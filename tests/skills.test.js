@@ -119,30 +119,31 @@ test('SkillRegistry built-in skills and execution', async (t) => {
   await t.test('AST/LSP Code Intelligence tools (file_outline, go_to_definition, find_references, get_diagnostics)', async () => {
     const codeDir = path.join(TEST_DIR, 'code_intel');
     fs.mkdirSync(codeDir, { recursive: true });
-    const reg = new SkillRegistry({ workspaceDir: codeDir });
+    const reg = new SkillRegistry();
+    const ctx = { config: { workspaceDir: codeDir } };
 
     await reg.execute('write_file', {
       path: 'math.ts',
       content: 'export function addNumbers(a: number, b: number): number {\n  return a + b;\n}\n'
-    });
+    }, ctx);
     await reg.execute('write_file', {
       path: 'app.ts',
       content: 'import { addNumbers } from "./math.js";\nexport const total = addNumbers(2, 3);\n'
-    });
+    }, ctx);
 
-    const outlineRes = await reg.execute('file_outline', { path: 'math.ts' });
+    const outlineRes = await reg.execute('file_outline', { path: 'math.ts' }, ctx);
     assert.equal(outlineRes.success, true);
     assert.ok(outlineRes.outline.some((item) => item.name === 'addNumbers'));
 
-    const defRes = await reg.execute('go_to_definition', { path: 'app.ts', line: 2, symbol: 'addNumbers' });
+    const defRes = await reg.execute('go_to_definition', { path: 'app.ts', line: 2, symbol: 'addNumbers' }, ctx);
     assert.equal(defRes.success, true);
     assert.ok(defRes.definitions.some((d) => d.file.endsWith('math.ts') && d.line === 1));
 
-    const refRes = await reg.execute('find_references', { path: 'math.ts', line: 1, symbol: 'addNumbers' });
+    const refRes = await reg.execute('find_references', { path: 'math.ts', line: 1, symbol: 'addNumbers' }, ctx);
     assert.equal(refRes.success, true);
     assert.ok(refRes.references.some((r) => r.file.endsWith('app.ts')));
 
-    const diagClean = await reg.execute('get_diagnostics', { path: 'app.ts' });
+    const diagClean = await reg.execute('get_diagnostics', { path: 'app.ts' }, ctx);
     assert.equal(diagClean.success, true);
     assert.equal(diagClean.errorCount, 0);
 
@@ -151,7 +152,7 @@ test('SkillRegistry built-in skills and execution', async (t) => {
       path: 'app.ts',
       targetText: 'addNumbers(2, 3)',
       replacementText: 'addNumbers("bad", 3)'
-    });
+    }, ctx);
     assert.equal(badPatch.success, true);
     assert.ok(Array.isArray(badPatch.diagnostics) && badPatch.diagnostics.length > 0);
   });
