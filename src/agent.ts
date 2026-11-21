@@ -16,6 +16,25 @@ import { compactHistoryIfNeeded } from './agent/compaction.js';
 import { buildRecallContext, buildSystemPrompt as buildAgentSystemPrompt } from './agent/promptBuilder.js';
 import { executeAgentRun } from './agent/runner.js';
 import { OMSystemOne } from './systemOne.js';
+import { createExecutionBackend } from './execution/remote.js';
+import { defaultTerminalManager } from './skills/terminal.js';
+import { disposeAllLspClients } from './skills/codeIntel.js';
+import type {
+  AgentActivityEntry,
+  AgentHook,
+  AgentRunOptions,
+  AgentRunResult,
+  AgentUsageStats,
+  ChatMessage,
+  ConfirmCommandHandler,
+  ExecutionBackend,
+  ModelInfo,
+  OMAgentOptions,
+  OMConfig,
+  ProviderLike,
+  SkillDefinition,
+  TokenUsage
+} from './types.js';
 
 const log = createLogger('OMAgent');
 
@@ -35,30 +54,32 @@ const MAX_TOOL_OUTPUT_CHARS = 12000;
 
 export class OMAgent extends EventEmitter {
   static ModelService = ModelService;
-  options: Record<string, any>;
-  config: any;
+  options: OMAgentOptions;
+  config: OMConfig;
   memory: OMMemory;
   git: OMGitManager;
   skills: SkillRegistry;
-  provider: any;
+  provider: ProviderLike;
   router: ModelRouter;
   systemOne: OMSystemOne;
-  history: any[];
-  answers: any[];
-  activityLog: any[];
+  execution: ExecutionBackend;
+  history: ChatMessage[];
+  answers: Record<string, any>[];
+  activityLog: AgentActivityEntry[];
   sessionId: string;
-  _watchers: any[];
+  _watchers: fs.FSWatcher[];
   _ignoreWatchUntil: number;
-  _toolsCache: Map<string, any>;
+  _toolsCache: Map<string, any[]>;
+  _isSelfHealing?: boolean;
   modelService: typeof ModelService;
   mcpManager: MCPManager;
   snapshots: WorkspaceSnapshotManager;
   lastRunId: string | null;
-  hooks: any[];
+  hooks: AgentHook[];
   _activeAbortController: AbortController | null;
   _steeringQueue: string[];
-  confirmCommand: ((info: Record<string, any>) => Promise<boolean> | boolean) | null;
-  usageStats: { promptTokens: number; completionTokens: number; totalTokens: number; calls: number };
+  confirmCommand: ConfirmCommandHandler | null;
+  usageStats: AgentUsageStats;
 
   static normalizeModel(model: string) {
     if (typeof model !== 'string') return model;
@@ -70,7 +91,7 @@ export class OMAgent extends EventEmitter {
     return PROVIDER_ALIASES[p] || p;
   }
 
-  constructor(options: Record<string, any> = {}) {
+  constructor(options: OMAgentOptions = {}) {
     super();
     this.options = options;
     this.config = loadConfig(options);
@@ -78,7 +99,8 @@ export class OMAgent extends EventEmitter {
     const asyncEmbedder = options.asyncEmbedder
       || (this.config.embedding?.url ? createHttpEmbedder(this.config.embedding) : undefined);
     this.memory = new OMMemory(this.config.memoryDir, { asyncEmbedder });
-    this.git = new OMGitManager(this.config.workspaceDir);
+    this.execution = options.executionBackend || createExecutionBackend(this.config.execution, this.config.workspaceDir);
+    this.git = new OMGitManager(this.config.workspaceDir, this.execution);
     this.skills = new SkillRegistry();
     this.provider = options.providerInstance || createProvider(this.config);
     this.systemOne = new OMSystemOne(this.config.systemOne, { embedder: options.systemOneEmbedder });
@@ -100,7 +122,7 @@ export class OMAgent extends EventEmitter {
     this._toolsCache = new Map();
     this.modelService = ModelService;
     this.mcpManager = new MCPManager();
-    this.snapshots = new WorkspaceSnapshotManager(this.config.workspaceDir);
+    this.snapshots = new WorkspaceSnapshotManager(this.config.workspaceDir, null, this.execution);
     this.lastRunId = null;
     this.hooks = [];
     if (Array.isArray(options.hooks)) this.hooks.push(...options.hooks);
@@ -127,7 +149,7 @@ export class OMAgent extends EventEmitter {
   /**
    * Record structured activity events for live dashboard visibility
    */
-  _recordActivity(type: string, data: Record<string, any> = {}) {
+  _recordActivity(type: string, data: Record<string, unknown> = {}): AgentActivityEntry {
     const entry = {
       id: `act_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
       type,
@@ -216,7 +238,7 @@ export class OMAgent extends EventEmitter {
   /**
    * List available models using ModelService
    */
-  async listModels(providerName?: string, options: Record<string, any> = {}) {
+  async listModels(providerName?: string, options: Record<string, unknown> = {}): Promise<ModelInfo[]> {
     const pName = OMAgent.normalizeProvider(providerName || this.config.provider || 'gemini');
     return ModelService.listModels({
       provider: pName,
@@ -225,7 +247,7 @@ export class OMAgent extends EventEmitter {
     });
   }
 
-  async ListModels(providerName?: string, options: Record<string, any> = {}) {
+  async ListModels(providerName?: string, options: Record<string, unknown> = {}): Promise<ModelInfo[]> {
     return this.listModels(providerName, options);
   }
 
@@ -328,6 +350,8 @@ export class OMAgent extends EventEmitter {
 
   async close() {
     this.stopWatching();
+    defaultTerminalManager.closeAll();
+    disposeAllLspClients();
     this.mcpManager?.closeAll();
     await this.memory?.flush?.();
     this.memory?.close?.();
@@ -336,7 +360,7 @@ export class OMAgent extends EventEmitter {
   /**
    * Register a custom skill dynamically
    */
-  registerSkill(skill: Record<string, any>) {
+  registerSkill(skill: SkillDefinition) {
     this.skills.register(skill, 'custom');
     this._emitConfigUpdate();
     return this;
@@ -417,11 +441,11 @@ export class OMAgent extends EventEmitter {
   /**
    * Format registered skills for the active or specified provider (cached per provider type)
    */
-  getFormattedTools(providerOverride?: string) {
+  getFormattedTools(providerOverride?: string): any[] {
     const pName = OMAgent.normalizeProvider(providerOverride || this.provider.name || '');
     const cacheKey = pName === 'anthropic' ? 'anthropic' : pName === 'gemini' ? 'gemini' : 'openai';
     if (this._toolsCache.has(cacheKey)) {
-      return this._toolsCache.get(cacheKey);
+      return this._toolsCache.get(cacheKey) || [];
     }
     let formatted;
     if (cacheKey === 'anthropic') formatted = this.skills.toAnthropicTools();
@@ -446,11 +470,12 @@ export class OMAgent extends EventEmitter {
     return handleSlashControl(this, trimmedPrompt);
   }
 
-  _accumulateUsage(usage: any) {
+  _accumulateUsage(usage: TokenUsage | Record<string, unknown> | undefined) {
     if (!usage || typeof usage !== 'object') return;
-    const prompt = Number(usage.prompt_tokens ?? usage.input_tokens ?? usage.promptTokenCount ?? 0) || 0;
-    const completion = Number(usage.completion_tokens ?? usage.output_tokens ?? usage.candidatesTokenCount ?? 0) || 0;
-    const total = Number(usage.total_tokens ?? usage.totalTokenCount ?? (prompt + completion)) || (prompt + completion);
+    const u = usage as Record<string, unknown>;
+    const prompt = Number(u.prompt_tokens ?? u.input_tokens ?? u.promptTokenCount ?? u.promptTokens ?? 0) || 0;
+    const completion = Number(u.completion_tokens ?? u.output_tokens ?? u.candidatesTokenCount ?? u.completionTokens ?? 0) || 0;
+    const total = Number(u.total_tokens ?? u.totalTokenCount ?? u.totalTokens ?? (prompt + completion)) || (prompt + completion);
     this.usageStats.promptTokens += prompt;
     this.usageStats.completionTokens += completion;
     this.usageStats.totalTokens += total;
@@ -458,20 +483,21 @@ export class OMAgent extends EventEmitter {
     return { promptTokens: prompt, completionTokens: completion, totalTokens: total };
   }
 
-  use(hookObj: Record<string, any>) {
+  use(hookObj: AgentHook) {
     if (hookObj && typeof hookObj === 'object') {
       this.hooks.push(hookObj);
     }
     return this;
   }
 
-  async _runHooks(hookName: string, payload: Record<string, any>) {
-    let current = payload;
+  async _runHooks(hookName: string, payload: Record<string, unknown>) {
+    let current: Record<string, unknown> = payload;
     for (const h of this.hooks) {
-      if (typeof h?.[hookName] === 'function') {
-        const res = await h[hookName](current, this);
+      const fn = h?.[hookName];
+      if (typeof fn === 'function') {
+        const res = await (fn as (ctx: Record<string, unknown>, agent: OMAgent) => Promise<unknown> | unknown)(current, this);
         if (res && typeof res === 'object') {
-          current = { ...current, ...res };
+          current = { ...current, ...(res as Record<string, unknown>) };
         }
       }
     }
@@ -504,7 +530,7 @@ export class OMAgent extends EventEmitter {
    * @param {Record<string, any>} [options] - Per-call options
    * @returns {Promise<{ content: string, answer?: string, provider?: string, model?: string, target?: string, usage?: Record<string, number>, steps: Array<any>, totalSteps?: number, sessionId?: string, runId?: string, aborted?: boolean, fallbackUsed?: boolean, fallbackEvents?: Array<any>, answers?: Array<any>, success: boolean }>}
    */
-  async run(prompt: string, options: Record<string, any> = {}) {
-    return executeAgentRun(this, prompt, options);
+  async run(prompt: string, options: AgentRunOptions = {}): Promise<AgentRunResult> {
+    return executeAgentRun(this, prompt, options) as Promise<AgentRunResult>;
   }
 }

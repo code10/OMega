@@ -32,6 +32,9 @@ jobs:
       - name: Verify docs and badges are in sync
         run: npm run docs:check
 
+      - name: Typecheck internal and public contracts
+        run: npm run check:types
+
       - name: Run unit & integration suite
         run: npm test
 
@@ -77,3 +80,51 @@ jobs:
 
       - name: Verify OS sandbox & detached worker tests
         run: node --test tests/improvements.test.js tests/detached_swarm.test.js tests/skills.test.js
+
+  remote-execution-ci:
+    name: Linux (Live Docker & SSH ExecutionBackend E2E)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies and build
+        run: npm ci && npm run build
+
+      - name: Pull Alpine image for live DockerExecutionBackend E2E
+        run: docker pull alpine:latest
+
+      - name: Start ephemeral SSH container for live SSHExecutionBackend E2E
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keygen -t ed25519 -N "" -f ~/.ssh/om_ci_ed25519
+          PUB_KEY=$(cat ~/.ssh/om_ci_ed25519.pub)
+          docker run -d --rm --name om-ci-sshd \
+            -p 2222:2222 \
+            -e PUID=1000 \
+            -e PGID=1000 \
+            -e USER_NAME=omci \
+            -e PUBLIC_KEY="$PUB_KEY" \
+            lscr.io/linuxserver/openssh-server:latest
+          for i in $(seq 1 30); do
+            if ssh-keyscan -p 2222 127.0.0.1 >> ~/.ssh/known_hosts 2>/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Run live Docker & SSH ExecutionBackend integration tests
+        env:
+          OM_SSH_TEST_HOST: omci@127.0.0.1
+          OM_SSH_TEST_PORT: "2222"
+          OM_SSH_TEST_KEY: ~/.ssh/om_ci_ed25519
+          OM_SSH_TEST_WORKDIR: /tmp
+        run: node --test tests/remote_integration.test.js
+
+      - name: Cleanup SSH test container
+        if: always()
+        run: docker rm -f om-ci-sshd || true

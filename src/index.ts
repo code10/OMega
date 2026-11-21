@@ -22,3 +22,6 @@ export { OMSelfImprover } from './selfImprove.js';
 export { OMSelfHealer } from './selfHeal.js';
 export { OMTrainingPipeline } from './training.js';
 export { AgentManager } from './gateway/agentManager.js';
+export { LocalExecutionBackend, defaultLocalExecutionBackend, getExecutionBackend } from './execution/backend.js';
+export { DockerExecutionBackend, SSHExecutionBackend, RemoteShellExecutionBackend, createExecutionBackend } from './execution/remote.js';
+export { TerminalSessionManager, defaultTerminalManager } from './skills/terminal.js';

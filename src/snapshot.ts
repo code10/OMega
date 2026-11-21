@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { defaultLocalExecutionBackend } from './execution/backend.js';
+import type { ExecutionBackend, ExecutionDirEntry, ExecutionFileStat } from './types.js';
 
 /**
  * Lightweight Zero-Dependency Workspace Snapshot & Rollback Manager ("Undo Agent Run").
@@ -8,12 +10,75 @@ import path from 'node:path';
 export class WorkspaceSnapshotManager {
   workspaceDir: string;
   snapshotRoot: string;
+  execution: ExecutionBackend;
   runs: Map<string, any>;
 
-  constructor(workspaceDir = process.cwd(), snapshotRoot: string | null = null) {
+  constructor(
+    workspaceDir = process.cwd(),
+    snapshotRoot: string | null = null,
+    execution: ExecutionBackend = defaultLocalExecutionBackend
+  ) {
     this.workspaceDir = path.resolve(workspaceDir || process.cwd());
     this.snapshotRoot = snapshotRoot || path.join(this.workspaceDir, '.om_snapshots');
+    this.execution = execution;
     this.runs = new Map();
+  }
+
+  private _existsSync(p: string): boolean {
+    const res = this.execution.exists(p);
+    return typeof res === 'boolean' ? res : fs.existsSync(p);
+  }
+
+  private _statSync(p: string): ExecutionFileStat {
+    const res = this.execution.stat(p);
+    if (res && !(res instanceof Promise)) return res;
+    const s = fs.statSync(p);
+    return { isFile: s.isFile(), isDirectory: s.isDirectory(), size: s.size, mtimeMs: s.mtimeMs };
+  }
+
+  private _readFileSync(p: string): string {
+    const res = this.execution.readFile(p, 'utf8');
+    return typeof res === 'string' ? res : fs.readFileSync(p, 'utf8');
+  }
+
+  private _writeFileSync(p: string, content: string): void {
+    const res = this.execution.writeFile(p, content, 'utf8');
+    if (res instanceof Promise) {
+      fs.writeFileSync(p, content, 'utf8');
+    }
+  }
+
+  private _mkdirSync(p: string): void {
+    const res = this.execution.mkdir(p, { recursive: true });
+    if (res instanceof Promise) {
+      fs.mkdirSync(p, { recursive: true });
+    }
+  }
+
+  private _readdirSync(p: string): ExecutionDirEntry[] {
+    const res = this.execution.readdir(p);
+    if (Array.isArray(res)) return res;
+    return fs.readdirSync(p, { withFileTypes: true }).map((d) => ({
+      name: d.name,
+      isFile: d.isFile(),
+      isDirectory: d.isDirectory()
+    }));
+  }
+
+  private _copyFileSync(src: string, dest: string): void {
+    if (typeof this.execution.copyFile === 'function') {
+      const res = this.execution.copyFile(src, dest);
+      if (!(res instanceof Promise)) return;
+    }
+    this._writeFileSync(dest, this._readFileSync(src));
+  }
+
+  private _rmSync(p: string): void {
+    if (typeof this.execution.rm === 'function') {
+      const res = this.execution.rm(p, { force: true });
+      if (!(res instanceof Promise)) return;
+    }
+    fs.rmSync(p, { force: true });
   }
 
   _runDir(runId: string) {
@@ -56,13 +121,13 @@ export class WorkspaceSnapshotManager {
     // Only capture the first pre-run state per file within this run
     if (entry.files[rel]) return;
 
-    const existed = fs.existsSync(abs);
+    const existed = this._existsSync(abs);
     let backupFile: string | null = null;
-    if (existed && fs.statSync(abs).isFile()) {
+    if (existed && this._statSync(abs).isFile) {
       const backupDir = path.join(this._runDir(runId), 'files');
       backupFile = path.join(backupDir, rel);
-      fs.mkdirSync(path.dirname(backupFile), { recursive: true });
-      fs.copyFileSync(abs, backupFile);
+      this._mkdirSync(path.dirname(backupFile));
+      this._copyFileSync(abs, backupFile);
     }
 
     entry.files[rel] = { existed, backupFile };
@@ -71,8 +136,8 @@ export class WorkspaceSnapshotManager {
 
   _persistManifest(entry: Record<string, any>) {
     try {
-      fs.mkdirSync(this._runDir(entry.runId), { recursive: true });
-      fs.writeFileSync(this._manifestPath(entry.runId), JSON.stringify(entry, null, 2), 'utf8');
+      this._mkdirSync(this._runDir(entry.runId));
+      this._writeFileSync(this._manifestPath(entry.runId), JSON.stringify(entry, null, 2));
     } catch (_) {
       // non-fatal
     }
@@ -81,9 +146,9 @@ export class WorkspaceSnapshotManager {
   loadManifest(runId: string) {
     if (this.runs.has(runId)) return this.runs.get(runId);
     const p = this._manifestPath(runId);
-    if (!fs.existsSync(p)) return null;
+    if (!this._existsSync(p)) return null;
     try {
-      const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
+      const parsed = JSON.parse(this._readFileSync(p));
       this.runs.set(runId, parsed);
       return parsed;
     } catch (_) {
@@ -92,8 +157,8 @@ export class WorkspaceSnapshotManager {
   }
 
   listRuns() {
-    if (!fs.existsSync(this.snapshotRoot)) return [];
-    const dirs = fs.readdirSync(this.snapshotRoot, { withFileTypes: true }).filter((d) => d.isDirectory());
+    if (!this._existsSync(this.snapshotRoot)) return [];
+    const dirs = this._readdirSync(this.snapshotRoot).filter((d) => d.isDirectory);
     const list = [];
     for (const d of dirs) {
       const m = this.loadManifest(d.name);
@@ -116,11 +181,11 @@ export class WorkspaceSnapshotManager {
     const changes = [];
     for (const [rel, info] of Object.entries(entry.files || {}) as Array<[string, any]>) {
       const abs = path.join(this.workspaceDir, rel);
-      const currentExists = fs.existsSync(abs);
-      const before = info.existed && info.backupFile && fs.existsSync(info.backupFile)
-        ? fs.readFileSync(info.backupFile, 'utf8')
+      const currentExists = this._existsSync(abs);
+      const before = info.existed && info.backupFile && this._existsSync(info.backupFile)
+        ? this._readFileSync(info.backupFile)
         : null;
-      const after = currentExists && fs.statSync(abs).isFile() ? fs.readFileSync(abs, 'utf8') : null;
+      const after = currentExists && this._statSync(abs).isFile ? this._readFileSync(abs) : null;
       changes.push({
         path: rel,
         status: !info.existed && currentExists ? 'created' : info.existed && !currentExists ? 'deleted' : 'modified',
@@ -140,12 +205,12 @@ export class WorkspaceSnapshotManager {
     const deleted = [];
     for (const [rel, info] of Object.entries(entry.files || {}) as Array<[string, any]>) {
       const abs = path.join(this.workspaceDir, rel);
-      if (info.existed && info.backupFile && fs.existsSync(info.backupFile)) {
-        fs.mkdirSync(path.dirname(abs), { recursive: true });
-        fs.copyFileSync(info.backupFile, abs);
+      if (info.existed && info.backupFile && this._existsSync(info.backupFile)) {
+        this._mkdirSync(path.dirname(abs));
+        this._copyFileSync(info.backupFile, abs);
         restored.push(rel);
-      } else if (!info.existed && fs.existsSync(abs)) {
-        fs.rmSync(abs, { force: true });
+      } else if (!info.existed && this._existsSync(abs)) {
+        this._rmSync(abs);
         deleted.push(rel);
       }
     }

@@ -7,6 +7,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { OMAgent, OMSelfHealer } from '../dist/index.js';
+import { disposeAllLspClients } from '../dist/skills/codeIntel.js';
 
 function makeTempGitRepo(prefix = 'omega-heal-') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -14,6 +15,12 @@ function makeTempGitRepo(prefix = 'omega-heal-') {
   execFileSync('git', ['config', 'user.email', 'omega-test@example.com'], { cwd: dir, stdio: 'ignore' });
   execFileSync('git', ['config', 'user.name', 'OMega Test'], { cwd: dir, stdio: 'ignore' });
   return dir;
+}
+
+function cleanupTempDir(dir) {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch (_) {}
 }
 
 describe('Autonomous Framework Self-Healing (The Recursive Immune System)', () => {
@@ -178,7 +185,8 @@ describe('Autonomous Framework Self-Healing (The Recursive Immune System)', () =
       const lastCommitMsg = execFileSync('git', ['log', '-1', '--pretty=%s'], { cwd: repoDir, encoding: 'utf8' }).trim();
       assert.ok(lastCommitMsg.startsWith('fix(self-heal):'));
     } finally {
-      fs.rmSync(repoDir, { recursive: true, force: true });
+      disposeAllLspClients();
+      cleanupTempDir(repoDir);
     }
   });
 
@@ -244,7 +252,8 @@ describe('Autonomous Framework Self-Healing (The Recursive Immune System)', () =
       // Verify file was rolled back to original content
       assert.equal(fs.readFileSync(targetFile, 'utf8'), originalContent);
     } finally {
-      fs.rmSync(repoDir, { recursive: true, force: true });
+      disposeAllLspClients();
+      cleanupTempDir(repoDir);
     }
   });
 
@@ -310,7 +319,8 @@ describe('Autonomous Framework Self-Healing (The Recursive Immune System)', () =
       assert.equal(res.healEvents.length, 1);
       assert.equal(res.healEvents[0].committed, true);
     } finally {
-      fs.rmSync(repoDir, { recursive: true, force: true });
+      disposeAllLspClients();
+      cleanupTempDir(repoDir);
     }
   });
 

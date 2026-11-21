@@ -1,14 +1,20 @@
-import type { ProviderChatOptions, ProviderChatResult } from '../types.js';
+import type {
+  ModelInfo,
+  ProviderChatOptions,
+  ProviderChatResult,
+  ProviderConstructorOptions,
+  ProviderLike
+} from '../types.js';
 
 /**
  * Base Model Provider Interface
  */
-export class BaseProvider {
+export class BaseProvider implements ProviderLike {
   name: string;
   model: string;
   baseUrl?: string;
 
-  constructor(options: Record<string, any> = {}) {
+  constructor(options: ProviderConstructorOptions = {}) {
     this.name = options.name || 'base';
     this.model = options.model || 'default';
     this.baseUrl = options.baseUrl;
@@ -18,11 +24,11 @@ export class BaseProvider {
     throw new Error('Provider chat() method must be implemented by subclass');
   }
 
-  async listModels(_options: Record<string, any> = {}): Promise<any[]> {
+  async listModels(_options: Record<string, unknown> = {}): Promise<ModelInfo[]> {
     throw new Error(`listModels() is not implemented for provider '${this.name}'`);
   }
 
-  async ListModels(options: Record<string, any> = {}): Promise<any[]> {
+  async ListModels(options: Record<string, unknown> = {}): Promise<ModelInfo[]> {
     return this.listModels(options);
   }
 }

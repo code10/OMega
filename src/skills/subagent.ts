@@ -74,7 +74,7 @@ export const subagentSkills: SkillDefinition[] = [
         targetWorkspace = tempWorkspace;
       }
 
-      const child = new AgentClass({
+      const child = new (AgentClass as new (options?: Record<string, any>) => any)({
         ...parentAgent.options,
         provider: parentAgent.config.provider,
         model: parentAgent.config.model,

@@ -1,6 +1,6 @@
 import { createProvider } from '../providers/index.js';
 import { compactHistory } from './compaction.js';
-import { OMSelfHealer } from '../selfHeal.js';
+import { OMSelfHealer, type SelfHealResult } from '../selfHeal.js';
 import {
   captureWorkspaceState,
   detectWorkspaceDrift,
@@ -9,23 +9,21 @@ import {
   type CheckpointStatus
 } from './checkpoint.js';
 import { redactSecrets } from '../utils/redact.js';
+import type { OMAgent } from '../agent.js';
+import type { AgentRunOptions, AgentRunResult, ChatMessage, SkillResult, ToolCall } from '../types.js';
 
 /**
  * Execute a single user prompt through the autonomous ReAct loop.
- * @param {any} agent
- * @param {string} prompt
- * @param {Record<string, any>} [options]
- * @returns {Promise<{ content: string, answer?: string, provider?: string, model?: string, target?: string, usage?: Record<string, number>, steps: Array<any>, totalSteps?: number, sessionId?: string, runId?: string, aborted?: boolean, fallbackUsed?: boolean, fallbackEvents?: Array<any>, answers?: Array<any>, success: boolean }>}
  */
 export async function executeAgentRun(
-  agent: any,
+  agent: OMAgent,
   prompt: string,
-  options: Record<string, any> = {}
-): Promise<Record<string, any>> {
+  options: AgentRunOptions = {}
+): Promise<AgentRunResult> {
   const rawMaxSteps = options.maxSteps ?? agent.config.maxSteps ?? 50;
   const maxSteps = rawMaxSteps === 0 ? Infinity : Math.max(1, Number(rawMaxSteps) || 50);
   const resumeCp = options.resumeCheckpoint || null;
-  const steps: any[] = Array.isArray(resumeCp?.steps) ? [...resumeCp.steps] : [];
+  const steps: Array<Record<string, unknown>> = Array.isArray(resumeCp?.steps) ? [...resumeCp.steps] : [];
   const trimmedPrompt = (prompt || resumeCp?.prompt || '').trim();
 
   const controlResponse = agent._handleSlashControl(trimmedPrompt);
@@ -43,7 +41,7 @@ export async function executeAgentRun(
   }
 
   if (resumeCp && Array.isArray(resumeCp.history) && resumeCp.history.length > 0) {
-    agent.history = [...resumeCp.history];
+    agent.history = [...resumeCp.history] as ChatMessage[];
     if (Array.isArray(resumeCp.answers)) {
       agent.answers = [...resumeCp.answers];
     }
@@ -52,7 +50,7 @@ export async function executeAgentRun(
       agent.history.push({ role: 'user', content: effectivePrompt });
     }
   } else {
-    const userMessage: Record<string, any> = { role: 'user', content: effectivePrompt };
+    const userMessage: ChatMessage = { role: 'user', content: effectivePrompt };
     if (Array.isArray(options.attachments) && options.attachments.length > 0) {
       userMessage.attachments = options.attachments;
     }
@@ -66,7 +64,7 @@ export async function executeAgentRun(
   let activeTurnModel = agent.config.model;
   let activeProviderInstance = agent.provider;
   const fallbackEvents = [];
-  const healEvents: any[] = [];
+  const healEvents: SelfHealResult[] = [];
   let healAttempts = 0;
   const selfHealOverride = options.selfHeal === true
     ? { enabled: true }
@@ -108,8 +106,12 @@ export async function executeAgentRun(
   }
   let systemPrompt = agent.buildSystemPrompt({ query: effectivePrompt });
   let promptNeedsRefresh = false;
-  const runUsage = resumeCp?.usage
-    ? { ...resumeCp.usage }
+  const runUsage: { promptTokens: number; completionTokens: number; totalTokens: number } = resumeCp?.usage
+    ? {
+        promptTokens: Number(resumeCp.usage.promptTokens || 0),
+        completionTokens: Number(resumeCp.usage.completionTokens || 0),
+        totalTokens: Number(resumeCp.usage.totalTokens || 0)
+      }
     : { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
 
   const startPayload = { prompt: prompt || effectivePrompt, sessionId: agent.sessionId, provider: agent.config.provider, model: agent.config.model };
@@ -160,7 +162,7 @@ export async function executeAgentRun(
       agent.history.length > 0 &&
       agent.history[agent.history.length - 1]?.role === 'assistant' &&
       Array.isArray(agent.history[agent.history.length - 1]?.toolCalls) &&
-      agent.history[agent.history.length - 1].toolCalls.length > 0
+      (agent.history[agent.history.length - 1].toolCalls?.length ?? 0) > 0
     ) {
       agent.history.pop();
     }
@@ -184,7 +186,7 @@ export async function executeAgentRun(
     }
   }
 
-  const persistCheckpoint = (status: CheckpointStatus, extra: Record<string, any> = {}) => {
+  const persistCheckpoint = (status: CheckpointStatus, extra: Record<string, unknown> = {}) => {
     if (options.checkpoint === false || !agent.config?.memoryDir) return;
     try {
       const wsState = options.detached || status === 'paused'
@@ -489,13 +491,13 @@ export async function executeAgentRun(
         agent._recordActivity('tool_start', toolStartPayload);
       }
 
-      const runToolCall = async (tc: any) => {
+      const runToolCall = async (tc: ToolCall) => {
         const sig = `${tc.name}:${JSON.stringify(tc.args || {})}`;
         const prevCount = seenToolSignatures.get(sig) || 0;
         seenToolSignatures.set(sig, prevCount + 1);
 
         const startTime = Date.now();
-        let result;
+        let result: SkillResult;
         let effectiveArgs = tc.args;
         try {
           const confirmTools = Array.isArray(agent.config.security?.requireConfirmationForTools)
@@ -533,12 +535,12 @@ export async function executeAgentRun(
             args: tc.args
           });
           if (beforeToolCtx.cancel) {
-            result = { success: false, error: beforeToolCtx.reason || `Tool '${tc.name}' blocked by beforeTool hook.` };
+            result = { success: false, error: String(beforeToolCtx.reason || `Tool '${tc.name}' blocked by beforeTool hook.`) };
             return { tc, result, durationMs: Date.now() - startTime, repeated: prevCount >= 1 };
           }
-          effectiveArgs = beforeToolCtx.args || tc.args;
+          effectiveArgs = (beforeToolCtx.args as Record<string, unknown>) || tc.args;
 
-          if ((tc.name === 'write_file' || tc.name === 'patch_file') && effectiveArgs?.path) {
+          if ((tc.name === 'write_file' || tc.name === 'patch_file') && typeof effectiveArgs?.path === 'string') {
             agent.snapshots.captureBeforeMutation(runId, effectiveArgs.path);
           }
 
@@ -546,6 +548,7 @@ export async function executeAgentRun(
             config: agent.config,
             memory: agent.memory,
             agent,
+            execution: agent.execution,
             signal: combinedSignal,
             subagentDepth: options.subagentDepth || 0,
             confirmCommand: options.confirmCommand || agent.options.confirmCommand || agent.confirmCommand
@@ -559,7 +562,7 @@ export async function executeAgentRun(
             const healResult = await OMSelfHealer.heal(
               agent,
               {
-                error: result.stack || result.error || `Tool '${tc.name}' failed`,
+                error: String(result.stack || result.error || `Tool '${tc.name}' failed`),
                 source: 'tool_failure',
                 step: currentStep,
                 toolName: tc.name,
@@ -576,11 +579,12 @@ export async function executeAgentRun(
                 config: agent.config,
                 memory: agent.memory,
                 agent,
+                execution: agent.execution,
                 signal: combinedSignal,
                 subagentDepth: options.subagentDepth || 0,
                 confirmCommand: options.confirmCommand || agent.options.confirmCommand || agent.confirmCommand
               });
-              result = { ...(result && typeof result === 'object' ? result : { value: result }), selfHealed: true, healResult };
+              result = { success: true, ...(result && typeof result === 'object' ? result : { value: result }), selfHealed: true, healResult };
               }
             }
           }
@@ -590,7 +594,7 @@ export async function executeAgentRun(
             args: effectiveArgs,
             result
           });
-          result = afterToolCtx.result;
+          result = afterToolCtx.result as SkillResult;
         } catch (execErr: any) {
           if (canSelfHeal('tool_failure')) {
             healAttempts++;
@@ -615,11 +619,12 @@ export async function executeAgentRun(
                   config: agent.config,
                   memory: agent.memory,
                   agent,
+                  execution: agent.execution,
                   signal: combinedSignal,
                   subagentDepth: options.subagentDepth || 0,
                   confirmCommand: options.confirmCommand || agent.options.confirmCommand || agent.confirmCommand
                 });
-                result = { ...(retryResult && typeof retryResult === 'object' ? retryResult : { value: retryResult }), selfHealed: true, healResult };
+                result = { success: true, ...(retryResult && typeof retryResult === 'object' ? retryResult : { value: retryResult }), selfHealed: true, healResult };
               } catch (retryErr: any) {
                 result = { success: false, error: retryErr.message, selfHealed: true, healResult };
               }
@@ -646,10 +651,10 @@ export async function executeAgentRun(
 
       const stepRecord: {
         step: number;
-        thought: any;
+        thought: unknown;
         provider: string;
         model: string;
-        toolCalls: any[];
+        toolCalls: Array<Record<string, unknown>>;
       } = {
         step: currentStep,
         thought: cleanThought,
@@ -748,7 +753,7 @@ export async function executeAgentRun(
 
     persistCheckpoint('completed', { finishedAt: new Date().toISOString() });
 
-    let worktreeResult: Record<string, any> | undefined;
+    let worktreeResult: Record<string, unknown> | undefined;
     if (activeWorktree && agent.git) {
       try {
         const summary = agent.git.getWorktreeSummary(activeWorktree.worktreePath);

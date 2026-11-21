@@ -1,11 +1,9 @@
-import { exec } from 'node:child_process';
-import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveSafePath } from './filesystem.js';
 import { buildSafeChildEnv, redactSecrets } from '../utils/redact.js';
-import { buildSandboxedCommand, spawnSandboxed } from './sandbox.js';
-import type { SkillContext } from '../types.js';
+import { getExecutionBackend } from '../execution/backend.js';
+import type { SecurityConfig, SkillContext } from '../types.js';
 
 const SHELL_CONTROL_PATTERN = /[;|&`<>\r\n]|\$\(/;
 const DEFAULT_ALLOWED_COMMANDS = ['git'];
@@ -49,6 +47,132 @@ function tokenizeCommand(input: string): string[] {
     tokens.push(current);
   }
   return tokens;
+}
+
+export interface ShellPolicyCheckResult {
+  allowed: boolean;
+  error?: string;
+  directExecutable: string | null;
+  directArgs: string[];
+}
+
+/**
+ * Shared command security policy validator for exec_command and terminal_start.
+ */
+export function validateShellCommandPolicy(
+  commandText: string,
+  security: SecurityConfig = {},
+  executable?: string,
+  args?: unknown[]
+): ShellPolicyCheckResult {
+  const defaultDenied = [':(){ :|:& };:', 'rm -rf /', 'mkfs.', 'dd if=/dev/zero'];
+  const denied = [...defaultDenied, ...(security.deniedCommands || [])];
+  for (const d of denied) {
+    if (d && commandText.toLowerCase().includes(d.toLowerCase())) {
+      return {
+        allowed: false,
+        error: `Security violation: Command contains blocked substring '${d}'`,
+        directExecutable: null,
+        directArgs: []
+      };
+    }
+  }
+
+  const configuredAllowed = Array.isArray(security.allowedCommands) ? security.allowedCommands.filter(Boolean) : [];
+  const allowedList = security.allowAllCommands === true
+    ? []
+    : (configuredAllowed.length > 0 ? configuredAllowed : DEFAULT_ALLOWED_COMMANDS);
+  let directExecutable = executable ? String(executable).trim() : null;
+  let directArgs = Array.isArray(args) ? args.map(String) : [];
+
+  if (allowedList.length > 0) {
+    if (!executable && SHELL_CONTROL_PATTERN.test(commandText)) {
+      return {
+        allowed: false,
+        error: 'Security violation: Shell control operators (;, |, &, `, $(, <, >, newline) are not permitted when security.allowedCommands is active.',
+        directExecutable: null,
+        directArgs: []
+      };
+    }
+
+    if (!directExecutable) {
+      let tokens: string[];
+      try {
+        tokens = tokenizeCommand(commandText.trim());
+      } catch (tokErr: any) {
+        return {
+          allowed: false,
+          error: `Security violation: ${tokErr.message}`,
+          directExecutable: null,
+          directArgs: []
+        };
+      }
+      if (tokens.length === 0) {
+        return {
+          allowed: false,
+          error: 'Security violation: Empty command is not permitted.',
+          directExecutable: null,
+          directArgs: []
+        };
+      }
+      directExecutable = tokens[0];
+      directArgs = tokens.slice(1);
+    }
+
+    const resolvedName = path.basename(directExecutable).toLowerCase();
+    const resolvedStem = resolvedName.replace(/\.(exe|cmd|bat|ps1)$/i, '');
+    const isPermitted = allowedList.some((entry) => {
+      const e = path.basename(String(entry).trim()).toLowerCase();
+      const eStem = e.replace(/\.(exe|cmd|bat|ps1)$/i, '');
+      return resolvedName === e || resolvedStem === eStem;
+    });
+
+    if (!isPermitted) {
+      return {
+        allowed: false,
+        error: `Security violation: Command '${resolvedName}' is not in security.allowedCommands`,
+        directExecutable: null,
+        directArgs: []
+      };
+    }
+
+    if (resolvedStem === 'git') {
+      const isRebase = directArgs.some((a) => a === 'rebase');
+      for (const arg of directArgs) {
+        const lowerArg = String(arg).toLowerCase();
+        if (
+          lowerArg === '-c' ||
+          lowerArg.startsWith('-c=') ||
+          lowerArg === '--config-env' ||
+          lowerArg.startsWith('--config-env=') ||
+          lowerArg === '--exec-path' ||
+          lowerArg.startsWith('--exec-path=') ||
+          lowerArg === '--upload-pack' ||
+          lowerArg.startsWith('--upload-pack=') ||
+          lowerArg === '-u' ||
+          lowerArg === '--receive-pack' ||
+          lowerArg.startsWith('--receive-pack=') ||
+          lowerArg === '--exec' ||
+          lowerArg.startsWith('--exec=') ||
+          lowerArg === '--ext-diff' ||
+          (isRebase && (lowerArg === '-x' || lowerArg.startsWith('-x=')))
+        ) {
+          return {
+            allowed: false,
+            error: `Security violation: Dangerous git flag '${arg}' is blocked.`,
+            directExecutable: null,
+            directArgs: []
+          };
+        }
+      }
+    }
+  }
+
+  return {
+    allowed: true,
+    directExecutable,
+    directArgs
+  };
 }
 
 /**
@@ -95,93 +219,11 @@ export const shellSkills = [
         return { success: false, error: 'Command or executable is required.' };
       }
 
-      // Security check 1: Built-in destructive commands protection + user-configured denied commands
-      const defaultDenied = [':(){ :|:& };:', 'rm -rf /', 'mkfs.', 'dd if=/dev/zero'];
-      const denied = [...defaultDenied, ...(security.deniedCommands || [])];
-      for (const d of denied) {
-        if (d && commandText.toLowerCase().includes(d.toLowerCase())) {
-          return {
-            success: false,
-            error: `Security violation: Command contains blocked substring '${d}'`
-          };
-        }
+      const policy = validateShellCommandPolicy(commandText, security, executable, args);
+      if (!policy.allowed) {
+        return { success: false, error: policy.error };
       }
-
-      // Security check 2: Always enforce allowedCommands allowlist unless allowAllCommands is explicitly enabled
-      const configuredAllowed = Array.isArray(security.allowedCommands) ? security.allowedCommands.filter(Boolean) : [];
-      const allowed = security.allowAllCommands === true
-        ? []
-        : (configuredAllowed.length > 0 ? configuredAllowed : DEFAULT_ALLOWED_COMMANDS);
-      let directExecutable = executable ? String(executable).trim() : null;
-      let directArgs = Array.isArray(args) ? args.map(String) : [];
-
-      if (allowed.length > 0) {
-        if (!executable && SHELL_CONTROL_PATTERN.test(commandText)) {
-          return {
-            success: false,
-            error: 'Security violation: Shell control operators (;, |, &, `, $(, <, >, newline) are not permitted when security.allowedCommands is active.'
-          };
-        }
-
-        if (!directExecutable) {
-          let tokens;
-          try {
-            tokens = tokenizeCommand(commandText.trim());
-          } catch (tokErr: any) {
-            return { success: false, error: `Security violation: ${tokErr.message}` };
-          }
-          if (tokens.length === 0) {
-            return { success: false, error: 'Security violation: Empty command is not permitted.' };
-          }
-          directExecutable = tokens[0];
-          directArgs = tokens.slice(1);
-        }
-
-        const resolvedName = path.basename(directExecutable).toLowerCase();
-        const resolvedStem = resolvedName.replace(/\.(exe|cmd|bat|ps1)$/i, '');
-        const isPermitted = allowed.some((entry) => {
-          const e = path.basename(String(entry).trim()).toLowerCase();
-          const eStem = e.replace(/\.(exe|cmd|bat|ps1)$/i, '');
-          return resolvedName === e || resolvedStem === eStem;
-        });
-
-        if (!isPermitted) {
-          return {
-            success: false,
-            error: `Security violation: Command '${resolvedName}' is not in security.allowedCommands`
-          };
-        }
-
-        // Security check 2b: Block dangerous git flags that execute arbitrary binaries/hooks
-        if (resolvedStem === 'git') {
-          const isRebase = directArgs.some((a) => a === 'rebase');
-          for (const arg of directArgs) {
-            const lowerArg = String(arg).toLowerCase();
-            if (
-              lowerArg === '-c' ||
-              lowerArg.startsWith('-c=') ||
-              lowerArg === '--config-env' ||
-              lowerArg.startsWith('--config-env=') ||
-              lowerArg === '--exec-path' ||
-              lowerArg.startsWith('--exec-path=') ||
-              lowerArg === '--upload-pack' ||
-              lowerArg.startsWith('--upload-pack=') ||
-              lowerArg === '-u' ||
-              lowerArg === '--receive-pack' ||
-              lowerArg.startsWith('--receive-pack=') ||
-              lowerArg === '--exec' ||
-              lowerArg.startsWith('--exec=') ||
-              lowerArg === '--ext-diff' ||
-              (isRebase && (lowerArg === '-x' || lowerArg.startsWith('-x=')))
-            ) {
-              return {
-                success: false,
-                error: `Security violation: Dangerous git flag '${arg}' is blocked.`
-              };
-            }
-          }
-        }
-      }
+      const { directExecutable, directArgs } = policy;
 
       // Security check 3: Require interactive confirmation if configured
       if (security.requireConfirmationForShell) {
@@ -217,9 +259,10 @@ export const shellSkills = [
         };
       }
 
-      if (!fs.existsSync(workingDir)) {
+      const backend = getExecutionBackend(context);
+      if (!(await backend.exists(workingDir))) {
         try {
-          fs.mkdirSync(workingDir, { recursive: true });
+          await backend.mkdir(workingDir, { recursive: true });
         } catch (mkdirErr: any) {
           return {
             success: false,
@@ -233,123 +276,76 @@ export const shellSkills = [
       const allowedEnvVars = Array.isArray(security.allowedEnvVars) ? security.allowedEnvVars : [];
       const childEnv = buildSafeChildEnv(process.env, {}, Boolean(security.inheritSensitiveEnv), allowedEnvVars);
 
-      return new Promise((resolve) => {
-        const handleResult = (error: any, stdout: string, stderr: string) => {
-          const outStr = redactSecrets((stdout || '').trim());
-          const errStr = redactSecrets((stderr || '').trim());
-          const exitCode = error ? (error.code ?? 1) : 0;
-
-          if (error && !outStr && !errStr) {
-            resolve({
-              success: false,
-              exitCode,
-              error: redactSecrets(error.message)
-            });
-          } else {
-            resolve({
-              success: exitCode === 0,
-              exitCode,
-              stdout: outStr || '(no stdout output)',
-              stderr: errStr ? errStr : undefined,
-              timedOut: error?.killed || false
-            });
-          }
+      const formatProcessResult = (res: {
+        exitCode: number;
+        stdout: string;
+        stderr: string;
+        timedOut: boolean;
+        outputTruncated?: boolean;
+        errorMessage?: string;
+        sandboxBackend?: string;
+      }) => {
+        const outStr = redactSecrets((res.stdout || '').trim());
+        const errStr = redactSecrets((res.stderr || '').trim());
+        if (res.errorMessage && !outStr && !errStr) {
+          return {
+            success: false,
+            exitCode: res.exitCode,
+            error: redactSecrets(res.errorMessage),
+            ...(res.sandboxBackend ? { sandboxBackend: res.sandboxBackend } : {})
+          };
+        }
+        return {
+          success: res.exitCode === 0 && !res.timedOut && !res.outputTruncated,
+          exitCode: res.exitCode,
+          stdout: outStr || '(no stdout output)',
+          stderr: errStr ? errStr : undefined,
+          timedOut: res.timedOut,
+          ...(res.outputTruncated ? { outputTruncated: true } : {}),
+          ...(res.sandboxBackend ? { sandboxBackend: res.sandboxBackend } : {})
         };
+      };
 
-        if (directExecutable) {
-          const sandboxPrefix = Array.isArray(security.sandboxCommand) && security.sandboxCommand.length > 0
-            ? security.sandboxCommand.map((part) => String(part).replaceAll('${cwd}', workingDir))
-            : null;
-
-          let invocation;
-          if (sandboxPrefix) {
-            invocation = {
-              backend: 'custom',
-              executable: sandboxPrefix[0],
-              args: [...sandboxPrefix.slice(1), directExecutable, ...directArgs],
-              cleanup: () => {}
-            };
-          } else {
-            try {
-              invocation = buildSandboxedCommand(directExecutable, directArgs, workingDir, security.sandbox || {});
-            } catch (sandboxErr: any) {
-              resolve({ success: false, error: sandboxErr?.message || String(sandboxErr) });
-              return;
-            }
-          }
-
-          spawnSandboxed(invocation.executable, invocation.args, {
+      if (directExecutable) {
+        try {
+          const res = await backend.spawn(directExecutable, directArgs, {
             cwd: workingDir,
             env: childEnv,
             timeoutMs: safeTimeout,
             maxOutputBytes: security.sandbox?.maxOutputBytes,
-            cleanup: invocation.cleanup
-          }).then((res) => {
-            const outStr = redactSecrets((res.stdout || '').trim());
-            const errStr = redactSecrets((res.stderr || '').trim());
-            if (res.errorMessage && !outStr && !errStr) {
-              resolve({
-                success: false,
-                exitCode: res.exitCode,
-                error: redactSecrets(res.errorMessage),
-                sandboxBackend: invocation.backend
-              });
-            } else {
-              resolve({
-                success: res.exitCode === 0 && !res.timedOut && !res.outputTruncated,
-                exitCode: res.exitCode,
-                stdout: outStr || '(no stdout output)',
-                stderr: errStr ? errStr : undefined,
-                timedOut: res.timedOut,
-                outputTruncated: res.outputTruncated || undefined,
-                sandboxBackend: invocation.backend
-              });
-            }
+            sandbox: security.sandbox || {},
+            sandboxCommand: security.sandboxCommand
           });
-        } else {
-          if (security.sandbox?.strict || security.sandbox?.mode === 'os' || security.sandbox?.mode === 'container') {
-            const shellFlag = os.platform() === 'win32' ? '-Command' : '-c';
-            let invocation;
-            try {
-              invocation = buildSandboxedCommand(shell, [shellFlag, commandText], workingDir, security.sandbox || {});
-            } catch (sandboxErr: any) {
-              resolve({ success: false, error: sandboxErr?.message || String(sandboxErr) });
-              return;
-            }
-            spawnSandboxed(invocation.executable, invocation.args, {
-              cwd: workingDir,
-              env: childEnv,
-              timeoutMs: safeTimeout,
-              maxOutputBytes: security.sandbox?.maxOutputBytes,
-              cleanup: invocation.cleanup
-            }).then((res) => {
-              const outStr = redactSecrets((res.stdout || '').trim());
-              const errStr = redactSecrets((res.stderr || '').trim());
-              resolve({
-                success: res.exitCode === 0 && !res.timedOut && !res.outputTruncated,
-                exitCode: res.exitCode,
-                stdout: outStr || '(no stdout output)',
-                stderr: errStr ? errStr : undefined,
-                timedOut: res.timedOut,
-                outputTruncated: res.outputTruncated || undefined,
-                sandboxBackend: invocation.backend
-              });
-            });
-            return;
-          }
-          exec(
-            commandText,
-            {
-              cwd: workingDir,
-              timeout: safeTimeout,
-              shell,
-              env: childEnv,
-              maxBuffer: 10 * 1024 * 1024 // 10MB
-            },
-            handleResult
-          );
+          return formatProcessResult(res);
+        } catch (sandboxErr: any) {
+          return { success: false, error: sandboxErr?.message || String(sandboxErr) };
         }
+      }
+
+      if (security.sandbox?.strict || security.sandbox?.mode === 'os' || security.sandbox?.mode === 'container') {
+        const shellFlag = os.platform() === 'win32' ? '-Command' : '-c';
+        try {
+          const res = await backend.spawn(shell, [shellFlag, commandText], {
+            cwd: workingDir,
+            env: childEnv,
+            timeoutMs: safeTimeout,
+            maxOutputBytes: security.sandbox?.maxOutputBytes,
+            sandbox: security.sandbox || {}
+          });
+          return formatProcessResult(res);
+        } catch (sandboxErr: any) {
+          return { success: false, error: sandboxErr?.message || String(sandboxErr) };
+        }
+      }
+
+      const res = await backend.exec(commandText, {
+        cwd: workingDir,
+        timeoutMs: safeTimeout,
+        shell,
+        env: childEnv,
+        maxBuffer: 10 * 1024 * 1024
       });
+      return formatProcessResult(res);
     }
   }
 ];

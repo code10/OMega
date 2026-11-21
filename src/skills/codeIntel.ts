@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import type { SkillContext } from '../types.js';
+import type { ExecutionBackend, SkillContext } from '../types.js';
+import { defaultLocalExecutionBackend, getExecutionBackend } from '../execution/backend.js';
 import { resolveSafePath } from './filesystem.js';
 
 const CODE_EXT_RE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/i;
@@ -50,6 +51,7 @@ interface OpenFileState {
 
 class TSLspClient {
   rootDir: string;
+  execution: ExecutionBackend;
   proc: ChildProcessWithoutNullStreams | null = null;
   initPromise: Promise<void> | null = null;
   nextId = 1;
@@ -59,8 +61,9 @@ class TSLspClient {
   diagnosticsByUri = new Map<string, any[]>();
   idleTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(rootDir: string) {
+  constructor(rootDir: string, execution: ExecutionBackend = defaultLocalExecutionBackend) {
     this.rootDir = path.resolve(rootDir);
+    this.execution = execution;
   }
 
   private bumpIdleTimer() {
@@ -114,10 +117,12 @@ class TSLspClient {
         throw new Error('TypeScript LSP server is not available in this environment.');
       }
 
-      const proc = spawn(resolved.cmd, resolved.args, {
-        cwd: this.rootDir,
-        stdio: ['pipe', 'pipe', 'pipe']
-      });
+      const proc = this.execution.spawnInteractive
+        ? this.execution.spawnInteractive(resolved.cmd, resolved.args, { cwd: this.rootDir, env: process.env })
+        : spawn(resolved.cmd, resolved.args, {
+            cwd: this.rootDir,
+            stdio: ['pipe', 'pipe', 'pipe']
+          });
       this.proc = proc;
       this.setStreamsRef(false);
 
@@ -227,10 +232,10 @@ class TSLspClient {
     });
   }
 
-  syncFile(filePath: string): { uri: string; content: string } | null {
-    if (!fs.existsSync(filePath)) return null;
-    const stat = fs.statSync(filePath);
-    if (!stat.isFile()) return null;
+  async syncFile(filePath: string): Promise<{ uri: string; content: string } | null> {
+    if (!(await this.execution.exists(filePath))) return null;
+    const stat = await this.execution.stat(filePath);
+    if (!stat.isFile) return null;
 
     const uri = pathToFileURL(path.resolve(filePath)).href;
     const cached = this.openFiles.get(uri);
@@ -238,7 +243,7 @@ class TSLspClient {
       return { uri, content: cached.content };
     }
 
-    const content = fs.readFileSync(filePath, 'utf8');
+    const content = await this.execution.readFile(filePath, 'utf8');
     const ext = path.extname(filePath).toLowerCase();
     const languageId = ext === '.tsx' ? 'typescriptreact' : ext === '.jsx' ? 'javascriptreact' : ext.includes('js') ? 'javascript' : 'typescript';
 
@@ -267,6 +272,9 @@ class TSLspClient {
     }
     if (this.proc) {
       try {
+        this.proc.stdin?.destroy();
+        this.proc.stdout?.destroy();
+        this.proc.stderr?.destroy();
         this.proc.kill();
       } catch (_) {}
       this.proc = null;
@@ -278,11 +286,18 @@ class TSLspClient {
 
 const clientCache = new Map<string, TSLspClient>();
 
-function getLspClient(workspaceDir: string): TSLspClient {
-  const key = path.resolve(workspaceDir || process.cwd());
+export function disposeAllLspClients() {
+  for (const client of clientCache.values()) {
+    client.dispose();
+  }
+  clientCache.clear();
+}
+
+function getLspClient(workspaceDir: string, execution: ExecutionBackend = defaultLocalExecutionBackend): TSLspClient {
+  const key = `${execution.name}:${path.resolve(workspaceDir || process.cwd())}`;
   let client = clientCache.get(key);
   if (!client) {
-    client = new TSLspClient(key);
+    client = new TSLspClient(workspaceDir, execution);
     clientCache.set(key, client);
   }
   return client;
@@ -352,16 +367,21 @@ function getLinePreview(filePath: string, zeroBasedLine: number): string {
 /**
  * Run fast TypeScript LSP diagnostics on a single file (used by auto-diagnostics after edits).
  */
-export async function getFileDiagnostics(filePath: string, workspaceDir: string, maxDiagnostics = 20) {
+export async function getFileDiagnostics(
+  filePath: string,
+  workspaceDir: string,
+  maxDiagnostics = 20,
+  execution: ExecutionBackend = defaultLocalExecutionBackend
+) {
   if (!CODE_EXT_RE.test(filePath)) return [];
-  const client = getLspClient(workspaceDir);
+  const client = getLspClient(workspaceDir, execution);
   try {
     await client.ensureStarted();
   } catch (_) {
     return [];
   }
 
-  const synced = client.syncFile(filePath);
+  const synced = await client.syncFile(filePath);
   if (!synced) return [];
 
   let items: any[] = [];
@@ -407,14 +427,14 @@ export const codeIntelSkills = [
       }
       if (!fs.existsSync(target)) return { success: false, error: `File not found: ${filePath}` };
 
-      const client = getLspClient(workspaceDir);
+      const client = getLspClient(workspaceDir, getExecutionBackend(context));
       try {
         await client.ensureStarted();
       } catch (err: any) {
         return { success: false, error: err.message };
       }
 
-      const synced = client.syncFile(target);
+      const synced = await client.syncFile(target);
       if (!synced) return { success: false, error: `Unable to read file: ${filePath}` };
 
       const raw = await client.request('textDocument/documentSymbol', {
@@ -453,14 +473,14 @@ export const codeIntelSkills = [
       }
       if (!fs.existsSync(target)) return { success: false, error: `File not found: ${filePath}` };
 
-      const client = getLspClient(workspaceDir);
+      const client = getLspClient(workspaceDir, getExecutionBackend(context));
       try {
         await client.ensureStarted();
       } catch (err: any) {
         return { success: false, error: err.message };
       }
 
-      const synced = client.syncFile(target);
+      const synced = await client.syncFile(target);
       if (!synced) return { success: false, error: `Unable to read file: ${filePath}` };
 
       const pos = resolveLineCol(synced.content, line, column, symbol);
@@ -516,14 +536,14 @@ export const codeIntelSkills = [
       }
       if (!fs.existsSync(target)) return { success: false, error: `File not found: ${filePath}` };
 
-      const client = getLspClient(workspaceDir);
+      const client = getLspClient(workspaceDir, getExecutionBackend(context));
       try {
         await client.ensureStarted();
       } catch (err: any) {
         return { success: false, error: err.message };
       }
 
-      const synced = client.syncFile(target);
+      const synced = await client.syncFile(target);
       if (!synced) return { success: false, error: `Unable to read file: ${filePath}` };
 
       const pos = resolveLineCol(synced.content, line, column, symbol);
@@ -575,10 +595,89 @@ export const codeIntelSkills = [
       }
       if (!fs.existsSync(target)) return { success: false, error: `File not found: ${filePath}` };
 
-      const diagnostics = await getFileDiagnostics(target, workspaceDir, maxDiagnostics);
+      const diagnostics = await getFileDiagnostics(target, workspaceDir, maxDiagnostics, getExecutionBackend(context));
       return {
         success: true,
         file: path.relative(path.resolve(workspaceDir), target),
+        errorCount: diagnostics.filter((d) => d.category === 'error').length,
+        diagnostics
+      };
+    }
+  },
+
+  {
+    name: 'get_workspace_diagnostics',
+    description: 'Run project-wide TypeScript typechecking diagnostics across the workspace using the execution backend.',
+    parameters: {
+      type: 'object',
+      properties: {
+        tsconfigPath: { type: 'string', description: 'Optional path to tsconfig.json (defaults to workspace tsconfig.json)' },
+        maxDiagnostics: { type: 'number', description: 'Maximum diagnostics to return (default: 50)' }
+      }
+    },
+    execute: async ({ tsconfigPath, maxDiagnostics = 50 }: { tsconfigPath?: string; maxDiagnostics?: number }, context: SkillContext = {}) => {
+      const workspaceDir = path.resolve(context.config?.workspaceDir || process.cwd());
+      const backend = getExecutionBackend(context);
+
+      let tscExe: string | null = null;
+      for (const reqBase of [path.join(workspaceDir, 'package.json'), import.meta.url]) {
+        try {
+          const req = createRequire(reqBase);
+          const tsPkgPath = req.resolve('typescript/package.json');
+          const getExe = path.join(path.dirname(tsPkgPath), 'lib', 'getExePath.js');
+          if (fs.existsSync(getExe)) {
+            const mod = await import(pathToFileURL(getExe).href);
+            const exe = typeof mod.default === 'function' ? mod.default() : null;
+            if (exe && fs.existsSync(exe)) {
+              tscExe = exe;
+              break;
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (!tscExe) {
+        return { success: false, error: 'TypeScript compiler (tsc) is not available in this environment.' };
+      }
+
+      const args = ['--noEmit', '--pretty', 'false'];
+      if (tsconfigPath) {
+        try {
+          const safeTsConfig = resolveSafePath(tsconfigPath, workspaceDir, context);
+          args.push('-p', safeTsConfig);
+        } catch (err: any) {
+          return { success: false, error: err.message };
+        }
+      }
+
+      const res = await backend.spawn(tscExe, args, {
+        cwd: workspaceDir,
+        env: process.env,
+        timeoutMs: 60000
+      });
+
+      const combined = `${res.stdout || ''}\n${res.stderr || ''}`.trim();
+      const diagRegex = /^(.+?)\((\d+),(\d+)\):\s+(error|warning|message)\s+(TS\d+):\s+(.+)$/;
+      const diagnostics: Array<{ file: string; line: number; column: number; category: string; code: string; message: string }> = [];
+
+      for (const line of combined.split(/\r?\n/)) {
+        const m = diagRegex.exec(line.trim());
+        if (m) {
+          diagnostics.push({
+            file: path.relative(workspaceDir, path.resolve(workspaceDir, m[1])),
+            line: Number(m[2]),
+            column: Number(m[3]),
+            category: m[4],
+            code: m[5],
+            message: m[6]
+          });
+          if (diagnostics.length >= maxDiagnostics) break;
+        }
+      }
+
+      return {
+        success: true,
+        exitCode: res.exitCode,
         errorCount: diagnostics.filter((d) => d.category === 'error').length,
         diagnostics
       };

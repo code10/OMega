@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
 import path from 'node:path';
+import { defaultLocalExecutionBackend } from './execution/backend.js';
+import type { ExecutionBackend } from './types.js';
 
 /**
  * Zero-dependency Git integration for repository inspection, diffing,
@@ -8,9 +9,11 @@ import path from 'node:path';
  */
 export class OMGitManager {
   workspaceDir: string;
+  execution: ExecutionBackend;
 
-  constructor(workspaceDir = process.cwd()) {
+  constructor(workspaceDir = process.cwd(), execution: ExecutionBackend = defaultLocalExecutionBackend) {
     this.workspaceDir = path.resolve(workspaceDir || process.cwd());
+    this.execution = execution;
   }
 
   /**
@@ -21,6 +24,9 @@ export class OMGitManager {
    */
   _exec(args: string[], cwd = this.workspaceDir) {
     try {
+      if (typeof this.execution.execSync === 'function') {
+        return this.execution.execSync('git', args, { cwd });
+      }
       return execFileSync('git', args, {
         cwd,
         encoding: 'utf8',
@@ -116,7 +122,7 @@ export class OMGitManager {
    */
   createWorktree(worktreePath: string, branchName = `om-wt-${Date.now().toString(36)}`) {
     const absPath = path.resolve(this.workspaceDir, worktreePath);
-    fs.mkdirSync(path.dirname(absPath), { recursive: true });
+    this.execution.mkdir(path.dirname(absPath), { recursive: true });
     this._exec(['worktree', 'add', '-b', branchName, absPath]);
     this._linkWorktreeDependencies(absPath);
     return { worktreePath: absPath, branch: branchName };
@@ -129,10 +135,10 @@ export class OMGitManager {
   _linkWorktreeDependencies(absWorktreePath: string) {
     const mainNodeModules = path.join(this.workspaceDir, 'node_modules');
     const wtNodeModules = path.join(absWorktreePath, 'node_modules');
-    if (fs.existsSync(mainNodeModules) && !fs.existsSync(wtNodeModules)) {
+    if (this.execution.exists(mainNodeModules) && !this.execution.exists(wtNodeModules)) {
       try {
         const linkType = process.platform === 'win32' ? 'junction' : 'dir';
-        fs.symlinkSync(mainNodeModules, wtNodeModules, linkType);
+        this.execution.symlink?.(mainNodeModules, wtNodeModules, linkType);
       } catch (_) {
         // Best-effort; worktree still functions if symlink/junction is unsupported
       }
@@ -145,13 +151,8 @@ export class OMGitManager {
   _unlinkWorktreeDependencies(absWorktreePath: string) {
     const wtNodeModules = path.join(absWorktreePath, 'node_modules');
     try {
-      const stat = fs.lstatSync(wtNodeModules);
-      if (stat.isSymbolicLink()) {
-        if (process.platform === 'win32') {
-          fs.rmdirSync(wtNodeModules);
-        } else {
-          fs.unlinkSync(wtNodeModules);
-        }
+      if (this.execution.isSymlink?.(wtNodeModules)) {
+        this.execution.unlink?.(wtNodeModules);
       }
     } catch (_) {
       // Ignore if not present
@@ -189,12 +190,12 @@ export class OMGitManager {
     for (const f of untrackedFiles) {
       const fullPath = path.join(absPath, f.path);
       try {
-        const stat = fs.statSync(fullPath);
-        if (!stat.isFile() || stat.size > 32768) continue;
-        const content = fs.readFileSync(fullPath, 'utf8');
-        if (content.includes('\u0000')) continue; // skip binary
+        const stat = this.execution.stat(fullPath);
+        if (stat instanceof Promise || !stat.isFile || stat.size > 32768) continue;
+        const content = this.execution.readFile(fullPath, 'utf8');
+        if (typeof content !== 'string' || content.includes('\u0000')) continue; // skip binary
         const lines = content.split(/\r?\n/);
-        const hunkBody = lines.map((l) => `+${l}`).join('\n');
+        const hunkBody = lines.map((l: string) => `+${l}`).join('\n');
         const synthetic = `diff --git a/${f.path} b/${f.path}\nnew file mode 100644\n--- /dev/null\n+++ b/${f.path}\n@@ -0,0 +1,${lines.length} @@\n${hunkBody}\n`;
         diff = diff ? `${diff}\n${synthetic}` : synthetic;
       } catch (_) {
@@ -224,7 +225,7 @@ export class OMGitManager {
    */
   mergeWorktree(worktreePath: string, branchName: string, commitMessage = `OMega task merge (${branchName})`) {
     const absPath = path.resolve(this.workspaceDir, worktreePath);
-    const wtGit = new OMGitManager(absPath);
+    const wtGit = new OMGitManager(absPath, this.execution);
     const wtStatus = wtGit.getStatus();
     if (!wtStatus.clean) {
       wtGit.commit(commitMessage);
@@ -239,7 +240,7 @@ export class OMGitManager {
    */
   discardWorktree(worktreePath: string, branchName?: string) {
     const absPath = path.resolve(this.workspaceDir, worktreePath);
-    if (fs.existsSync(absPath)) {
+    if (this.execution.exists(absPath)) {
       this.removeWorktree(absPath, true);
     }
     if (branchName && branchName !== 'HEAD') {

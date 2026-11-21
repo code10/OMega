@@ -11,6 +11,8 @@ import { subagentSkills } from './subagent.js';
 import { gitSkills } from './git.js';
 import { codeIntelSkills } from './codeIntel.js';
 import { browserSkills } from './browser.js';
+import { terminalSkills } from './terminal.js';
+import type { SkillContext, SkillDefinition, SkillResult, ToolParametersSchema } from '../types.js';
 
 /**
  * Lightweight frontmatter parser for SKILL.md files
@@ -34,7 +36,7 @@ export function parseSkillMarkdown(content: string, defaultName = 'workflow-skil
 
   const rawFrontmatter = fmMatch[1];
   const body = fmMatch[2].trim();
-  const meta: Record<string, any> = {};
+  const meta: Record<string, string | boolean> = {};
 
   const lines = rawFrontmatter.split(/\r?\n/);
   let currentKey: string | null = null;
@@ -67,7 +69,7 @@ export function parseSkillMarkdown(content: string, defaultName = 'workflow-skil
     meta[currentKey] = isFolded ? multilineVal.join(' ').trim() : multilineVal.join('\n').trim();
   }
 
-  let triggers = [];
+  let triggers: string[] = [];
   if (meta.triggers) {
     if (typeof meta.triggers === 'string') {
       const cleaned = meta.triggers.replace(/^\[|\]$/g, '').trim();
@@ -84,8 +86,8 @@ export function parseSkillMarkdown(content: string, defaultName = 'workflow-skil
     disableModelInvocation = meta.disableModelInvocation === 'true' || meta.disableModelInvocation === true;
   }
 
-  const name = meta.name ? meta.name.replace(/^['"]|['"]$/g, '').trim() : defaultName;
-  const description = meta.description ? meta.description.replace(/^['"]|['"]$/g, '').trim() : `Workflow playbook for ${name}`;
+  const name = typeof meta.name === 'string' ? meta.name.replace(/^['"]|['"]$/g, '').trim() : defaultName;
+  const description = typeof meta.description === 'string' ? meta.description.replace(/^['"]|['"]$/g, '').trim() : `Workflow playbook for ${name}`;
 
   return {
     name,
@@ -98,7 +100,7 @@ export function parseSkillMarkdown(content: string, defaultName = 'workflow-skil
 }
 
 export class SkillRegistry {
-  skills: Map<string, any>;
+  skills: Map<string, SkillDefinition<any>>;
 
   constructor() {
     this.skills = new Map();
@@ -118,7 +120,8 @@ export class SkillRegistry {
       ...subagentSkills,
       ...gitSkills,
       ...codeIntelSkills,
-      ...browserSkills
+      ...browserSkills,
+      ...terminalSkills
     ]) {
       this.register({ ...skill, source: 'builtin' }, 'builtin');
     }
@@ -127,7 +130,7 @@ export class SkillRegistry {
   /**
    * Register a new skill definition
    */
-  register(skill: Record<string, any>, sourceOverride?: string) {
+  register(skill: SkillDefinition<any>, sourceOverride?: string) {
     if (!skill || !skill.name) {
       throw new Error('Skill must have a name');
     }
@@ -152,10 +155,17 @@ export class SkillRegistry {
     return this;
   }
 
-  _registerModuleExports(module: Record<string, any>, source = 'directory') {
+  _registerModuleExports(
+    module: {
+      skill?: SkillDefinition<any>;
+      skills?: SkillDefinition<any>[];
+      default?: SkillDefinition<any> | SkillDefinition<any>[];
+    },
+    source = 'directory'
+  ) {
     if (!module) return;
     if (Array.isArray(module.skills)) {
-      module.skills.forEach((s: any) => this.register(s, source));
+      module.skills.forEach((s) => this.register(s, source));
     } else if (module.skill) {
       this.register(module.skill, source);
     } else if (module.default && typeof module.default === 'object') {
@@ -180,7 +190,7 @@ export class SkillRegistry {
     return Array.from(this.skills.values());
   }
 
-  _validateArgs(parameters: Record<string, any>, args: Record<string, any>) {
+  _validateArgs(parameters: ToolParametersSchema | Record<string, unknown>, args: Record<string, unknown>) {
     if (!parameters || typeof parameters !== 'object') return null;
     const safeArgs = args && typeof args === 'object' ? args : {};
     const required = Array.isArray(parameters.required) ? parameters.required : [];
@@ -189,7 +199,7 @@ export class SkillRegistry {
         return `Missing required parameter '${key}'`;
       }
     }
-    const props = parameters.properties || {};
+    const props = (parameters.properties || {}) as Record<string, { type?: string } | undefined>;
     for (const [key, val] of Object.entries(safeArgs)) {
       const propSchema = props[key];
       if (!propSchema || val === undefined || val === null) continue;
@@ -212,7 +222,7 @@ export class SkillRegistry {
   /**
    * Execute a skill safely
    */
-  async execute(name: string, args: Record<string, any>, context: Record<string, any> = {}) {
+  async execute(name: string, args: Record<string, unknown>, context: SkillContext = {}): Promise<SkillResult> {
     const skill = this.skills.get(name);
     if (!skill) {
       return {
@@ -230,7 +240,8 @@ export class SkillRegistry {
     }
 
     try {
-      return await skill.execute(args || {}, context);
+      const res = await skill.execute(args || {}, context);
+      return (res && typeof res === 'object' ? res : { success: true, value: res }) as SkillResult;
     } catch (err: any) {
       return {
         success: false,
@@ -321,7 +332,7 @@ export class SkillRegistry {
                   }
                 }
               },
-              execute: async (args: Record<string, any> = {}, _context: Record<string, any> = {}) => {
+              execute: async (args: Record<string, unknown> = {}, _context: SkillContext = {}) => {
                 return {
                   success: true,
                   name: parsed.name,
@@ -374,7 +385,7 @@ export class SkillRegistry {
                 }
               }
             },
-            execute: async (args: Record<string, any> = {}, _context: Record<string, any> = {}) => {
+            execute: async (args: Record<string, unknown> = {}, _context: SkillContext = {}) => {
               return {
                 success: true,
                 name: parsed.name,

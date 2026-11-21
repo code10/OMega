@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { SkillContext } from '../types.js';
+import { getExecutionBackend } from '../execution/backend.js';
 import { getFileDiagnostics } from './codeIntel.js';
 
 function resolveRealOrAbs(p: string): string {
@@ -43,7 +44,7 @@ export function resolveSafePath(filePath: string, baseDir = process.cwd(), conte
     context?.config?.skillsDir,
     ...(Array.isArray(security.allowedPaths) ? security.allowedPaths : [])
   ]
-    .filter(Boolean)
+    .filter((r): r is string => Boolean(r))
     .map((r) => resolveRealOrAbs(r));
 
   const isAllowed = allowedRoots.some((root) => isWithinRoot(resolvedTarget, root));
@@ -96,23 +97,24 @@ export const filesystemSkills = [
       },
       required: ['path']
     },
-    execute: async ({ path: filePath, startLine, endLine }: Record<string, any>, context: SkillContext = {}) => {
+    execute: async ({ path: filePath, startLine, endLine }: { path: string; startLine?: number; endLine?: number }, context: SkillContext = {}) => {
+      const backend = getExecutionBackend(context);
       let target;
       try {
         target = resolveSafePath(filePath, context.config?.workspaceDir, context);
       } catch (err: any) {
         return { success: false, error: err.message };
       }
-      if (!fs.existsSync(target)) {
+      if (!(await backend.exists(target))) {
         return { success: false, error: `File not found: ${filePath}` };
       }
 
-      const stat = fs.statSync(target);
-      if (stat.isDirectory()) {
+      const stat = await backend.stat(target);
+      if (stat.isDirectory) {
         return { success: false, error: `Target is a directory, not a file: ${filePath}. Use list_dir instead.` };
       }
 
-      const content = fs.readFileSync(target, 'utf8');
+      const content = await backend.readFile(target, 'utf8');
       const lines = content.split('\n');
 
       if (startLine !== undefined || endLine !== undefined) {
@@ -161,7 +163,8 @@ export const filesystemSkills = [
       },
       required: ['path', 'content']
     },
-    execute: async ({ path: filePath, content }: Record<string, any>, context: SkillContext = {}) => {
+    execute: async ({ path: filePath, content }: { path: string; content: string }, context: SkillContext = {}) => {
+      const backend = getExecutionBackend(context);
       let target;
       try {
         target = resolveSafePath(filePath, context.config?.workspaceDir, context);
@@ -171,11 +174,11 @@ export const filesystemSkills = [
       }
       const parentDir = path.dirname(target);
 
-      if (!fs.existsSync(parentDir)) {
-        fs.mkdirSync(parentDir, { recursive: true });
+      if (!(await backend.exists(parentDir))) {
+        await backend.mkdir(parentDir, { recursive: true });
       }
 
-      fs.writeFileSync(target, content, 'utf8');
+      await backend.writeFile(target, content, 'utf8');
       const diagnostics = await getFileDiagnostics(target, context.config?.workspaceDir || process.cwd(), 10);
       return {
         success: true,
@@ -195,22 +198,23 @@ export const filesystemSkills = [
         path: { type: 'string', description: 'Directory path to list (defaults to current workspace directory)' }
       }
     },
-    execute: async ({ path: dirPath = '.' }, context: SkillContext = {}) => {
+    execute: async ({ path: dirPath = '.' }: { path?: string }, context: SkillContext = {}) => {
+      const backend = getExecutionBackend(context);
       let target;
       try {
         target = resolveSafePath(dirPath, context.config?.workspaceDir, context);
       } catch (err: any) {
         return { success: false, error: err.message };
       }
-      if (!fs.existsSync(target)) {
+      if (!(await backend.exists(target))) {
         return { success: false, error: `Directory not found: ${dirPath}` };
       }
 
-      const entries = fs.readdirSync(target, { withFileTypes: true });
+      const entries = await backend.readdir(target);
       const items = entries.map((entry) => ({
         name: entry.name,
-        isDirectory: entry.isDirectory(),
-        isFile: entry.isFile()
+        isDirectory: entry.isDirectory,
+        isFile: entry.isFile
       }));
 
       return {
@@ -246,7 +250,16 @@ export const filesystemSkills = [
       },
       required: ['path']
     },
-    execute: async ({ path: filePath, targetText, replacementText, edits }: Record<string, any>, context: SkillContext = {}) => {
+    execute: async (
+      { path: filePath, targetText, replacementText, edits }: {
+        path: string;
+        targetText?: string;
+        replacementText?: string;
+        edits?: Array<{ targetText: string; replacementText: string }>;
+      },
+      context: SkillContext = {}
+    ) => {
+      const backend = getExecutionBackend(context);
       let target;
       try {
         target = resolveSafePath(filePath, context.config?.workspaceDir, context);
@@ -254,7 +267,7 @@ export const filesystemSkills = [
       } catch (err: any) {
         return { success: false, error: err.message };
       }
-      if (!fs.existsSync(target)) {
+      if (!(await backend.exists(target))) {
         return { success: false, error: `File not found: ${filePath}` };
       }
 
@@ -268,7 +281,7 @@ export const filesystemSkills = [
         return { success: false, error: 'Either targetText/replacementText or a non-empty edits array is required.' };
       }
 
-      const raw = fs.readFileSync(target, 'utf8');
+      const raw = await backend.readFile(target, 'utf8');
       const usesCRLF = raw.includes('\r\n');
       let working = raw;
 
@@ -289,7 +302,7 @@ export const filesystemSkills = [
         }
       }
 
-      fs.writeFileSync(target, working, 'utf8');
+      await backend.writeFile(target, working, 'utf8');
       const diagnostics = await getFileDiagnostics(target, context.config?.workspaceDir || process.cwd(), 10);
       return {
         success: true,
@@ -315,14 +328,15 @@ export const filesystemSkills = [
       },
       required: ['query']
     },
-    execute: async ({ query, dir = '.', filePattern, regex = false, maxResults = 20 }: Record<string, any>, context: SkillContext = {}) => {
+    execute: async ({ query, dir = '.', filePattern, regex = false, maxResults = 20 }: { query: string; dir?: string; filePattern?: string; regex?: boolean; maxResults?: number }, context: SkillContext = {}) => {
+      const backend = getExecutionBackend(context);
       let targetDir: string;
       try {
         targetDir = resolveSafePath(dir, context.config?.workspaceDir, context);
       } catch (err: any) {
         return { success: false, error: err.message };
       }
-      if (!fs.existsSync(targetDir)) {
+      if (!(await backend.exists(targetDir))) {
         return { success: false, error: `Directory not found: ${dir}` };
       }
 
@@ -353,11 +367,11 @@ export const filesystemSkills = [
       const BINARY_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.ico', '.webp', '.pdf', '.zip', '.tar', '.gz', '.bin', '.exe', '.dll', '.dylib', '.so']);
       const MAX_SEARCH_FILE_SIZE = 2 * 1024 * 1024; // 2MB
 
-      function walk(currentDir: string) {
+      async function walk(currentDir: string) {
         if (results.length >= maxResults) return;
         let entries;
         try {
-          entries = fs.readdirSync(currentDir, { withFileTypes: true });
+          entries = await backend.readdir(currentDir);
         } catch (_: any) {
           return;
         }
@@ -367,18 +381,18 @@ export const filesystemSkills = [
           if (IGNORED_DIRS.has(entry.name)) continue;
 
           const fullPath = path.join(currentDir, entry.name);
-          if (entry.isDirectory()) {
-            walk(fullPath);
-          } else if (entry.isFile()) {
+          if (entry.isDirectory) {
+            await walk(fullPath);
+          } else if (entry.isFile) {
             if (fileFilter && !fileFilter(entry.name)) continue;
             const ext = path.extname(entry.name).toLowerCase();
             if (BINARY_EXTENSIONS.has(ext)) continue;
 
             try {
-              const stat = fs.statSync(fullPath);
+              const stat = await backend.stat(fullPath);
               if (stat.size > MAX_SEARCH_FILE_SIZE) continue;
 
-              const text = fs.readFileSync(fullPath, 'utf8');
+              const text = await backend.readFile(fullPath, 'utf8');
               // Check if file is binary (contains null bytes)
               if (text.includes('\0')) continue;
 
@@ -401,7 +415,7 @@ export const filesystemSkills = [
         }
       }
 
-      walk(targetDir);
+      await walk(targetDir);
       return {
         success: true,
         query,

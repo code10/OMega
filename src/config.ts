@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { OMConfig } from './types.js';
+import type { OMAgentOptions, OMConfig } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,7 +36,7 @@ export function loadEnv(customPath?: string, override = false) {
 /**
  * Load and merge config from om.config.json and environment.
  */
-export function loadConfig(overrides: Record<string, any> = {}): OMConfig {
+export function loadConfig(overrides: OMAgentOptions = {}): OMConfig {
   loadEnv(undefined, Boolean(overrides.reloadEnv));
 
   const configPath = path.join(ROOT_DIR, 'om.config.json');
