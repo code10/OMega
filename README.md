@@ -10,7 +10,7 @@
 [![Tests](https://img.shields.io/badge/tests-143%20passed-success.svg)](tests/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](README.md)
 
-**OM** is a lightweight, local-first Node.js agent runtime you control completely—running offline on your hardware or routed across cloud models, with human-in-the-loop approvals, rollback snapshots, and Git-inspectable memory built in.
+**OM** is a lightweight, local-first Node.js agent runtime you control completely running offline on your hardware or routed across cloud models, with human-in-the-loop approvals, rollback snapshots, and Git-inspectable memory built in.
 
 ---
 

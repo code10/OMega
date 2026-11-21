@@ -274,13 +274,34 @@ export function initParametersPanel(elements: ParametersPanelElements) {
     });
   }
 
+  const systemPromptSection = document.getElementById('systemPromptSection');
+  const systemPromptToggle = document.getElementById('systemPromptToggle');
+  const systemPromptBody = document.getElementById('systemPromptBody');
+  if (systemPromptSection && systemPromptToggle && systemPromptBody) {
+    const toggleSystemPrompt = () => {
+      const nextOpen = !systemPromptSection.classList.contains('open');
+      systemPromptSection.classList.toggle('open', nextOpen);
+      systemPromptToggle.setAttribute('aria-expanded', nextOpen ? 'true' : 'false');
+      systemPromptBody.hidden = !nextOpen;
+      if (nextOpen) systemPromptInput?.focus();
+    };
+    systemPromptToggle.addEventListener('click', toggleSystemPrompt);
+    systemPromptToggle.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggleSystemPrompt();
+      }
+    });
+  }
+
   if (systemPromptInput && saveSystemPromptBtn) {
     systemPromptInput.addEventListener('input', () => {
       const isDirty = systemPromptInput.value !== savedSystemPromptValue;
       saveSystemPromptBtn.style.display = isDirty ? 'inline-flex' : 'none';
     });
 
-    saveSystemPromptBtn.addEventListener('click', async () => {
+    saveSystemPromptBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
       saveSystemPromptBtn.textContent = 'Saving...';
       try {
         const res = await fetch('/api/system-prompt', {

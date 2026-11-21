@@ -349,13 +349,24 @@
 
               <div class="params-body">
                 <!-- System Prompt -->
-                <div class="param-section">
-                  <div class="param-section-title">
+                <div class="param-section" id="systemPromptSection">
+                  <div class="param-section-title param-section-toggle" id="systemPromptToggle" role="button"
+                    tabindex="0" aria-expanded="false" aria-controls="systemPromptBody">
                     <span>System Prompt</span>
-                    <button class="param-mini-btn" id="saveSystemPromptBtn" style="display:none;">Save</button>
+                    <span class="param-title-actions">
+                      <button type="button" class="param-mini-btn" id="saveSystemPromptBtn"
+                        style="display:none;">Save</button>
+                      <svg class="param-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none"
+                        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                        aria-hidden="true">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                      </svg>
+                    </span>
                   </div>
-                  <textarea id="systemPromptInput" class="param-textarea" rows="5"
-                    placeholder="System prompt..."></textarea>
+                  <div id="systemPromptBody" class="param-collapsible-body" hidden>
+                    <textarea id="systemPromptInput" class="param-textarea" rows="5"
+                      placeholder="System prompt..."></textarea>
+                  </div>
                 </div>
 
                 <!-- Temperature Slider -->

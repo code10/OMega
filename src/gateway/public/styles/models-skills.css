@@ -102,6 +102,36 @@
   color: var(--text-secondary);
 }
 
+.param-section-toggle {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s ease;
+}
+
+.param-section-toggle:hover {
+  color: var(--text-primary);
+}
+
+.param-title-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.param-chevron {
+  color: var(--text-muted);
+  transition: transform 0.18s ease, color 0.15s ease;
+}
+
+.param-section.open .param-chevron {
+  transform: rotate(180deg);
+  color: var(--text-primary);
+}
+
+.param-collapsible-body[hidden] {
+  display: none;
+}
+
 .param-mini-btn {
   background: rgba(229, 169, 60, 0.14);
   border: 1px solid rgba(229, 169, 60, 0.32);
