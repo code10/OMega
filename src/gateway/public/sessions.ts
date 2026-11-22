@@ -208,6 +208,13 @@ export function initSessions(deps: SessionsDeps) {
     updateModelUsageBar();
   }
 
+  const OMEGA_WORDMARK_HTML = `<h2 class="welcome-wordmark" aria-label="OMega"><pre class="omega-ascii" aria-hidden="true">  ██████╗ ███╗   ███╗███████╗ ██████╗  █████╗ 
+ ██╔═══██╗████╗ ████║██╔════╝██╔════╝ ██╔══██╗
+ ██║   ██║██╔████╔██║█████╗  ██║  ███╗███████║
+ ██║   ██║██║╚██╔╝██║██╔══╝  ██║   ██║██╔══██║
+ ╚██████╔╝██║ ╚═╝ ██║███████╗╚██████╔╝██║  ██║
+  ╚═════╝ ╚═╝     ╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝</pre></h2>`;
+
   async function clearChatPage() {
     try {
       const res = await fetch('/api/clear', { method: 'POST' });
@@ -216,7 +223,7 @@ export function initSessions(deps: SessionsDeps) {
       if (topbarSessionTag) topbarSessionTag.textContent = currentId;
       messagesContainer.innerHTML = `
         <div class="welcome-card">
-          <h2>OMega</h2>
+          ${OMEGA_WORDMARK_HTML}
           <p>Page cleared.</p>
         </div>
       `;
@@ -226,7 +233,7 @@ export function initSessions(deps: SessionsDeps) {
     } catch (_) {
       messagesContainer.innerHTML = `
         <div class="welcome-card">
-          <h2>OMega</h2>
+          ${OMEGA_WORDMARK_HTML}
           <p>Page cleared.</p>
         </div>
       `;

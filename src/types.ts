@@ -359,6 +359,11 @@ export interface OMConfig {
   systemOne?: SystemOneConfig;
   selfHeal?: SelfHealConfig;
   execution?: ExecutionBackendConfig;
+  daemon?: {
+    autoStart?: boolean;
+    triggers?: Array<Record<string, any>>;
+    distillation?: Record<string, any>;
+  };
   gateway: {
     port: number;
     host: string;

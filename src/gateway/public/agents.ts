@@ -1,4 +1,5 @@
 import { byId, escapeHtml } from './utils.js';
+import { renderStatusBadge, renderChip, renderActionBtn } from './components.js';
 
 interface PersistentAgentItem {
   id: string;
@@ -1248,31 +1249,29 @@ export function initAgents() {
         const tokInfo = `${s.usage?.totalTokens ?? 0} tok`;
         const wsMode = s.workspaceMode === 'worktree' ? 'worktree' : 'shared';
         const kindChip = isDetached ? 'Detached Worker' : 'Chat Checkpoint';
-        const reasonTag = s.pauseReason ? `<span class="agent-chip">${escapeHtml(s.pauseReason)}</span>` : '';
-        const swarmTag = s.swarmId ? `<span class="agent-chip">${escapeHtml(s.swarmId)}</span>` : '';
 
         return `
           <div class="agent-card">
             <div class="agent-card-header">
               <div class="agent-card-title">
                 <strong>${escapeHtml(s.sessionId)}</strong>
-                <span class="agent-status-pill ${statusClass}">${escapeHtml(statusLabel)}</span>
+                ${renderStatusBadge(statusClass, statusLabel)}
               </div>
               <span class="agent-card-meta">${escapeHtml(stepInfo)} · ${escapeHtml(tokInfo)}</span>
             </div>
             <p class="agent-card-desc">${escapeHtml((s.prompt || '').slice(0, 140))}</p>
             <div class="agent-card-chips">
-              <span class="agent-chip">${escapeHtml(kindChip)}</span>
-              <span class="agent-chip">${escapeHtml(wsMode)}</span>
-              ${isDetached && s.pid ? `<span class="agent-chip">PID ${escapeHtml(String(s.pid))}</span>` : ''}
-              ${swarmTag}
-              ${reasonTag}
+              ${renderChip(kindChip)}
+              ${renderChip(wsMode)}
+              ${isDetached && s.pid ? renderChip(`PID ${s.pid}`) : ''}
+              ${s.swarmId ? renderChip(s.swarmId, 'accent') : ''}
+              ${s.pauseReason ? renderChip(s.pauseReason) : ''}
             </div>
             <div class="agent-card-actions">
-              <button type="button" class="btn-xs ghost-xs" data-detached-inspect="${escapeHtml(s.sessionId)}">Logs</button>
-              ${!isAlive && statusRaw !== 'completed' ? `<button type="button" class="btn-xs primary-xs" data-detached-resume="${escapeHtml(s.sessionId)}">Resume</button>` : ''}
-              <button type="button" class="btn-xs ghost-xs" data-detached-fork="${escapeHtml(s.sessionId)}">Fork</button>
-              ${isAlive ? `<button type="button" class="btn-xs danger-xs" data-detached-stop="${escapeHtml(s.sessionId)}">Stop</button>` : `<button type="button" class="btn-xs ghost-xs" data-detached-delete="${escapeHtml(s.sessionId)}">Delete</button>`}
+              ${renderActionBtn('Logs', { 'data-detached-inspect': s.sessionId })}
+              ${!isAlive && statusRaw !== 'completed' ? renderActionBtn('Resume', { 'data-detached-resume': s.sessionId }, 'primary') : ''}
+              ${renderActionBtn('Fork', { 'data-detached-fork': s.sessionId })}
+              ${isAlive ? renderActionBtn('Stop', { 'data-detached-stop': s.sessionId }, 'danger') : renderActionBtn('Delete', { 'data-detached-delete': s.sessionId })}
             </div>
           </div>
         `;

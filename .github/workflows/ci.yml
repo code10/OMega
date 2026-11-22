@@ -38,6 +38,9 @@ jobs:
       - name: Run unit & integration suite
         run: npm test
 
+      - name: Run benchmark suite
+        run: npm run benchmark
+
       - name: Cache Playwright Chromium
         id: playwright-cache
         uses: actions/cache@v4

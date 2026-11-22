@@ -133,7 +133,9 @@ export function serveStatic(
         res.end(rendered);
         return true;
       }
-      if (['.css', '.js', '.png', '.ico', '.svg', '.jpeg', '.jpg', '.webp'].includes(ext)) {
+      if (['.css', '.js'].includes(ext)) {
+        headers['Cache-Control'] = 'no-cache, must-revalidate';
+      } else if (['.png', '.ico', '.svg', '.jpeg', '.jpg', '.webp'].includes(ext)) {
         headers['Cache-Control'] = 'public, max-age=3600';
       }
       res.writeHead(200, headers);

@@ -103,15 +103,22 @@ export function loadConfig(overrides: OMAgentOptions = {}): OMConfig {
     model = model.replace('om-mock-', 'om-');
   }
 
+  const resolvedMemoryDir = resolvePath(
+    overrides.memoryDir || process.env.OM_MEMORY_DIR || fileConfig.memoryDir || './memory'
+  );
+  const resolvedWorkspaceDir = resolvePath(
+    overrides.workspaceDir || process.env.OM_WORKSPACE_DIR || fileConfig.workspaceDir || './workspace'
+  );
+
   return {
     ...fileConfig,
     ...overrides,
     rootDir: overrides.rootDir ? path.resolve(overrides.rootDir) : ROOT_DIR,
     provider,
     model,
-    memoryDir: resolvePath(overrides.memoryDir || fileConfig.memoryDir || './memory'),
+    memoryDir: resolvedMemoryDir,
     skillsDir: resolvePath(overrides.skillsDir || fileConfig.skillsDir || './skills'),
-    workspaceDir: resolvePath(overrides.workspaceDir || fileConfig.workspaceDir || './workspace'),
+    workspaceDir: resolvedWorkspaceDir,
     maxSteps: Number(overrides.maxSteps ?? fileConfig.maxSteps ?? 50),
     routing: {
       enabled: true,
@@ -251,7 +258,7 @@ export function persistActiveProvider(provider: string, model?: string, rootDir:
  * back to om.config.json when present.
  */
 export function saveConfigPatch(
-  patch: Partial<Pick<OMConfig, 'provider' | 'model' | 'temperature' | 'effort' | 'maxSteps' | 'systemPrompt' | 'routing' | 'security'>>,
+  patch: Partial<Pick<OMConfig, 'provider' | 'model' | 'temperature' | 'effort' | 'maxSteps' | 'systemPrompt' | 'routing' | 'security' | 'daemon'>>,
   rootDir: string = ROOT_DIR
 ): boolean {
   const configPath = path.join(rootDir, 'om.config.json');
@@ -270,6 +277,9 @@ export function saveConfigPatch(
     }
     if (patch.security !== undefined) {
       fileConfig.security = { ...(fileConfig.security || {}), ...patch.security };
+    }
+    if (patch.daemon !== undefined) {
+      fileConfig.daemon = { ...(fileConfig.daemon || {}), ...patch.daemon };
     }
 
     atomicWriteFileSync(configPath, JSON.stringify(fileConfig, null, 2) + '\n');

@@ -212,6 +212,19 @@
   border-color: var(--accent-primary);
 }
 
+.param-input[type="number"] {
+  color-scheme: dark;
+  font-family: var(--font-mono);
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.param-input[type="number"]::-webkit-outer-spin-button,
+.param-input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 .param-apply-btn {
   background: var(--bg-surface-elevated);
   border: 1px solid var(--border-medium);

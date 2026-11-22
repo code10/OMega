@@ -6,7 +6,8 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "OMega": "bin/om.js"
+    "OMega": "bin/om.js",
+    "om": "bin/om.js"
   },
   "files": [
     "dist/",
@@ -24,6 +25,7 @@
     "test": "npm run build && node --test tests/*.test.js",
     "test:e2e": "npm run build && node tests/e2e_ui.test.mjs",
     "benchmark": "npm run build && node --test tests/benchmark.test.js",
+    "benchmark:eval": "npm run build && node scripts/run-benchmark.js",
     "check:types": "tsc --noEmit && tsc -p tsconfig.public.json --noEmit",
     "docs:check": "node scripts/sync-docs.js --check",
     "docs:sync": "node scripts/sync-docs.js --write"

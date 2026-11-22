@@ -2,7 +2,7 @@
   <img src="src/gateway/public/om.png" alt="OM Logo" width="72" height="72" />
 </p>
 
-# OM Framework
+# OMega
 
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-1-blue.svg)](package.json)

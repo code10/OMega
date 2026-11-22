@@ -15,6 +15,7 @@ import { handleGitRoutes } from './routes/git.js';
 import { handleConfigRoutes } from './routes/config.js';
 import { AgentManager } from './agentManager.js';
 import { handleAgentsRoutes } from './routes/agents.js';
+import { handleDaemonRoutes } from './routes/daemon.js';
 import {
   authenticateRequest,
   getRequiredRole,
@@ -89,6 +90,20 @@ export async function startGateway(options: Record<string, any> = {}) {
   const agentManager = new AgentManager(agent, {
     onUpdate: (payload) => broadcastSSE('agent_update', payload)
   });
+
+  const emitDaemonUpdate = (eventType: string, payload?: any) => {
+    broadcastSSE('daemon_update', { eventType, payload, ...daemon.getStatus() });
+  };
+  daemon.on('trigger_run', (rec) => emitDaemonUpdate('trigger_run', rec));
+  daemon.on('trigger_error', (rec) => emitDaemonUpdate('trigger_error', rec));
+  daemon.on('trigger_merged', (rec) => emitDaemonUpdate('trigger_merged', rec));
+  daemon.on('trigger_discarded', (rec) => emitDaemonUpdate('trigger_discarded', rec));
+  daemon.on('started', () => emitDaemonUpdate('started'));
+  daemon.on('stopped', () => emitDaemonUpdate('stopped'));
+
+  if (config.daemon?.autoStart === true || (config.daemon?.autoStart !== false && daemon.triggers.size > 0)) {
+    daemon.start().catch(() => {});
+  }
 
   // Bridge interactive tool/shell confirmation into SSE + POST /api/approvals/:id
   const approvals = new ApprovalManager(
@@ -459,10 +474,8 @@ export async function startGateway(options: Record<string, any> = {}) {
       return;
     }
 
-    // 6i. Daemon Status & Webhook Triggers
-    if (pathname === '/api/daemon/status' && req.method === 'GET') {
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true, ...daemon.getStatus() }, null, 2));
+    // 6i. Daemon Schedules, Triggers, Runs & Webhook Triggers
+    if (await handleDaemonRoutes({ req, res, pathname, url, daemon, agent: reqAgent, persistConfig })) {
       return;
     }
 

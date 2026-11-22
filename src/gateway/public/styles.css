@@ -1,6 +1,6 @@
 @import url('./styles/base.css');
 @import url('./styles/chat.css');
-@import url('./styles/models-skills.css');
+@import url('./styles/models-skills.css?v=2');
 @import url('./styles/modals-panels.css');
 @import url('./styles/arena-theme.css');
-@import url('./styles/agents.css');
+@import url('./styles/agents.css?v=6');

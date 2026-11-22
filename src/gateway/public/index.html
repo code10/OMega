@@ -11,7 +11,7 @@
   <link
     href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400;1,6..72,600&family=Outfit:wght@400;500;600;700&display=swap"
     rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=3">
+  <link rel="stylesheet" href="styles.css?v=5">
   <link rel="icon" type="image/svg+xml" href="om.svg?v=4">
   <link rel="icon" type="image/png" sizes="512x512" href="om.png?v=4">
   <link rel="icon" type="image/png" sizes="32x32" href="om-32.png?v=4">
@@ -44,6 +44,15 @@
               <circle cx="15" cy="14" r="1"></circle>
             </svg>
             <span class="rail-tooltip">Agents</span>
+          </button>
+
+          <button class="rail-item" data-tab="automations" aria-label="Automations">
+            <svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9"></circle>
+              <polyline points="12 7 12 12 15 15"></polyline>
+            </svg>
+            <span class="rail-tooltip">Automations</span>
           </button>
 
           <button class="rail-item" data-tab="models" aria-label="Models">
@@ -151,6 +160,7 @@
         <!-- TAB 1: CHAT VIEW (LM Studio 3-Column Layout) -->
         <!-- @include partials/pane-chat.html -->
         <!-- @include partials/pane-agents.html -->
+        <!-- @include partials/pane-automations.html -->
         <!-- @include partials/pane-models.html -->
         <!-- @include partials/pane-skills.html -->
         <!-- @include partials/pane-memory.html -->
@@ -162,7 +172,7 @@
 
   <!-- @include partials/modals.html -->
 
-  <script type="module" src="app.js?v=7"></script>
+  <script type="module" src="app.js?v=11"></script>
 </body>
 
 </html>

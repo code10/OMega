@@ -1,0 +1,107 @@
+        <section class="tab-pane" id="paneAutomations">
+          <div class="agents-main-area">
+            <div class="pane-content-padded">
+              <div class="section-intro automations-header-row">
+                <div>
+                  <h3>Autonomous Daemons &amp; Schedules</h3>
+                  <p>Deterministic-first background checks, isolated worktree fixes, and persistent run logs.</p>
+                </div>
+                <div class="automations-header-actions">
+                  <span class="automation-status-pill stopped" id="daemonStatusBadge">Stopped</span>
+                  <button type="button" class="btn-xs ghost-xs" id="toggleDaemonBtn">Start Daemon</button>
+                  <button type="button" class="btn-xs primary-xs" id="openNewTriggerBtn">+ New Trigger</button>
+                  <button type="button" class="btn-xs ghost-xs" id="refreshAutomationsBtn">Refresh</button>
+                </div>
+              </div>
+
+              <div class="agent-error-banner" id="automationsErrorBanner" style="display: none;"></div>
+
+              <!-- Starter Automation Templates (60-second onboarding) -->
+              <div class="automations-templates-bar" id="automationsTemplatesBar">
+                <span class="automations-templates-label">Quick Templates:</span>
+                <button type="button" class="btn-xs ghost-xs" data-template="nightly-watchdog">+ Nightly Test &amp; Typecheck</button>
+                <button type="button" class="btn-xs ghost-xs" data-template="dependency-audit">+ Dependency Audit</button>
+                <button type="button" class="btn-xs ghost-xs" data-template="watch-typecheck">+ File-Watch Typecheck</button>
+              </div>
+
+              <!-- Create / Edit Trigger Form -->
+              <div class="agent-form-card" id="newTriggerFormCard" style="display: none; margin-bottom: 18px;">
+                <div class="agent-form-header">
+                  <h4>New Background Trigger</h4>
+                  <button type="button" class="btn-xs ghost-xs" id="closeNewTriggerBtn">&times;</button>
+                </div>
+
+                <div class="agent-form-grid">
+                  <div class="agent-form-field">
+                    <label for="triggerIdInput">Trigger ID</label>
+                    <input type="text" id="triggerIdInput" class="param-input" placeholder="e.g. nightly-test-heal" />
+                  </div>
+                  <div class="agent-form-field">
+                    <label for="triggerTypeSelect">Trigger Type</label>
+                    <select id="triggerTypeSelect" class="param-select">
+                      <option value="cron">Cron Schedule</option>
+                      <option value="interval">Interval (ms)</option>
+                      <option value="watch">File Watcher</option>
+                      <option value="webhook">Webhook</option>
+                    </select>
+                  </div>
+                  <div class="agent-form-field" id="triggerScheduleField">
+                    <label for="triggerScheduleInput" id="triggerScheduleLabel">Cron Expression (5-field)</label>
+                    <input type="text" id="triggerScheduleInput" class="param-input" placeholder="0 2 * * *" value="0 2 * * *" />
+                  </div>
+                </div>
+
+                <div class="agent-form-grid">
+                  <div class="agent-form-field">
+                    <label for="triggerCheckCmdInput">Deterministic Check Command (0 tokens)</label>
+                    <input type="text" id="triggerCheckCmdInput" class="param-input" placeholder="e.g. npm test" />
+                  </div>
+                  <div class="agent-form-field">
+                    <label for="triggerMaxStepsInput">Max Steps Guardrail</label>
+                    <input type="number" id="triggerMaxStepsInput" class="param-input" value="25" min="1" max="200" />
+                  </div>
+                  <div class="agent-form-field">
+                    <label for="triggerMaxTokensInput">Max Tokens Guardrail (0 = unlimited)</label>
+                    <input type="number" id="triggerMaxTokensInput" class="param-input" value="50000" min="0" step="1000" />
+                  </div>
+                </div>
+
+                <div class="agent-form-field">
+                  <label for="triggerPromptInput">Agent Prompt (runs only if check fails, or directly if no check command)</label>
+                  <textarea id="triggerPromptInput" class="param-textarea" rows="2"
+                    placeholder="Diagnose the failing check, apply a minimal fix, and re-run the check to verify."></textarea>
+                </div>
+
+                <div class="agent-form-footer">
+                  <label class="agent-checkbox-label">
+                    <input type="checkbox" id="triggerIsolatedWorktree" checked />
+                    <span>Run in isolated git worktree (safe overnight edits — inspect &amp; merge in 1 click)</span>
+                  </label>
+                  <button type="button" class="btn-sm primary-sm" id="saveTriggerBtn">Save Trigger</button>
+                </div>
+              </div>
+
+              <!-- Configured Triggers (matches Detached Swarms & Checkpoints) -->
+              <div class="agents-section" id="configuredTriggersSection">
+                <div class="agents-section-title">
+                  <h4>Configured Triggers</h4>
+                  <span class="session-badge-count" id="triggersCountBadge">0</span>
+                </div>
+                <div class="agents-grid" id="automationsTriggersList">
+                  <!-- Populated dynamically -->
+                </div>
+              </div>
+
+              <!-- Persistent Run Logs & Worktree Fixes -->
+              <div class="agents-section" id="daemonRunsSection">
+                <div class="agents-section-title">
+                  <h4>Run History &amp; Worktree Fixes</h4>
+                  <span class="session-badge-count" id="runsCountBadge">0</span>
+                </div>
+                <div class="agent-runs-list" id="automationsRunsList">
+                  <!-- Populated dynamically -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>

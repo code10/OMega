@@ -557,13 +557,275 @@
   word-break: break-word;
 }
 
+.agent-status-pill {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  letter-spacing: 0.03em;
+}
+
+.agent-status-pill.running {
+  background: rgba(229, 169, 60, 0.18);
+  color: var(--accent-primary);
+}
+
 .agent-status-pill.paused {
-  background: rgba(245, 158, 11, 0.14);
-  color: #f59e0b;
+  background: rgba(126, 118, 106, 0.2);
+  color: var(--text-secondary);
 }
 
 .agent-status-pill.completed {
-  background: rgba(16, 185, 129, 0.14);
-  color: #10b981;
+  background: rgba(56, 161, 105, 0.16);
+  color: var(--accent-green);
 }
 
+.agent-status-pill.error {
+  background: rgba(224, 90, 71, 0.16);
+  color: var(--accent-red);
+}
+
+
+/* Automations / Daemons Pane */
+.automations-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.automations-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.automation-status-pill {
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+}
+
+.automation-status-pill.running {
+  background: rgba(43, 168, 156, 0.16);
+  color: var(--accent-teal);
+  border-color: rgba(43, 168, 156, 0.4);
+}
+
+.automation-status-pill.stopped {
+  background: var(--bg-surface);
+  color: var(--text-muted);
+}
+
+.automation-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.automations-section {
+  margin-top: 18px;
+}
+
+.automations-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.automations-section-title h4 {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--text-primary);
+}
+
+.automations-count-badge {
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--bg-surface);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+}
+
+.automations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.automations-empty {
+  padding: 16px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  background: var(--bg-surface);
+  border: 1px dashed var(--border-medium);
+  border-radius: var(--radius-md);
+}
+
+.agent-card.disabled {
+  opacity: 0.65;
+}
+
+.agent-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agent-card-title strong {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.agent-card-desc {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.agent-card-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.agent-chip {
+  font-size: 0.68rem;
+  font-family: var(--font-mono);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-surface-elevated);
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+}
+
+.agent-chip-accent {
+  background: rgba(229, 169, 60, 0.14);
+  color: var(--accent-primary);
+  border-color: rgba(229, 169, 60, 0.35);
+}
+
+.agent-chip-teal {
+  background: rgba(43, 168, 156, 0.16);
+  color: var(--accent-teal);
+  border-color: rgba(43, 168, 156, 0.35);
+}
+
+.agent-chip-error {
+  background: rgba(224, 90, 71, 0.16);
+  color: var(--accent-red);
+  border-color: rgba(224, 90, 71, 0.35);
+}
+
+.automations-templates-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.automations-templates-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-right: 4px;
+}
+
+.agent-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.automation-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.automation-badge {
+  font-size: 0.68rem;
+  font-family: var(--font-mono);
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--bg-surface-elevated);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+}
+
+.automation-badge.zero-token,
+.automation-badge.ok {
+  background: rgba(43, 168, 156, 0.16);
+  color: var(--accent-teal);
+  border-color: rgba(43, 168, 156, 0.35);
+}
+
+.automation-badge.worktree {
+  background: rgba(229, 169, 60, 0.14);
+  color: var(--accent-primary);
+  border-color: rgba(229, 169, 60, 0.35);
+}
+
+.automation-badge.err {
+  background: rgba(224, 90, 71, 0.16);
+  color: var(--accent-red);
+  border-color: rgba(224, 90, 71, 0.35);
+}
+
+.automation-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.automation-card-prompt {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.automation-card-error {
+  font-size: 0.78rem;
+  color: var(--accent-red);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.automation-diff-box {
+  margin: 4px 0 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-primary);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre;
+}

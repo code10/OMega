@@ -12,6 +12,7 @@ import { initModels } from './models.js';
 import { initSessions } from './sessions.js';
 import { initTraceRenderer } from './traceRenderer.js';
 import { initAgents } from './agents.js';
+import { initAutomations } from './automations.js';
 import { initDeviceSpecs } from './device.js';
 
 function resolveGatewayToken(): string {
@@ -67,6 +68,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const { openRefViewer, closeRefViewer, closeSkillCreator } = initModals({ loadSkills: () => loadSkills() });
   const { refreshRouting } = initRoutingModal();
   const { loadAgents, handleAgentUpdate } = initAgents();
+  const { loadAutomations, handleDaemonUpdate } = initAutomations();
   const { loadDeviceSpecs } = initDeviceSpecs();
 
   function autoResizePromptInput() {
@@ -233,6 +235,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const TAB_NAMES: Record<string, string> = {
     chat: 'Chat',
     agents: 'Agents',
+    automations: 'Automations',
     models: 'Models',
     skills: 'Skills',
     memory: 'Memory',
@@ -246,6 +249,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const TAB_PANE_IDS: Record<string, string> = {
     chat: 'paneChat',
     agents: 'paneAgents',
+    automations: 'paneAutomations',
     models: 'paneModels',
     skills: 'paneSkills',
     memory: 'paneMemory',
@@ -270,6 +274,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const tabLoaders: Record<string, () => void> = {
       chat: loadSessions,
       agents: loadAgents,
+      automations: loadAutomations,
       models: loadModels,
       skills: loadSkills,
       memory: loadMemory,
@@ -475,6 +480,12 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
           const payload = JSON.parse(ev.data);
           handleAgentUpdate(payload);
+        } catch (_) { }
+      });
+      es.addEventListener('daemon_update', (ev) => {
+        try {
+          const payload = JSON.parse(ev.data);
+          handleDaemonUpdate(payload);
         } catch (_) { }
       });
       es.addEventListener('approval_required', (ev) => {

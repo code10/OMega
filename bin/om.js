@@ -10,6 +10,9 @@ import { AgentManager } from '../dist/gateway/agentManager.js';
 import { OMEvalRunner } from '../dist/eval.js';
 import { OMSelfImprover } from '../dist/selfImprove.js';
 import { OMTrainingPipeline } from '../dist/training.js';
+import { installService, uninstallService, getServiceStatus } from '../dist/service.js';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 
 // ANSI terminal colors
 const C = {
@@ -67,12 +70,12 @@ function printBanner(config, skillsCount, clearFirst = false) {
     linesSinceBanner = 0;
   }
   origConsoleLog(`
-${C.bold}${C.skyBlue}  ██████╗ ${C.cyan}███╗   ███╗${C.reset}    ${C.bold}${C.skyBlue}OM — AI Agent Framework${C.reset}
-${C.bold}${C.skyBlue} ██╔═══██╗${C.cyan}████╗ ████║${C.reset}    ${C.gray}Local-first operator runtime${C.reset}
-${C.bold}${C.skyBlue} ██║   ██║${C.cyan}██╔████╔██║${C.reset}
-${C.bold}${C.skyBlue} ██║   ██║${C.cyan}██║╚██╔╝██║${C.reset}    ${C.gray}Provider:${C.reset}  ${C.skyBlue}${config.provider}${C.reset} [${config.model}]
-${C.bold}${C.skyBlue} ╚██████╔╝${C.cyan}██║ ╚═╝ ██║${C.reset}    ${C.gray}Skills:${C.reset}    ${C.skyBlue}${skillsCount} loaded${C.reset}
-${C.bold}${C.skyBlue}  ╚═════╝ ${C.cyan}╚═╝     ╚═╝${C.reset}    ${C.gray}Memory:${C.reset}    ${C.dim}${config.memoryDir}${C.reset}
+${C.bold}${C.cyan}  ██████╗ ███╗   ███╗${C.reset}    ${C.bold}${C.skyBlue}OM — Agent Harness${C.reset}
+${C.bold}${C.cyan} ██╔═══██╗████╗ ████║${C.reset}    ${C.gray}Local-first operator runtime${C.reset}
+${C.bold}${C.cyan} ██║   ██║██╔████╔██║${C.reset}
+${C.bold}${C.cyan} ██║   ██║██║╚██╔╝██║${C.reset}    ${C.gray}Provider:${C.reset}  ${C.skyBlue}${config.provider}${C.reset} [${config.model}]
+${C.bold}${C.cyan} ╚██████╔╝██║ ╚═╝ ██║${C.reset}    ${C.gray}Skills:${C.reset}    ${C.skyBlue}${skillsCount} loaded${C.reset}
+${C.bold}${C.cyan}  ╚═════╝ ╚═╝     ╚═╝${C.reset}    ${C.gray}Memory:${C.reset}    ${C.dim}${config.memoryDir}${C.reset}
 `);
 }
 
@@ -85,8 +88,8 @@ function updateBannerInPlace(config, skillsCount) {
   // Only update in place if the terminal hasn't scrolled the top banner off-screen
   if ((linesSinceBanner || 0) + 10 >= rows) return;
 
-  const providerLine = `${C.bold}${C.skyBlue} ██║   ██║${C.cyan}██║╚██╔╝██║${C.reset}    ${C.gray}Provider:${C.reset}  ${C.skyBlue}${config.provider}${C.reset} [${config.model}]`;
-  const skillsLine = `${C.bold}${C.skyBlue} ╚██████╔╝${C.cyan}██║ ╚═╝ ██║${C.reset}    ${C.gray}Skills:${C.reset}    ${C.skyBlue}${skillsCount} loaded${C.reset}`;
+  const providerLine = `${C.bold}${C.cyan} ██║   ██║██║╚██╔╝██║${C.reset}    ${C.gray}Provider:${C.reset}  ${C.skyBlue}${config.provider}${C.reset} [${config.model}]`;
+  const skillsLine = `${C.bold}${C.cyan} ╚██████╔╝██║ ╚═╝ ██║${C.reset}    ${C.gray}Skills:${C.reset}    ${C.skyBlue}${skillsCount} loaded${C.reset}`;
   // Row 5 is Provider, Row 6 is Skills when banner is at the top of the screen
   output.write(
     `\x1b[s` +
@@ -201,6 +204,7 @@ Usage:
   om "<instruction>"           Run single task and exit
   om models [provider]         List available models (e.g. Gemini, Gpt)
   om gateway                   Start OM Web UI Gateway dashboard
+  om service <action>          Manage 24/7 native OS service (install|uninstall|status)
   om --help                    Show this help
 `);
     return;
@@ -249,6 +253,32 @@ Usage:
     const outDir = args[1];
     const res = OMTrainingPipeline.exportDataset(tmpAgent.config.memoryDir, outDir);
     console.log(JSON.stringify(res, null, 2));
+    return;
+  }
+
+  if (args[0] === 'service') {
+    const action = args[1] || 'status';
+    const modeIdx = args.indexOf('--mode');
+    const mode = modeIdx !== -1 && args[modeIdx + 1] === 'daemon' ? 'daemon' : 'gateway';
+    const dryRun = args.includes('--dry-run');
+    const cliPath = fileURLToPath(import.meta.url);
+    const serviceOpts = {
+      mode,
+      cliPath,
+      workspaceDir: overrides.workspaceDir || process.cwd(),
+      memoryDir: overrides.memoryDir || path.join(overrides.workspaceDir || process.cwd(), 'memory')
+    };
+
+    if (action === 'install') {
+      const res = installService({ ...serviceOpts, dryRun });
+      console.log(JSON.stringify(res, null, 2));
+    } else if (action === 'uninstall') {
+      const res = uninstallService(serviceOpts);
+      console.log(JSON.stringify(res, null, 2));
+    } else {
+      const res = getServiceStatus(serviceOpts);
+      console.log(JSON.stringify(res, null, 2));
+    }
     return;
   }
 

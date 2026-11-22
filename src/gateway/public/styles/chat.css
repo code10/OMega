@@ -280,8 +280,35 @@
   font-family: var(--font-display);
   font-size: 2.1rem;
   font-weight: 600;
-  color: var(--text-primary);
+  background: linear-gradient(180deg, #f5b547 0%, #de9422 50%, #b56e0c 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
   letter-spacing: -0.01em;
+}
+
+.welcome-card h2.welcome-wordmark {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.welcome-card .omega-ascii {
+  margin: 0;
+  font-family: 'Fira Code', ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+  font-size: clamp(0.55rem, 1.15vw, 0.85rem);
+  font-weight: 600;
+  line-height: 1.02;
+  letter-spacing: 0;
+  white-space: pre;
+  text-align: left;
+  background: linear-gradient(180deg, #f5b547 0%, #de9422 50%, #b56e0c 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  user-select: none;
 }
 
 .welcome-card p {
