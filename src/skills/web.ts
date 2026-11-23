@@ -9,9 +9,25 @@ import type { HttpFileInput, HttpImageInput, SkillContext, SkillDefinition, SSEP
 import { consumeSSEStream, extractSSEToken } from '../utils/http.js';
 import { resolveSafePath } from './filesystem.js';
 
+function normalizeIpv4Mapped(ip: string): string {
+  const low = ip.trim().toLowerCase();
+  // Dotted form: ::ffff:127.0.0.1
+  if (/^::ffff:\d+\.\d+\.\d+\.\d+$/.test(low)) {
+    return low.slice(7);
+  }
+  // Hex form produced by WHATWG URL parser: ::ffff:7f00:1 -> 127.0.0.1
+  const hexMatch = low.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (hexMatch) {
+    const hi = parseInt(hexMatch[1], 16);
+    const lo = parseInt(hexMatch[2], 16);
+    return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+  }
+  return low;
+}
+
 function isPrivateIp(ip: string): boolean {
   if (!ip) return false;
-  const normalized = ip.replace(/^::ffff:/i, '');
+  const normalized = normalizeIpv4Mapped(ip);
   if (net.isIPv4(normalized)) {
     const parts = normalized.split('.').map(Number);
     const [a, b] = parts;
@@ -42,7 +58,8 @@ export async function validateExternalUrl(rawUrl: string, context: SkillContext 
     return parsedUrl;
   }
 
-  const host = parsedUrl.hostname.toLowerCase();
+  // URL.hostname keeps brackets around IPv6 literals ([::1]); strip before net.isIP
+  const host = parsedUrl.hostname.toLowerCase().replace(/^\[|\]$/g, '');
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) {
     throw new Error(`SSRF protection: Access to local hostname '${host}' is blocked`);
   }
@@ -56,17 +73,48 @@ export async function validateExternalUrl(rawUrl: string, context: SkillContext 
 
   try {
     const records = await dns.lookup(host, { all: true });
+    if (!records || records.length === 0) {
+      throw new Error(`SSRF protection: DNS lookup returned no addresses for '${host}'`);
+    }
     for (const rec of records) {
       if (isPrivateIp(rec.address)) {
         throw new Error(`SSRF protection: Host '${host}' resolves to private IP '${rec.address}'`);
       }
     }
   } catch (err: any) {
-    if (err.message.startsWith('SSRF protection:')) throw err;
-    // Allow fetch to surface DNS errors naturally if not SSRF
+    if (String(err?.message || '').startsWith('SSRF protection:')) throw err;
+    // Fail closed on DNS lookup failures to prevent unverified SSRF targets
+    throw new Error(`SSRF protection: DNS resolution failed for '${host}': ${err?.message || err}`);
   }
 
   return parsedUrl;
+}
+
+/**
+ * Perform fetch() with redirect:'manual' and SSRF re-validation on every redirect hop.
+ */
+export async function safeExternalFetch(
+  rawUrl: string,
+  init: RequestInit = {},
+  context: SkillContext = {},
+  maxRedirects = 5
+): Promise<Response> {
+  let currentUrl = (await validateExternalUrl(rawUrl, context)).href;
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    const res = await fetch(currentUrl, { ...init, redirect: 'manual' });
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get('location');
+      if (!loc) return res;
+      if (hop === maxRedirects) {
+        throw new Error(`Too many redirects (>${maxRedirects}) while fetching ${rawUrl}`);
+      }
+      const nextUrl = new URL(loc, currentUrl).href;
+      currentUrl = (await validateExternalUrl(nextUrl, context)).href;
+      continue;
+    }
+    return res;
+  }
+  throw new Error(`Too many redirects while fetching ${rawUrl}`);
 }
 
 // Simple HTML to readable text / markdown stripper with safe regex patterns
@@ -206,14 +254,12 @@ export const webSkills: SkillDefinition[] = [
     execute: async ({ url, maxChars = 8000 }, context = {}) => {
       try {
         if (!url) return { success: false, error: 'URL is required' };
-        await validateExternalUrl(url, context);
-
-        const res = await fetch(url, {
+        const res = await safeExternalFetch(url, {
           headers: {
-            'User-Agent': 'OM-Agent/1.0 (AI Agent Framework)'
+            'User-Agent': 'OM-Agent/1.0 (Agent Harness)'
           },
           signal: AbortSignal.timeout(15000)
-        });
+        }, context);
 
         if (!res.ok) {
           return { success: false, status: res.status, error: `HTTP ${res.status}: ${res.statusText}` };
@@ -363,7 +409,7 @@ export const webSkills: SkillDefinition[] = [
           }
         }
 
-        const res = await fetch(url, options as any);
+        const res = await safeExternalFetch(url, options as RequestInit, context);
         const contentType = res.headers.get('content-type') || '';
 
         if (stream || contentType.includes('text/event-stream')) {

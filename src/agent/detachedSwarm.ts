@@ -289,11 +289,17 @@ export class DetachedSwarmManager {
     }
 
     let logTail = '';
-    if (checkpoint.logFile && fs.existsSync(checkpoint.logFile)) {
-      const raw = fs.readFileSync(checkpoint.logFile, 'utf8');
-      const lines = raw.split(/\r?\n/);
-      const maxLines = options.logLines ?? 80;
-      logTail = lines.slice(-maxLines).join('\n');
+    if (checkpoint.logFile) {
+      const allowedRoot = path.resolve(this.memoryDir);
+      const resolvedLog = path.resolve(checkpoint.logFile);
+      const rel = path.relative(allowedRoot, resolvedLog);
+      const isContained = rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+      if (isContained && fs.existsSync(resolvedLog)) {
+        const raw = fs.readFileSync(resolvedLog, 'utf8');
+        const lines = raw.split(/\r?\n/);
+        const maxLines = options.logLines ?? 80;
+        logTail = lines.slice(-maxLines).join('\n');
+      }
     }
 
     return {

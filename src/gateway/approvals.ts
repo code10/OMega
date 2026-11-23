@@ -55,34 +55,53 @@ export interface CommandRulesConfig {
  * Manages Human-in-the-Loop (HITL) tool/shell execution approvals over SSE + REST.
  */
 export class ApprovalManager {
-  broadcastSSE: (eventName: string, data: any) => void;
-  pending: Map<string, { payload: any; resolve: (approved: boolean) => void }>;
-  sessionApprovedTools: Set<string>;
-  sessionApprovedCommandPrefixes: Set<string>;
+  broadcastSSE: (eventName: string, data: any, ownerId?: string) => void;
+  pending: Map<string, { ownerId: string; payload: any; resolve: (approved: boolean) => void }>;
+  sessionApprovedToolsByOwner: Map<string, Set<string>>;
+  sessionApprovedCommandPrefixesByOwner: Map<string, Set<string>>;
   onAlwaysAllow?: (tool: string, rule?: { commandPrefix?: string }) => void;
   getCommandRules?: () => CommandRulesConfig;
 
   constructor(
-    broadcastSSE: (eventName: string, data: any) => void,
+    broadcastSSE: (eventName: string, data: any, ownerId?: string) => void,
     onAlwaysAllow?: (tool: string, rule?: { commandPrefix?: string }) => void,
     getCommandRules?: () => CommandRulesConfig
   ) {
     this.broadcastSSE = broadcastSSE;
     this.pending = new Map();
-    this.sessionApprovedTools = new Set();
-    this.sessionApprovedCommandPrefixes = new Set();
+    this.sessionApprovedToolsByOwner = new Map();
+    this.sessionApprovedCommandPrefixesByOwner = new Map();
     this.onAlwaysAllow = onAlwaysAllow;
     this.getCommandRules = getCommandRules;
   }
 
+  private _getOwnerTools(ownerId: string): Set<string> {
+    let set = this.sessionApprovedToolsByOwner.get(ownerId);
+    if (!set) {
+      set = new Set();
+      this.sessionApprovedToolsByOwner.set(ownerId, set);
+    }
+    return set;
+  }
+
+  private _getOwnerPrefixes(ownerId: string): Set<string> {
+    let set = this.sessionApprovedCommandPrefixesByOwner.get(ownerId);
+    if (!set) {
+      set = new Set();
+      this.sessionApprovedCommandPrefixesByOwner.set(ownerId, set);
+    }
+    return set;
+  }
+
   /**
-   * Create a confirmCommand handler compatible with OMAgent.
-   * @returns {(info: any) => Promise<boolean>}
+   * Create a confirmCommand handler compatible with OMAgent, scoped to ownerId.
    */
-  createConfirmHandler(): (info: Record<string, any>) => Promise<boolean> {
+  createConfirmHandler(ownerId = 'local'): (info: Record<string, any>) => Promise<boolean> {
     return (info: Record<string, any>) => {
       const toolName = String(info.tool || 'exec_command');
       const commandText = info.command ? String(info.command) : '';
+      const ownerTools = this._getOwnerTools(ownerId);
+      const ownerPrefixes = this._getOwnerPrefixes(ownerId);
 
       if (toolName === 'exec_command' && commandText) {
         const rules = this.getCommandRules ? this.getCommandRules() : {};
@@ -90,19 +109,20 @@ export class ApprovalManager {
           return Promise.resolve(false);
         }
         const allowRules = [
-          ...this.sessionApprovedCommandPrefixes,
+          ...ownerPrefixes,
           ...(Array.isArray(rules.allow) ? rules.allow : [])
         ];
-        if (this.sessionApprovedTools.has(toolName) || matchesCommandRule(commandText, allowRules)) {
+        if (ownerTools.has(toolName) || matchesCommandRule(commandText, allowRules)) {
           return Promise.resolve(true);
         }
-      } else if (this.sessionApprovedTools.has(toolName)) {
+      } else if (ownerTools.has(toolName)) {
         return Promise.resolve(true);
       }
 
       const id = `appr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
       const payload = {
         id,
+        ownerId,
         tool: toolName,
         args: info.args || null,
         command: commandText || null,
@@ -116,6 +136,7 @@ export class ApprovalManager {
         }, 120000);
         timer.unref?.();
         this.pending.set(id, {
+          ownerId,
           payload,
           resolve: (approved) => {
             clearTimeout(timer);
@@ -123,18 +144,15 @@ export class ApprovalManager {
             resolve(Boolean(approved));
           }
         });
-        this.broadcastSSE('approval_required', payload);
+        this.broadcastSSE('approval_required', payload, ownerId);
       });
     };
   }
 
   /**
-   * Handle POST /api/approvals/:id
-   * @param {import('node:http').IncomingMessage} req
-   * @param {import('node:http').ServerResponse} res
-   * @param {string} id
+   * Handle POST /api/approvals/:id with strict tenant ownership check.
    */
-  async handleResolve(req: http.IncomingMessage, res: http.ServerResponse, id: string) {
+  async handleResolve(req: http.IncomingMessage, res: http.ServerResponse, id: string, callerId = 'local') {
     const data: Record<string, any> | null = await readJsonBody(req, res);
     if (!data) return;
     const entry = this.pending.get(id);
@@ -142,25 +160,32 @@ export class ApprovalManager {
       sendJson(res, 404, { success: false, error: `Approval '${id}' not found or expired` });
       return;
     }
+    if (entry.ownerId !== callerId) {
+      sendJson(res, 403, { success: false, error: `Forbidden: approval '${id}' belongs to another user.` });
+      return;
+    }
     const approved = Boolean(data.approved);
     const scope = data.scope === 'always' ? 'always' : data.scope === 'session' ? 'session' : 'once';
     const commandPrefix = typeof data.commandPrefix === 'string' ? data.commandPrefix.trim() : '';
+    const ownerTools = this._getOwnerTools(entry.ownerId);
+    const ownerPrefixes = this._getOwnerPrefixes(entry.ownerId);
 
     if (approved && (scope === 'session' || scope === 'always')) {
+      const canPersistGlobal = scope === 'always' && entry.ownerId === 'local' && Boolean(this.onAlwaysAllow);
       if (entry.payload.tool === 'exec_command' && commandPrefix) {
-        this.sessionApprovedCommandPrefixes.add(commandPrefix);
-        if (scope === 'always' && this.onAlwaysAllow) {
+        ownerPrefixes.add(commandPrefix);
+        if (canPersistGlobal && this.onAlwaysAllow) {
           this.onAlwaysAllow(entry.payload.tool, { commandPrefix });
         }
       } else {
-        this.sessionApprovedTools.add(entry.payload.tool);
-        if (scope === 'always' && this.onAlwaysAllow) {
+        ownerTools.add(entry.payload.tool);
+        if (canPersistGlobal && this.onAlwaysAllow) {
           this.onAlwaysAllow(entry.payload.tool);
         }
       }
     }
     entry.resolve(approved);
-    this.broadcastSSE('approval_resolved', { id, approved, scope, commandPrefix: commandPrefix || undefined });
+    this.broadcastSSE('approval_resolved', { id, approved, scope, commandPrefix: commandPrefix || undefined }, entry.ownerId);
     sendJson(res, 200, { success: true, id, approved, scope, commandPrefix: commandPrefix || undefined });
   }
 }

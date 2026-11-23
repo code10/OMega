@@ -55,6 +55,13 @@ export function resolveSafePath(filePath: string, baseDir = process.cwd(), conte
   return resolvedTarget;
 }
 
+export const EXECUTABLE_SKILL_EXTENSIONS = ['.js', '.mjs', '.cjs', '.ts'] as const;
+
+export function isExecutableSkillFilename(filename: string): boolean {
+  const lower = String(filename || '').toLowerCase();
+  return EXECUTABLE_SKILL_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
 export function assertWritablePath(resolvedTarget: string, context: SkillContext = {}) {
   const security = context?.config?.security || {};
   if (security.allowSelfModification === true) {
@@ -79,7 +86,7 @@ export function assertWritablePath(resolvedTarget: string, context: SkillContext
   }
 
   const skillsDir = resolveRealOrAbs(context?.config?.skillsDir || path.join(projectRoot, 'skills'));
-  if (isWithinRoot(resolvedTarget, skillsDir) && baseName.endsWith('.js')) {
+  if (isWithinRoot(resolvedTarget, skillsDir) && isExecutableSkillFilename(baseName)) {
     throw new Error(`Security violation: Writing executable skill '${baseName}' inside skillsDir is blocked to prevent self-modification.`);
   }
 }

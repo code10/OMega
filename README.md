@@ -7,7 +7,7 @@
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.19.0-brightgreen.svg)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-1-blue.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-154%20passed-success.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-161%20passed-success.svg)](tests/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](README.md)
 
 **OMega** is a lightweight, local-first Node.js agent harness you control completely | Running offline on your hardware or routed across cloud models, with human-in-the-loop approvals, isolated git worktrees, rollback snapshots, and Git-inspectable memory built in.
@@ -76,6 +76,26 @@ OM_GATEWAY_PORT=3000
 
 Runtime defaults (routing fallback chains, `daemon` triggers, `security` rules, `execution` backend, `systemOne`, `selfHeal`, and `gateway`) live in [`om.config.json`](om.config.json).
 
+### Multi-User Gateway Authentication
+
+Never commit plaintext tokens to `om.config.json` (which is tracked by Git). Use SHA-256 `tokenHash` values and a pinned `jwtSecret` (or `OM_JWT_SECRET` in `.env`):
+
+```json
+{
+  "gateway": {
+    "auth": {
+      "mode": "multiuser",
+      "jwtSecret": "replace-with-64-hex-char-secret",
+      "users": [
+        { "id": "alice", "role": "admin", "tokenHash": "<sha256-hex-of-token>" },
+        { "id": "bob", "role": "operator", "tokenHash": "<sha256-hex-of-token>" },
+        { "id": "carol", "role": "viewer", "tokenHash": "<sha256-hex-of-token>" }
+      ]
+    }
+  }
+}
+```
+
 ---
 
 ## Extending OM
@@ -143,7 +163,7 @@ npm run benchmark:eval       # Coding-task scorecard runner (--live for real API
 node scripts/security-audit.js  # Dependency, secret & eval() audit
 ```
 
-All 154 unit & integration tests pass using Node's built-in `node:test` runner (Playwright is used for `test:e2e`).
+All 161 unit & integration tests pass using Node's built-in `node:test` runner (Playwright is used for `test:e2e`).
 
 ---
 

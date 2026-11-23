@@ -95,7 +95,11 @@ export function extractBearerToken(req: http.IncomingMessage, url: URL): string 
   if (authHeader.startsWith('Bearer ')) {
     return authHeader.slice(7).trim();
   }
-  return String(url.searchParams.get('token') || '').trim();
+  // Browser EventSource cannot send custom headers, so allow ?token= strictly on /api/events
+  if (url.pathname === '/api/events') {
+    return String(url.searchParams.get('token') || '').trim();
+  }
+  return '';
 }
 
 export function authenticateRequest(
@@ -143,11 +147,15 @@ export function authenticateRequest(
 export function getRequiredRole(pathname: string, method = 'GET'): UserRole {
   const m = method.toUpperCase();
 
-  // Admin-only routes: config, system prompt, skill creation, daemon, training, destructive resets
+  // Admin-only routes: config, system prompt, provider keys, git diffs, webhooks, skill creation, daemon, training, destructive resets
   if (
     pathname.startsWith('/api/config') ||
     pathname === '/api/system-prompt' ||
     pathname === '/api/permissions' ||
+    pathname === '/api/providers/keys' ||
+    pathname === '/api/git/diff' ||
+    pathname === '/api/git/worktree/diff' ||
+    pathname.startsWith('/api/webhooks/') ||
     pathname === '/api/skills/create' ||
     pathname.startsWith('/api/daemon') ||
     pathname.startsWith('/api/training') ||

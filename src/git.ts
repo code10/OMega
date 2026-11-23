@@ -95,8 +95,16 @@ export class OMGitManager {
    * @returns {string}
    */
   getDiff(baseRef?: string) {
-    const args = baseRef ? ['diff', baseRef] : ['diff'];
-    return this._exec(args);
+    if (baseRef !== undefined && baseRef !== '') {
+      const cleaned = String(baseRef).trim();
+      if (!cleaned || cleaned.startsWith('-') || /[\r\n\0]/.test(cleaned)) {
+        throw new Error(`Invalid git ref '${baseRef}': refs must not start with '-' or contain control characters.`);
+      }
+      // Verify the revision resolves cleanly before passing to git diff
+      this._exec(['rev-parse', '--verify', `${cleaned}^{commit}`]);
+      return this._exec(['diff', cleaned, '--']);
+    }
+    return this._exec(['diff', '--']);
   }
 
   /**

@@ -11,6 +11,7 @@ const MAX_OUTPUT_BUFFER_CHARS = 200_000;
 
 interface TerminalSession {
   id: string;
+  ownerKey: string;
   label?: string;
   command: string;
   cwd: string;
@@ -20,6 +21,11 @@ interface TerminalSession {
   exitCode: number | null;
   buffer: string;
   readCursor: number;
+}
+
+function resolveTerminalOwnerKey(context: SkillContext = {}): string {
+  const ws = context.config?.workspaceDir || context.agent?.config?.workspaceDir || '';
+  return ws ? path.resolve(ws).toLowerCase() : 'default';
 }
 
 export class TerminalSessionManager {
@@ -96,6 +102,7 @@ export class TerminalSessionManager {
     const id = `term_${++this.counter}_${Date.now().toString(36)}`;
     const session: TerminalSession = {
       id,
+      ownerKey: resolveTerminalOwnerKey(context),
       label: options.label,
       command: commandText || defaultShell,
       cwd: workingDir,
@@ -148,10 +155,17 @@ export class TerminalSessionManager {
     };
   }
 
-  async write(options: { sessionId: string; input?: string; appendNewline?: boolean; interrupt?: boolean; waitMs?: number }) {
+  async write(
+    options: { sessionId: string; input?: string; appendNewline?: boolean; interrupt?: boolean; waitMs?: number },
+    context: SkillContext = {}
+  ) {
     const session = this.sessions.get(options.sessionId);
     if (!session) {
       return { success: false, error: `Terminal session '${options.sessionId}' not found.` };
+    }
+    const callerKey = resolveTerminalOwnerKey(context);
+    if (session.ownerKey !== callerKey) {
+      return { success: false, error: `Security violation: Terminal session '${options.sessionId}' belongs to another workspace.` };
     }
     if (!session.alive) {
       return { success: false, error: `Terminal session '${options.sessionId}' has already exited (code ${session.exitCode}).` };
@@ -160,6 +174,36 @@ export class TerminalSessionManager {
     if (options.interrupt) {
       session.proc.stdin.write('\x03');
     } else if (typeof options.input === 'string') {
+      const security = context.config?.security || {};
+      const trimmedInput = options.input.trim();
+      if (trimmedInput) {
+        const policy = validateShellCommandPolicy(trimmedInput, security);
+        if (!policy.allowed) {
+          return { success: false, error: policy.error };
+        }
+        if (security.requireConfirmationForShell) {
+          const confirmFn = context.confirmCommand || context.agent?.confirmCommand;
+          if (typeof confirmFn !== 'function') {
+            return {
+              success: false,
+              confirmationRequired: true,
+              error: 'Writing to an interactive terminal requires human confirmation, but no confirmation handler is attached.'
+            };
+          }
+          const approved = await confirmFn({
+            tool: 'terminal_write',
+            command: trimmedInput,
+            args: { sessionId: session.id }
+          });
+          if (!approved) {
+            return {
+              success: false,
+              confirmationRequired: true,
+              error: 'Terminal write was denied by user confirmation.'
+            };
+          }
+        }
+      }
       const payload = options.appendNewline !== false ? `${options.input}\n` : options.input;
       session.proc.stdin.write(payload);
     } else {
@@ -183,10 +227,14 @@ export class TerminalSessionManager {
     };
   }
 
-  read(options: { sessionId: string; tailLines?: number; unreadOnly?: boolean }) {
+  read(options: { sessionId: string; tailLines?: number; unreadOnly?: boolean }, context: SkillContext = {}) {
     const session = this.sessions.get(options.sessionId);
     if (!session) {
       return { success: false, error: `Terminal session '${options.sessionId}' not found.` };
+    }
+    const callerKey = resolveTerminalOwnerKey(context);
+    if (session.ownerKey !== callerKey) {
+      return { success: false, error: `Security violation: Terminal session '${options.sessionId}' belongs to another workspace.` };
     }
 
     let raw: string;
@@ -209,18 +257,21 @@ export class TerminalSessionManager {
     };
   }
 
-  list() {
+  list(context: SkillContext = {}) {
     const now = Date.now();
-    const sessions = Array.from(this.sessions.values()).map((s) => ({
-      sessionId: s.id,
-      label: s.label,
-      command: s.command,
-      pid: s.proc.pid,
-      cwd: path.resolve(s.cwd),
-      alive: s.alive,
-      exitCode: s.exitCode,
-      uptimeMs: now - s.startedAt
-    }));
+    const callerKey = resolveTerminalOwnerKey(context);
+    const sessions = Array.from(this.sessions.values())
+      .filter((s) => s.ownerKey === callerKey)
+      .map((s) => ({
+        sessionId: s.id,
+        label: s.label,
+        command: s.command,
+        pid: s.proc.pid,
+        cwd: path.resolve(s.cwd),
+        alive: s.alive,
+        exitCode: s.exitCode,
+        uptimeMs: now - s.startedAt
+      }));
     return {
       success: true,
       count: sessions.length,
@@ -228,7 +279,19 @@ export class TerminalSessionManager {
     };
   }
 
-  close(sessionId: string) {
+  close(sessionId: string, context: SkillContext = {}) {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      return { success: false, error: `Terminal session '${sessionId}' not found.` };
+    }
+    const callerKey = resolveTerminalOwnerKey(context);
+    if (session.ownerKey !== callerKey) {
+      return { success: false, error: `Security violation: Terminal session '${sessionId}' belongs to another workspace.` };
+    }
+    return this._forceClose(sessionId);
+  }
+
+  _forceClose(sessionId: string) {
     const session = this.sessions.get(sessionId);
     if (!session) {
       return { success: false, error: `Terminal session '${sessionId}' not found.` };
@@ -268,7 +331,7 @@ export class TerminalSessionManager {
 
   closeAll() {
     for (const id of Array.from(this.sessions.keys())) {
-      this.close(id);
+      this._forceClose(id);
     }
   }
 }
@@ -306,8 +369,8 @@ export const terminalSkills: SkillDefinition<any>[] = [
       },
       required: ['sessionId']
     },
-    execute: async (args: { sessionId: string; input?: string; appendNewline?: boolean; interrupt?: boolean; waitMs?: number }) => {
-      return defaultTerminalManager.write(args);
+    execute: async (args: { sessionId: string; input?: string; appendNewline?: boolean; interrupt?: boolean; waitMs?: number }, context: SkillContext = {}) => {
+      return defaultTerminalManager.write(args, context);
     }
   },
   {
@@ -322,8 +385,8 @@ export const terminalSkills: SkillDefinition<any>[] = [
       },
       required: ['sessionId']
     },
-    execute: async (args: { sessionId: string; tailLines?: number; unreadOnly?: boolean }) => {
-      return defaultTerminalManager.read(args);
+    execute: async (args: { sessionId: string; tailLines?: number; unreadOnly?: boolean }, context: SkillContext = {}) => {
+      return defaultTerminalManager.read(args, context);
     }
   },
   {
@@ -333,8 +396,8 @@ export const terminalSkills: SkillDefinition<any>[] = [
       type: 'object',
       properties: {}
     },
-    execute: async () => {
-      return defaultTerminalManager.list();
+    execute: async (_args = {}, context: SkillContext = {}) => {
+      return defaultTerminalManager.list(context);
     }
   },
   {
@@ -347,8 +410,8 @@ export const terminalSkills: SkillDefinition<any>[] = [
       },
       required: ['sessionId']
     },
-    execute: async ({ sessionId }: { sessionId: string }) => {
-      return defaultTerminalManager.close(sessionId);
+    execute: async ({ sessionId }: { sessionId: string }, context: SkillContext = {}) => {
+      return defaultTerminalManager.close(sessionId, context);
     }
   }
 ];

@@ -30,6 +30,7 @@ export class TenantManager {
   onActivity?: (userId: string, entry: any) => void;
   onAgentUpdate?: (userId: string, payload: any) => void;
   confirmCommand?: (info: Record<string, any>) => Promise<boolean>;
+  confirmCommandFactory?: (userId: string) => (info: Record<string, any>) => Promise<boolean>;
   _evictTimer: ReturnType<typeof setInterval> | null;
 
   constructor(options: {
@@ -39,6 +40,7 @@ export class TenantManager {
     onActivity?: (userId: string, entry: any) => void;
     onAgentUpdate?: (userId: string, payload: any) => void;
     confirmCommand?: (info: Record<string, any>) => Promise<boolean>;
+    confirmCommandFactory?: (userId: string) => (info: Record<string, any>) => Promise<boolean>;
   }) {
     this.baseConfig = options.baseConfig;
     const baseRoot = path.resolve(options.baseConfig.workspaceDir || process.cwd());
@@ -48,6 +50,7 @@ export class TenantManager {
     this.onActivity = options.onActivity;
     this.onAgentUpdate = options.onAgentUpdate;
     this.confirmCommand = options.confirmCommand;
+    this.confirmCommandFactory = options.confirmCommandFactory;
 
     const sweepInterval = Math.min(this.idleTtlMs, 60_000);
     this._evictTimer = setInterval(() => {
@@ -67,19 +70,23 @@ export class TenantManager {
     const tenantBase = path.join(this.tenantsRoot, safeId);
     const memoryDir = path.join(tenantBase, 'memory');
     const workspaceDir = path.join(tenantBase, 'workspace');
+    const skillsDir = path.join(tenantBase, 'skills');
     fs.mkdirSync(memoryDir, { recursive: true });
     fs.mkdirSync(workspaceDir, { recursive: true });
+    fs.mkdirSync(skillsDir, { recursive: true });
 
     const tenantConfig = {
       ...this.baseConfig,
       memoryDir,
-      workspaceDir
+      workspaceDir,
+      skillsDir
     };
     const agent = new OMAgent(tenantConfig);
     await agent.init();
-    if (this.confirmCommand) {
-      agent.confirmCommand = this.confirmCommand;
-      agent.options.confirmCommand = this.confirmCommand;
+    const confirmHandler = this.confirmCommandFactory ? this.confirmCommandFactory(safeId) : this.confirmCommand;
+    if (confirmHandler) {
+      agent.confirmCommand = confirmHandler;
+      agent.options.confirmCommand = confirmHandler;
     }
     if (this.onActivity) {
       agent.on('activity', (entry) => this.onActivity?.(safeId, entry));

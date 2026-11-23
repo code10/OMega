@@ -165,6 +165,21 @@ export function validateShellCommandPolicy(
           };
         }
       }
+      const configIdx = directArgs.findIndex((a) => String(a).toLowerCase() === 'config');
+      if (configIdx !== -1) {
+        const afterConfig = directArgs.slice(configIdx + 1).filter((a) => !String(a).startsWith('-'));
+        for (const candidateKey of afterConfig) {
+          const key = String(candidateKey).toLowerCase();
+          if (/^(alias\.|core\.(pager|sshcommand|hookspath|fsmonitor|editor|askpass))/.test(key)) {
+            return {
+              allowed: false,
+              error: `Security violation: 'git config ${key}' is blocked to prevent arbitrary command execution.`,
+              directExecutable: null,
+              directArgs: []
+            };
+          }
+        }
+      }
     }
   }
 
@@ -322,7 +337,8 @@ export const shellSkills = [
         }
       }
 
-      if (security.sandbox?.strict || security.sandbox?.mode === 'os' || security.sandbox?.mode === 'container') {
+      const sandboxMode = security.sandbox?.mode;
+      if (security.sandbox?.strict || (sandboxMode && sandboxMode !== 'off')) {
         const shellFlag = os.platform() === 'win32' ? '-Command' : '-c';
         try {
           const res = await backend.spawn(shell, [shellFlag, commandText], {
@@ -330,7 +346,8 @@ export const shellSkills = [
             env: childEnv,
             timeoutMs: safeTimeout,
             maxOutputBytes: security.sandbox?.maxOutputBytes,
-            sandbox: security.sandbox || {}
+            sandbox: security.sandbox || {},
+            sandboxCommand: security.sandboxCommand
           });
           return formatProcessResult(res);
         } catch (sandboxErr: any) {

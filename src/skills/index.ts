@@ -3,7 +3,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { shellSkills } from './shell.js';
-import { filesystemSkills } from './filesystem.js';
+import { filesystemSkills, isExecutableSkillFilename } from './filesystem.js';
 import { webSkills } from './web.js';
 import { memorySkills } from './memory.js';
 import { systemSkills } from './system.js';
@@ -285,8 +285,8 @@ export class SkillRegistry {
     for (const entry of entries) {
       const fullPath = path.resolve(dirPath, entry.name);
 
-      // 1. Single JS / MJS tool file in skills root
-      if (entry.isFile() && (entry.name.endsWith('.js') || entry.name.endsWith('.mjs'))) {
+      // 1. Single JS / MJS tool file in skills root (shared extension list with write guard)
+      if (entry.isFile() && isExecutableSkillFilename(entry.name)) {
         try {
           const stat = fs.statSync(fullPath);
           const fileUrl = `${pathToFileURL(fullPath).href}?t=${stat.mtimeMs}`;

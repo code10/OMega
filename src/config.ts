@@ -39,7 +39,16 @@ export function loadEnv(customPath?: string, override = false) {
 export function loadConfig(overrides: OMAgentOptions = {}): OMConfig {
   loadEnv(undefined, Boolean(overrides.reloadEnv));
 
-  const configPath = path.join(ROOT_DIR, 'om.config.json');
+  const cwdConfigPath = path.join(process.cwd(), 'om.config.json');
+  const rootConfigPath = path.join(ROOT_DIR, 'om.config.json');
+  const explicitRootConfigPath = overrides.rootDir ? path.join(path.resolve(overrides.rootDir), 'om.config.json') : null;
+  const configPath =
+    explicitRootConfigPath && fs.existsSync(explicitRootConfigPath)
+      ? explicitRootConfigPath
+      : fs.existsSync(cwdConfigPath)
+        ? cwdConfigPath
+        : rootConfigPath;
+  const configBaseDir = path.dirname(configPath);
   let fileConfig: Record<string, any> = {};
   if (fs.existsSync(configPath)) {
     try {
@@ -49,8 +58,8 @@ export function loadConfig(overrides: OMAgentOptions = {}): OMConfig {
     }
   }
 
-  // Resolve directory paths relative to project root
-  const resolvePath = (p: string) => (path.isAbsolute(p) ? p : path.resolve(ROOT_DIR, p));
+  // Resolve directory paths relative to active config directory
+  const resolvePath = (p: string) => (path.isAbsolute(p) ? p : path.resolve(configBaseDir, p));
 
   let provider = (overrides.provider || process.env.OM_PROVIDER || fileConfig.provider || 'auto').toLowerCase();
   const providerAliases: Record<string, string> = {
@@ -155,6 +164,7 @@ export function loadConfig(overrides: OMAgentOptions = {}): OMConfig {
       requireConfirmationForTools: [
         'exec_command',
         'http_request',
+        'fetch_page',
         'delete_file',
         'desktop_click',
         'desktop_type',

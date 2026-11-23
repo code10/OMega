@@ -76,7 +76,8 @@ test('Unified ExecutionBackend seam routes filesystem and process skills through
       executionBackend: mockBackend,
       security: {
         requireConfirmationForShell: false,
-        allowAllCommands: true
+        allowAllCommands: true,
+        sandbox: { mode: 'off' }
       }
     });
 

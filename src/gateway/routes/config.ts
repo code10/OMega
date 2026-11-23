@@ -326,7 +326,12 @@ export async function handleConfigRoutes(ctx: ConfigRouteContext): Promise<boole
     if (!data) return true;
 
     const envName = typeof data.apiKeyEnv === 'string' ? data.apiKeyEnv.trim() : '';
-    const apiKey = typeof data.apiKey === 'string' ? data.apiKey.trim() : '';
+    const rawApiKey = typeof data.apiKey === 'string' ? data.apiKey : '';
+    if (/[\r\n\0]/.test(rawApiKey)) {
+      sendJson(res, 400, { success: false, error: 'Invalid apiKey: newline and null characters are not allowed' });
+      return true;
+    }
+    const apiKey = rawApiKey.trim();
 
     const allowedEnvVars = new Set<string>(['GEMINI_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY']);
     const providersCfg: Record<string, any> = agent.config.providers || {};
@@ -350,15 +355,33 @@ export async function handleConfigRoutes(ctx: ConfigRouteContext): Promise<boole
     const rootDir = agent.config.rootDir || process.cwd();
     const envPath = path.join(rootDir, '.env');
     try {
-      const existing = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
-      const lines = existing ? existing.split(/\r?\n/) : [];
-      const prefix = `${envName}=`;
-      const filtered = lines.filter((line) => !line.startsWith(prefix));
-      if (apiKey) {
-        filtered.push(`${envName}=${apiKey}`);
+      const envMap = new Map<string, string>();
+      const comments: string[] = [];
+      if (fs.existsSync(envPath)) {
+        for (const rawLine of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
+          const trimmed = rawLine.trim();
+          if (!trimmed || trimmed.startsWith('#')) {
+            if (trimmed) comments.push(rawLine);
+            continue;
+          }
+          const eqIdx = rawLine.indexOf('=');
+          if (eqIdx > 0) {
+            const k = rawLine.slice(0, eqIdx).trim();
+            const v = rawLine.slice(eqIdx + 1).replace(/[\r\n\0]/g, '');
+            if (k) envMap.set(k, v);
+          }
+        }
       }
-      const nextContent = filtered.filter((line, idx, arr) => !(idx === arr.length - 1 && line === '')).join('\n');
-      fs.writeFileSync(envPath, nextContent ? `${nextContent}\n` : '', 'utf8');
+      if (apiKey) {
+        envMap.set(envName, apiKey);
+      } else {
+        envMap.delete(envName);
+      }
+      const serialized = [
+        ...comments,
+        ...Array.from(envMap.entries()).map(([k, v]) => `${k}=${v}`)
+      ].join('\n');
+      fs.writeFileSync(envPath, serialized ? `${serialized}\n` : '', 'utf8');
     } catch (err: any) {
       sendJson(res, 500, { success: false, error: `Updated runtime env, but failed to write .env: ${err.message}` });
       return true;

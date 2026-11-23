@@ -44,7 +44,7 @@ export async function startGateway(options: Record<string, any> = {}) {
   const port = options.port ?? config.gateway?.port ?? 3000;
   const host = options.host || config.gateway?.host || '127.0.0.1';
   const sessionManager = new SessionManager(agent);
-  const sseClients = new Set<any>();
+  const sseClients = new Set<{ res: http.ServerResponse; ownerId: string }>();
   const daemon = new OMDaemon(agent).loadFromConfig(config);
 
   const isLocalHostBind = host === '127.0.0.1' || host === 'localhost' || host === '::1';
@@ -72,11 +72,14 @@ export async function startGateway(options: Record<string, any> = {}) {
     return [`http://127.0.0.1:${activePort}`, `http://localhost:${activePort}`];
   };
 
-  const broadcastSSE = (eventName: string, dataObj: any) => {
+  const broadcastSSE = (eventName: string, dataObj: any, targetOwnerId?: string) => {
     const payload = JSON.stringify(dataObj);
     for (const client of sseClients) {
+      if (isMultiUser && targetOwnerId && client.ownerId !== targetOwnerId) {
+        continue;
+      }
       try {
-        client.write(`event: ${eventName}\ndata: ${payload}\n\n`);
+        client.res.write(`event: ${eventName}\ndata: ${payload}\n\n`);
       } catch (_: any) {
         sseClients.delete(client);
       }
@@ -141,9 +144,9 @@ export async function startGateway(options: Record<string, any> = {}) {
         baseConfig: config,
         tenantsRoot: options.tenantsRoot,
         idleTtlMs: authConfig.tenantIdleTtlMs,
-        confirmCommand: gatewayConfirmHandler,
-        onActivity: (_uid, entry) => broadcastSSE('activity', entry),
-        onAgentUpdate: (_uid, payload) => broadcastSSE('agent_update', payload)
+        confirmCommandFactory: (uid) => approvals.createConfirmHandler(uid),
+        onActivity: (uid, entry) => broadcastSSE('activity', entry, uid),
+        onAgentUpdate: (uid, payload) => broadcastSSE('agent_update', payload, uid)
       })
     : null;
 
@@ -269,9 +272,10 @@ export async function startGateway(options: Record<string, any> = {}) {
         Connection: 'keep-alive'
       });
       res.write('\n');
-      sseClients.add(res);
+      const sseClient = { res, ownerId: authUser?.id || 'local' };
+      sseClients.add(sseClient);
       req.on('close', () => {
-        sseClients.delete(res);
+        sseClients.delete(sseClient);
       });
       return;
     }
@@ -443,7 +447,7 @@ export async function startGateway(options: Record<string, any> = {}) {
     // 6d. POST /api/approvals/:id (Resolve pending HITL tool/shell confirmation)
     const approvalMatch = pathname.match(/^\/api\/approvals\/([^/]+)$/);
     if (approvalMatch && req.method === 'POST') {
-      await approvals.handleResolve(req, res, decodeURIComponent(approvalMatch[1]));
+      await approvals.handleResolve(req, res, decodeURIComponent(approvalMatch[1]), authUser?.id || 'local');
       return;
     }
 
