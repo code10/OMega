@@ -51,8 +51,9 @@ export class SessionManager {
       workspaceDir: this.defaultAgent.config.workspaceDir,
       sessionId
     });
-    // Share loaded skills, security config & memory vector store
+    // Share loaded skills, router (live stats + cooldowns), security config & memory vector store
     isolated.skills = this.defaultAgent.skills;
+    isolated.router = this.defaultAgent.router;
     isolated.config.security = this.defaultAgent.config.security;
     try {
       isolated.resumeSession(sessionId);

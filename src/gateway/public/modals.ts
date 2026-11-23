@@ -325,7 +325,8 @@ export function initRoutingModal() {
       }
     }
 
-    if (providersList) {
+    const hasActiveEditInput = Boolean(editingEnv && providersList?.querySelector(`[data-env-input="${editingEnv}"]`));
+    if (providersList && !hasActiveEditInput) {
       const providers: any[] = Array.isArray(data.providers) ? data.providers : [];
       providersList.innerHTML = providers
         .map((prov) => {

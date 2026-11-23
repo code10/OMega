@@ -72,6 +72,18 @@ document.addEventListener('DOMContentLoaded', () => {
   const { loadAutomations, handleDaemonUpdate } = initAutomations();
   const { loadDeviceSpecs } = initDeviceSpecs();
 
+  let liveRoutingRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  function scheduleLiveRoutingRefresh() {
+    if (liveRoutingRefreshTimer) return;
+    liveRoutingRefreshTimer = setTimeout(() => {
+      liveRoutingRefreshTimer = null;
+      void refreshRouting();
+      if (activeTab === 'system') {
+        void loadAuditLedger();
+      }
+    }, 200);
+  }
+
   function autoResizePromptInput() {
     promptInput.style.height = 'auto';
     promptInput.style.height = `${Math.min(promptInput.scrollHeight, 180)}px`;
@@ -510,6 +522,16 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
           const entry = JSON.parse(ev.data);
           appendActivityLogEntry(entry);
+          if (
+            entry?.type === 'step_start' ||
+            entry?.type === 'tool_end' ||
+            entry?.type === 'retry' ||
+            entry?.type === 'fallback' ||
+            entry?.type === 'done' ||
+            entry?.type === 'error'
+          ) {
+            scheduleLiveRoutingRefresh();
+          }
         } catch (_) { }
       });
       es.addEventListener('agent_update', (ev) => {
