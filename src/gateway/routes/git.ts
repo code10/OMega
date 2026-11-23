@@ -1,4 +1,5 @@
 import type http from 'node:http';
+import type { OMAgent } from '../../agent.js';
 import { OMGitManager } from '../../git.js';
 import { readJsonBody, sendJson } from '../httpUtils.js';
 
@@ -7,7 +8,11 @@ export interface GitRouteContext {
   res: http.ServerResponse;
   pathname: string;
   url: URL;
-  agent: any;
+  agent: OMAgent;
+}
+
+function getErrMsg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 export async function handleGitRoutes(ctx: GitRouteContext): Promise<boolean> {
@@ -43,14 +48,14 @@ export async function handleGitRoutes(ctx: GitRouteContext): Promise<boolean> {
     try {
       const summary = git.getWorktreeSummary(wtPath);
       sendJson(res, 200, { success: true, ...summary });
-    } catch (err: any) {
-      sendJson(res, 500, { success: false, error: err.message });
+    } catch (err: unknown) {
+      sendJson(res, 500, { success: false, error: getErrMsg(err) });
     }
     return true;
   }
 
   if (pathname === '/api/git/worktree/merge' && req.method === 'POST') {
-    const data: Record<string, any> | null = await readJsonBody(req, res);
+    const data: Record<string, unknown> | null = await readJsonBody(req, res);
     if (!data) return true;
     if (!data.worktreePath || !data.branch) {
       sendJson(res, 400, { success: false, error: 'worktreePath and branch are required' });
@@ -59,14 +64,14 @@ export async function handleGitRoutes(ctx: GitRouteContext): Promise<boolean> {
     try {
       const result = git.mergeWorktree(String(data.worktreePath), String(data.branch), data.commitMessage ? String(data.commitMessage) : undefined);
       sendJson(res, 200, { success: true, ...result });
-    } catch (err: any) {
-      sendJson(res, 500, { success: false, error: err.message });
+    } catch (err: unknown) {
+      sendJson(res, 500, { success: false, error: getErrMsg(err) });
     }
     return true;
   }
 
   if (pathname === '/api/git/worktree/discard' && req.method === 'POST') {
-    const data: Record<string, any> | null = await readJsonBody(req, res);
+    const data: Record<string, unknown> | null = await readJsonBody(req, res);
     if (!data) return true;
     if (!data.worktreePath) {
       sendJson(res, 400, { success: false, error: 'worktreePath is required' });
@@ -75,8 +80,8 @@ export async function handleGitRoutes(ctx: GitRouteContext): Promise<boolean> {
     try {
       const result = git.discardWorktree(String(data.worktreePath), data.branch ? String(data.branch) : undefined);
       sendJson(res, 200, { success: true, ...result });
-    } catch (err: any) {
-      sendJson(res, 500, { success: false, error: err.message });
+    } catch (err: unknown) {
+      sendJson(res, 500, { success: false, error: getErrMsg(err) });
     }
     return true;
   }

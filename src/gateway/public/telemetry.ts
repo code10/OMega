@@ -1,4 +1,5 @@
 import { byId, escapeHtml } from './utils.js';
+import { renderVectorHitHtml, renderStatusNotice, renderErrorMessage, type VectorHitViewModel } from './components.js';
 
 export function initTelemetry() {
   const liveActivityFeed = byId('liveActivityFeed');
@@ -121,7 +122,7 @@ export function initTelemetry() {
     }
     const mode = vectorSearchMode ? vectorSearchMode.value : 'hybrid';
     vectorSearchResults.style.display = 'block';
-    vectorSearchResults.innerHTML = '<div class="activity-empty">Searching vector embeddings...</div>';
+    vectorSearchResults.innerHTML = renderStatusNotice('Searching vector embeddings...');
 
     try {
       const res = await fetch(`/api/memory/search?q=${encodeURIComponent(q)}&mode=${encodeURIComponent(mode)}&topK=8`);
@@ -130,25 +131,14 @@ export function initTelemetry() {
         vectorCountBadge.textContent = `${data.vectorStats.totalVectors || 0} vectors (${data.vectorStats.dimension || 256}d)`;
       }
       if (!data.results || data.results.length === 0) {
-        vectorSearchResults.innerHTML = `<div class="activity-empty">No matching memories found for "${escapeHtml(q)}".</div>`;
+        vectorSearchResults.innerHTML = renderStatusNotice(`No matching memories found for "${q}".`);
         return;
       }
-      vectorSearchResults.innerHTML = data.results
-        .map((r: any) => {
-          const pct = Math.round((r.score || 0) * 100);
-          return `
-            <div class="vector-hit-item">
-              <div class="vector-hit-top">
-                <span class="vector-hit-source">${escapeHtml(r.file || r.source || 'memory')}</span>
-                <span class="vector-hit-score">${pct}% match (${escapeHtml(r.matchType || 'vector')})</span>
-              </div>
-              <div class="vector-hit-text">${escapeHtml(r.text)}</div>
-            </div>
-          `;
-        })
+      vectorSearchResults.innerHTML = (data.results as VectorHitViewModel[])
+        .map((r) => renderVectorHitHtml(r))
         .join('');
-    } catch (err: any) {
-      vectorSearchResults.innerHTML = `<div class="activity-empty" style="color:var(--accent-red);">Search failed: ${escapeHtml(err?.message || err)}</div>`;
+    } catch (err: unknown) {
+      vectorSearchResults.innerHTML = renderErrorMessage('Search failed', err);
     }
   }
 

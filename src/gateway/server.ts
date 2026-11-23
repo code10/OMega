@@ -55,8 +55,8 @@ export async function startGateway(options: Record<string, any> = {}) {
   const allowSkillCreation = Boolean(options.allowSkillCreation ?? config.gateway?.allowSkillCreation ?? false);
   const authConfig: GatewayAuthConfig = {
     mode: 'local',
-    ...(config.gateway?.auth || {}),
-    ...(options.auth || {})
+    ...config.gateway?.auth,
+    ...options.auth
   };
   const isMultiUser = authConfig.mode === 'multiuser';
 
@@ -98,6 +98,7 @@ export async function startGateway(options: Record<string, any> = {}) {
   daemon.on('trigger_error', (rec) => emitDaemonUpdate('trigger_error', rec));
   daemon.on('trigger_merged', (rec) => emitDaemonUpdate('trigger_merged', rec));
   daemon.on('trigger_discarded', (rec) => emitDaemonUpdate('trigger_discarded', rec));
+  daemon.on('history_cleared', () => emitDaemonUpdate('history_cleared'));
   daemon.on('started', () => emitDaemonUpdate('started'));
   daemon.on('stopped', () => emitDaemonUpdate('stopped'));
 

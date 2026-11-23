@@ -19,6 +19,7 @@ dist/
 /workspace/
 .om_snapshots/
 .om_worktrees/
+.om-worktrees/
 /tenants/
 offload_cache/
 tests/tmp_*/

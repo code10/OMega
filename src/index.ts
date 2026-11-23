@@ -13,6 +13,15 @@ export { runInitCommand } from './cli/init.js';
 export { WorkspaceSnapshotManager } from './snapshot.js';
 export { SessionReplay } from './replay.js';
 export { OMDaemon } from './daemon.js';
+export type {
+  DaemonTriggerType,
+  DaemonTriggerConfig,
+  DaemonTrigger,
+  DaemonWorktreeState,
+  DaemonRunRecord,
+  DaemonStatus
+} from './daemon.js';
+export type * from './types.js';
 export { DetachedSwarmManager } from './agent/detachedSwarm.js';
 export { saveCheckpoint, loadCheckpoint, listCheckpoints, forkCheckpoint } from './agent/checkpoint.js';
 export { OMEvalRunner } from './eval.js';

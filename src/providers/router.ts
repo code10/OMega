@@ -44,8 +44,8 @@ export class ModelRouter {
         { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
         { provider: 'om', model: 'om-reasoning' }
       ],
-      ...(this.config.routing || {}),
-      ...(options.routing || {})
+      ...this.config.routing,
+      ...options.routing
     };
     this.onEvent = options.onEvent || (() => {});
     this.providerFactory = options.providerFactory || createProvider;
@@ -624,11 +624,14 @@ export class ModelRouter {
     }
 
     // 4. Execute seamless failover to fallback chain
+    const isQuotaZero = /quota limit:\s*0|limit:\s*0/i.test(String(lastError?.message || ''));
     const reasonType = ModelRouter.isContextLimitError(lastError)
       ? 'context_limit'
-      : ModelRouter.isRateLimitError(lastError)
-        ? 'rate_limit'
-        : 'provider_error';
+      : isQuotaZero
+        ? 'quota_unavailable'
+        : ModelRouter.isRateLimitError(lastError)
+          ? 'rate_limit'
+          : 'provider_error';
     return this._executeFailover(primaryProvider, chatParams, lastError, reasonType, options);
   }
 

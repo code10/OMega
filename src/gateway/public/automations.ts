@@ -125,6 +125,7 @@ export function initAutomations() {
   const runsListEl = document.getElementById('automationsRunsList');
   const triggersCountBadge = document.getElementById('triggersCountBadge');
   const runsCountBadge = document.getElementById('runsCountBadge');
+  const clearDaemonRunsBtn = document.getElementById('clearDaemonRunsBtn') as HTMLButtonElement | null;
 
   const store = createStore<AutomationsState>({
     running: false,
@@ -334,6 +335,16 @@ export function initAutomations() {
   });
 
   refreshAutomationsBtn?.addEventListener('click', loadAutomations);
+  clearDaemonRunsBtn?.addEventListener('click', async () => {
+    try {
+      const res = await fetch('/api/daemon/runs/clear', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to clear run history');
+      applyDaemonPayload(data);
+    } catch (err: any) {
+      store.set({ error: err?.message || String(err) });
+    }
+  });
   triggerTypeSelect?.addEventListener('change', syncScheduleField);
 
   saveTriggerBtn?.addEventListener('click', async () => {

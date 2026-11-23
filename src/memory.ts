@@ -29,6 +29,7 @@ export class OMMemory {
   vectorFile: string;
   _longTermCache: string | null;
   _writeQueue: Promise<any>;
+  _closed: boolean;
   vectorStore: VectorStore;
 
   constructor(baseDir: string, options: Record<string, any> = {}) {
@@ -39,6 +40,7 @@ export class OMMemory {
     this.vectorFile = path.join(this.baseDir, 'vectors.json');
     this._longTermCache = null;
     this._writeQueue = Promise.resolve();
+    this._closed = false;
     this.vectorStore = new VectorStore(this.vectorFile, {
       asyncEmbedder: options.asyncEmbedder
     });
@@ -47,7 +49,8 @@ export class OMMemory {
   }
 
   _enqueueWrite<T>(fn: () => Promise<T>): Promise<T> {
-    this._writeQueue = this._writeQueue.then(fn).catch((err) => {
+    this._writeQueue = this._writeQueue.then(() => (this._closed ? undefined : fn())).catch((err) => {
+      if (this._closed) return;
       log.warn(`Async memory write failed: ${err.message}`);
     });
     return this._writeQueue;
@@ -61,6 +64,7 @@ export class OMMemory {
   }
 
   close() {
+    this._closed = true;
     this.vectorStore?.close?.();
   }
 

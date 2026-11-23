@@ -259,7 +259,7 @@ export class OMSelfHealer {
       autoCommit: true,
       testCommand: 'npm test',
       maxSubagentSteps: 6,
-      ...(agent.config?.selfHeal || {}),
+      ...agent.config?.selfHeal,
       ...overrideConfig
     };
 

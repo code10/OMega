@@ -131,8 +131,8 @@ export function loadConfig(overrides: OMAgentOptions = {}): OMConfig {
         { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
         { provider: 'om', model: 'om-reasoning' }
       ],
-      ...(fileConfig.routing || {}),
-      ...(overrides.routing || {})
+      ...fileConfig.routing,
+      ...overrides.routing
     },
     systemOne: {
       device: overrides.systemOne?.device || fileConfig.systemOne?.device || 'auto',
@@ -144,24 +144,31 @@ export function loadConfig(overrides: OMAgentOptions = {}): OMConfig {
       toolShortlisting: overrides.systemOne?.toolShortlisting ?? fileConfig.systemOne?.toolShortlisting ?? true,
       toolShortlistK: Number(overrides.systemOne?.toolShortlistK ?? fileConfig.systemOne?.toolShortlistK ?? 20),
       selfHealTriage: overrides.systemOne?.selfHealTriage ?? fileConfig.systemOne?.selfHealTriage ?? true,
-      ...(fileConfig.systemOne || {}),
-      ...(overrides.systemOne || {}),
+      ...fileConfig.systemOne,
+      ...overrides.systemOne,
       enabled: (process.env.NODE_TEST_CONTEXT && overrides.systemOne?.enabled === undefined)
         ? false
         : Boolean(overrides.systemOne?.enabled ?? fileConfig.systemOne?.enabled ?? false),
     },
     security: {
       requireConfirmationForShell: true,
-      requireConfirmationForTools: ['exec_command', 'http_request'],
+      requireConfirmationForTools: [
+        'exec_command',
+        'http_request',
+        'delete_file',
+        'desktop_click',
+        'desktop_type',
+        'desktop_hotkey'
+      ],
       allowedCommands: ['git'],
       deniedCommands: ['format', 'rm -rf /', 'del /f /s /q C:\\*'],
       commandRules: { allow: [], deny: [] },
-      ...(fileConfig.security || {}),
-      ...(overrides.security || {})
+      ...fileConfig.security,
+      ...overrides.security
     },
     gateway: {
-      ...(fileConfig.gateway || {}),
-      ...(overrides.gateway || {}),
+      ...fileConfig.gateway,
+      ...overrides.gateway,
       port: Number(process.env.OM_GATEWAY_PORT || overrides.port || overrides.gateway?.port || fileConfig.gateway?.port || 3000),
       host: overrides.host || overrides.gateway?.host || fileConfig.gateway?.host || '127.0.0.1',
       openBrowser: Boolean(overrides.gateway?.openBrowser ?? fileConfig.gateway?.openBrowser ?? false),
@@ -273,13 +280,13 @@ export function saveConfigPatch(
     if (patch.maxSteps !== undefined) fileConfig.maxSteps = patch.maxSteps;
     if (patch.systemPrompt !== undefined) fileConfig.systemPrompt = patch.systemPrompt;
     if (patch.routing !== undefined) {
-      fileConfig.routing = { ...(fileConfig.routing || {}), ...patch.routing };
+      fileConfig.routing = { ...fileConfig.routing, ...patch.routing };
     }
     if (patch.security !== undefined) {
-      fileConfig.security = { ...(fileConfig.security || {}), ...patch.security };
+      fileConfig.security = { ...fileConfig.security, ...patch.security };
     }
     if (patch.daemon !== undefined) {
-      fileConfig.daemon = { ...(fileConfig.daemon || {}), ...patch.daemon };
+      fileConfig.daemon = { ...fileConfig.daemon, ...patch.daemon };
     }
 
     atomicWriteFileSync(configPath, JSON.stringify(fileConfig, null, 2) + '\n');

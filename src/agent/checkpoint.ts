@@ -142,8 +142,28 @@ export function saveCheckpoint(memoryDir: string, record: CheckpointRecord): str
     ...record,
     updatedAt: new Date().toISOString()
   };
-  fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), 'utf8');
-  fs.renameSync(tmpPath, filePath);
+  const serialized = JSON.stringify(payload, null, 2);
+  fs.writeFileSync(tmpPath, serialized, 'utf8');
+  let renamed = false;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      fs.renameSync(tmpPath, filePath);
+      renamed = true;
+      break;
+    } catch (err: any) {
+      if (err?.code !== 'EPERM' && err?.code !== 'EBUSY' && err?.code !== 'EACCES') {
+        try { fs.unlinkSync(tmpPath); } catch (_) {}
+        throw err;
+      }
+      // Brief busy-wait fallback for Windows file lock contention with concurrent readers
+      const waitUntil = Date.now() + 15 * (attempt + 1);
+      while (Date.now() < waitUntil) { /* spin */ }
+    }
+  }
+  if (!renamed) {
+    fs.writeFileSync(filePath, serialized, 'utf8');
+    try { fs.unlinkSync(tmpPath); } catch (_) {}
+  }
   return filePath;
 }
 

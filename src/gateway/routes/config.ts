@@ -285,7 +285,7 @@ export async function handleConfigRoutes(ctx: ConfigRouteContext): Promise<boole
     const data: Record<string, any> | null = await readJsonBody(req, res);
     if (!data) return true;
 
-    const currentRouting = { ...(agent.config.routing || {}) };
+    const currentRouting = { ...agent.config.routing };
     if (typeof data.enabled === 'boolean') {
       currentRouting.enabled = data.enabled;
       if (agent.router?.routingConfig) agent.router.routingConfig.enabled = data.enabled;
@@ -403,7 +403,7 @@ export async function handleConfigRoutes(ctx: ConfigRouteContext): Promise<boole
 
     const data: Record<string, any> | null = await readJsonBody(req, res);
     if (!data) return true;
-    const sec: Record<string, any> = { ...(agent.config.security || {}) };
+    const sec: Record<string, any> = { ...agent.config.security };
 
     if (data.preset === 'full_machine' || data.fullMachineAccess === true) {
       sec.allowAllCommands = true;
@@ -444,7 +444,7 @@ export async function handleConfigRoutes(ctx: ConfigRouteContext): Promise<boole
     }
 
     if (data.sandboxMode !== undefined || typeof data.sandboxStrict === 'boolean') {
-      const nextSandbox: Record<string, any> = { ...(sec.sandbox || {}) };
+      const nextSandbox: Record<string, any> = { ...sec.sandbox };
       if (data.sandboxMode !== undefined) {
         const mode = String(data.sandboxMode).toLowerCase().trim();
         if (!['off', 'auto', 'os', 'container'].includes(mode)) {

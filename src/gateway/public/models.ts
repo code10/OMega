@@ -1,4 +1,5 @@
 import { escapeHtml, formatTokens, isLocalProviderName, MODEL_LIMITS_MAP } from './utils.js';
+import { renderModelCardHtml } from './components.js';
 
 export interface ModelsDeps {
   modelDropdownMenu: HTMLElement;
@@ -316,39 +317,7 @@ export function initModels(deps: ModelsDeps) {
       const isCurrent = m.id.toLowerCase() === activeModel;
       const card = document.createElement('div');
       card.className = `model-card-lm ${isCurrent ? 'is-active-model' : ''}`;
-
-      let limits = '';
-      if (m.inputTokenLimit || m.outputTokenLimit) {
-        const inTok = m.inputTokenLimit ? `${Math.round(m.inputTokenLimit / 1000)}k Context` : '';
-        const outTok = m.outputTokenLimit ? `${Math.round(m.outputTokenLimit / 1000)}k Max Out` : '';
-        limits = [inTok, outTok].filter(Boolean).map((t) => `<span class="model-tag">${t}</span>`).join('');
-      }
-
-      const p = (m.provider || 'gemini').toLowerCase();
-      let provBadge = 'LLM';
-      if (p === 'gemini' || p === 'google') provBadge = 'GEMINI';
-      else if (p === 'om' || p === 'mock' || p === 'omega') provBadge = 'OMEGA';
-      else if (p === 'openai') provBadge = 'GPT';
-      else if (p === 'anthropic') provBadge = 'CLAUDE';
-      else if (p === 'vllm') provBadge = 'LOCAL';
-      else provBadge = p.toUpperCase();
-
-      card.innerHTML = `
-        <div class="model-card-top">
-          <div class="model-card-title">${escapeHtml(m.displayName || m.id)}</div>
-          <span class="model-card-provider">${escapeHtml(provBadge)}</span>
-        </div>
-        <div class="model-card-tags">
-          <span class="model-tag" style="color:var(--accent-primary); font-weight:600;">${escapeHtml(m.id)}</span>
-          ${limits}
-        </div>
-        <div class="model-card-desc">${escapeHtml(m.description || 'General-purpose reasoning language model.')}</div>
-        <div class="model-card-actions">
-          <button class="btn-load-model ${isCurrent ? 'loaded' : ''}">
-            ${isCurrent ? '● Active' : 'Load Model'}
-          </button>
-        </div>
-      `;
+      card.innerHTML = renderModelCardHtml(m, isCurrent);
 
       const btn = card.querySelector('.btn-load-model');
       if (!isCurrent && btn) {

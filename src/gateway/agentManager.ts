@@ -1095,7 +1095,7 @@ export class AgentManager {
   }
 
   clearPersistentAgents() {
-    for (const id of [...this.persistentAgents.keys()]) {
+    for (const id of Array.from(this.persistentAgents.keys())) {
       this.deletePersistentAgent(id);
     }
     this.runs = this.runs.filter((r) => !r.agentId);

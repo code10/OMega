@@ -12,6 +12,9 @@ import { gitSkills } from './git.js';
 import { codeIntelSkills } from './codeIntel.js';
 import { browserSkills } from './browser.js';
 import { terminalSkills } from './terminal.js';
+import { desktopSkills } from './desktop.js';
+import { clipboardSkills } from './clipboard.js';
+import { documentSkills } from './documents.js';
 import type { SkillContext, SkillDefinition, SkillResult, ToolParametersSchema } from '../types.js';
 
 /**
@@ -121,7 +124,10 @@ export class SkillRegistry {
       ...gitSkills,
       ...codeIntelSkills,
       ...browserSkills,
-      ...terminalSkills
+      ...terminalSkills,
+      ...desktopSkills,
+      ...clipboardSkills,
+      ...documentSkills
     ]) {
       this.register({ ...skill, source: 'builtin' }, 'builtin');
     }

@@ -7,7 +7,7 @@ import { distillMemory } from '../memory/distiller.js';
 export const memorySkills: SkillDefinition[] = [
   {
     name: 'save_memory',
-    description: 'Save an important fact, user preference, workflow rule, or persistent knowledge into OM long-term memory (MEMORY.md) and index its vector embedding.',
+    description: 'Save a persistent fact or preference to long-term memory (MEMORY.md).',
     parameters: {
       type: 'object',
       properties: {
@@ -30,7 +30,7 @@ export const memorySkills: SkillDefinition[] = [
 
   {
     name: 'read_memory',
-    description: 'Read the contents of the persistent MEMORY.md file.',
+    description: 'Read persistent long-term memory (MEMORY.md).',
     parameters: {
       type: 'object',
       properties: {}
@@ -49,7 +49,7 @@ export const memorySkills: SkillDefinition[] = [
 
   {
     name: 'search_memory',
-    description: 'Search through long-term memory, daily journal logs, past sessions, and indexed knowledge using hybrid keyword + vector semantic search.',
+    description: 'Search memory, daily logs, past sessions, and indexed notes (keyword + vector).',
     parameters: {
       type: 'object',
       properties: {
@@ -75,7 +75,7 @@ export const memorySkills: SkillDefinition[] = [
 
   {
     name: 'index_knowledge',
-    description: 'Index a document, note, or project file into the local vector embedding store for semantic retrieval across sessions.',
+    description: 'Index a document or note into the local vector store for later recall.',
     parameters: {
       type: 'object',
       properties: {

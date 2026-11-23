@@ -1,5 +1,6 @@
 import type http from 'node:http';
-import type { OMDaemon } from '../../daemon.js';
+import type { OMAgent } from '../../agent.js';
+import type { OMDaemon, DaemonTriggerConfig } from '../../daemon.js';
 import { saveConfigPatch } from '../../config.js';
 import { readJsonBody, sendJson } from '../httpUtils.js';
 
@@ -9,8 +10,12 @@ export interface DaemonRouteContext {
   pathname: string;
   url: URL;
   daemon: OMDaemon;
-  agent: any;
+  agent: OMAgent;
   persistConfig: boolean;
+}
+
+function getErrMsg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 function serializeTriggersForConfig(daemon: OMDaemon) {
@@ -36,10 +41,10 @@ function serializeTriggersForConfig(daemon: OMDaemon) {
     }));
 }
 
-function persistDaemonTriggers(daemon: OMDaemon, agent: any, persistConfig: boolean) {
+function persistDaemonTriggers(daemon: OMDaemon, agent: OMAgent, persistConfig: boolean) {
   if (!persistConfig) return;
   const triggers = serializeTriggersForConfig(daemon);
-  const nextDaemonCfg = { ...(agent.config?.daemon || {}), triggers };
+  const nextDaemonCfg = { ...agent.config?.daemon, triggers };
   agent.config.daemon = nextDaemonCfg;
   saveConfigPatch({ daemon: nextDaemonCfg }, agent.config.rootDir);
 }
@@ -71,15 +76,15 @@ export async function handleDaemonRoutes(ctx: DaemonRouteContext): Promise<boole
   }
 
   if (pathname === '/api/daemon/triggers' && req.method === 'POST') {
-    const data: Record<string, any> | null = await readJsonBody(req, res);
+    const data: Record<string, unknown> | null = await readJsonBody(req, res);
     if (!data) return true;
     try {
-      const trigger = daemon.addTrigger(data);
+      const trigger = daemon.addTrigger(data as unknown as DaemonTriggerConfig);
       persistDaemonTriggers(daemon, agent, persistConfig);
       await restartIfRunning(daemon);
       sendJson(res, 200, { success: true, trigger, ...daemon.getStatus() });
-    } catch (err: any) {
-      sendJson(res, 400, { success: false, error: err?.message || String(err) });
+    } catch (err: unknown) {
+      sendJson(res, 400, { success: false, error: getErrMsg(err) });
     }
     return true;
   }
@@ -101,15 +106,16 @@ export async function handleDaemonRoutes(ctx: DaemonRouteContext): Promise<boole
   const toggleMatch = pathname.match(/^\/api\/daemon\/triggers\/([^/]+)\/toggle$/);
   if (toggleMatch && req.method === 'POST') {
     const id = decodeURIComponent(toggleMatch[1]);
-    const data: Record<string, any> | null = await readJsonBody(req, res);
+    const data: Record<string, unknown> | null = await readJsonBody(req, res);
     if (data === null) return true;
     try {
-      const trigger = daemon.toggleTrigger(id, data.enabled);
+      const enabled = typeof data.enabled === 'boolean' ? data.enabled : undefined;
+      const trigger = daemon.toggleTrigger(id, enabled);
       persistDaemonTriggers(daemon, agent, persistConfig);
       await restartIfRunning(daemon);
       sendJson(res, 200, { success: true, trigger, ...daemon.getStatus() });
-    } catch (err: any) {
-      sendJson(res, 404, { success: false, error: err?.message || String(err) });
+    } catch (err: unknown) {
+      sendJson(res, 404, { success: false, error: getErrMsg(err) });
     }
     return true;
   }
@@ -121,7 +127,7 @@ export async function handleDaemonRoutes(ctx: DaemonRouteContext): Promise<boole
       sendJson(res, 404, { success: false, error: `Trigger '${id}' not found` });
       return true;
     }
-    const data: Record<string, any> | null = await readJsonBody(req, res);
+    const data: Record<string, unknown> | null = await readJsonBody(req, res);
     if (data === null) return true;
 
     const isAsync = url.searchParams.get('async') === '1' || url.searchParams.get('async') === 'true';
@@ -133,9 +139,15 @@ export async function handleDaemonRoutes(ctx: DaemonRouteContext): Promise<boole
     try {
       const record = await daemon.fireTrigger(id, data);
       sendJson(res, 200, { success: true, record });
-    } catch (err: any) {
-      sendJson(res, 400, { success: false, error: err?.message || String(err) });
+    } catch (err: unknown) {
+      sendJson(res, 400, { success: false, error: getErrMsg(err) });
     }
+    return true;
+  }
+
+  if (pathname === '/api/daemon/runs/clear' && req.method === 'POST') {
+    const result = daemon.clearHistory();
+    sendJson(res, 200, { success: true, ...result, ...daemon.getStatus() });
     return true;
   }
 
@@ -158,13 +170,14 @@ export async function handleDaemonRoutes(ctx: DaemonRouteContext): Promise<boole
   const mergeMatch = pathname.match(/^\/api\/daemon\/runs\/([^/]+)\/merge$/);
   if (mergeMatch && req.method === 'POST') {
     const runId = decodeURIComponent(mergeMatch[1]);
-    const data: Record<string, any> | null = await readJsonBody(req, res);
+    const data: Record<string, unknown> | null = await readJsonBody(req, res);
     if (data === null) return true;
     try {
-      const result = daemon.mergeRunWorktree(runId, data.commitMessage);
+      const commitMessage = typeof data.commitMessage === 'string' ? data.commitMessage : undefined;
+      const result = daemon.mergeRunWorktree(runId, commitMessage);
       sendJson(res, 200, { success: true, runId, ...result, ...daemon.getStatus() });
-    } catch (err: any) {
-      sendJson(res, 400, { success: false, error: err?.message || String(err) });
+    } catch (err: unknown) {
+      sendJson(res, 400, { success: false, error: getErrMsg(err) });
     }
     return true;
   }
@@ -175,8 +188,8 @@ export async function handleDaemonRoutes(ctx: DaemonRouteContext): Promise<boole
     try {
       const result = daemon.discardRunWorktree(runId);
       sendJson(res, 200, { success: true, runId, ...result, ...daemon.getStatus() });
-    } catch (err: any) {
-      sendJson(res, 400, { success: false, error: err?.message || String(err) });
+    } catch (err: unknown) {
+      sendJson(res, 400, { success: false, error: getErrMsg(err) });
     }
     return true;
   }

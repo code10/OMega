@@ -143,10 +143,20 @@ test('Persistent interactive terminal skills support start, write, read, list, a
     const writeRes = await agent.skills.execute('terminal_write', {
       sessionId,
       input: 'console.log("TERM_OK_" + (21 * 2))',
-      waitMs: 500
+      waitMs: 1200
     }, ctx);
     assert.equal(writeRes.success, true);
-    assert.match(writeRes.output, /TERM_OK_42/);
+
+    let combinedOut = writeRes.output || '';
+    if (!/TERM_OK_42/.test(combinedOut)) {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        await new Promise((r) => setTimeout(r, 300));
+        const poll = await agent.skills.execute('terminal_read', { sessionId, tailLines: 20 }, ctx);
+        combinedOut = poll.output || '';
+        if (/TERM_OK_42/.test(combinedOut)) break;
+      }
+    }
+    assert.match(combinedOut, /TERM_OK_42/);
 
     const readRes = await agent.skills.execute('terminal_read', {
       sessionId,

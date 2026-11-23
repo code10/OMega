@@ -200,6 +200,14 @@ test('Gateway daemon API routes create, run, inspect, and delete triggers', asyn
     assert.ok(statusData.triggers.some((t) => t.id === 'api-check'));
     assert.ok(statusData.recentRuns.some((r) => r.triggerId === 'api-check'));
 
+    const clearRes = await fetch(`${baseUrl}/api/daemon/runs/clear`, {
+      method: 'POST',
+      headers
+    });
+    assert.equal(clearRes.status, 200);
+    const clearData = await clearRes.json();
+    assert.equal(clearData.recentRuns.length, 0);
+
     const delRes = await fetch(`${baseUrl}/api/daemon/triggers/api-check`, {
       method: 'DELETE',
       headers

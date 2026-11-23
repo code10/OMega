@@ -7,7 +7,7 @@ import type { SkillContext, SkillDefinition } from '../types.js';
 export const gitSkills: SkillDefinition[] = [
   {
     name: 'git_status',
-    description: 'Inspect git repository branch and modified/untracked files in the workspace.',
+    description: 'Show current git branch and modified or untracked files.',
     parameters: {
       type: 'object',
       properties: {}
@@ -18,12 +18,17 @@ export const gitSkills: SkillDefinition[] = [
       if (!git.isGitRepo()) {
         return { success: false, error: 'Workspace is not a git repository' };
       }
-      return { success: true, ...git.getStatus() };
+      const status = git.getStatus();
+      const count = Array.isArray(status.files) ? status.files.length : 0;
+      const summary = status.clean
+        ? `On branch ${status.branch} — working tree clean`
+        : `On branch ${status.branch} — ${count} changed file(s)`;
+      return { success: true, summary, ...status };
     }
   },
   {
     name: 'git_diff',
-    description: 'Get unified git diff for the current working tree or against an optional base ref.',
+    description: 'Return unified git diff for working changes or against a base ref.',
     parameters: {
       type: 'object',
       properties: {
@@ -42,7 +47,7 @@ export const gitSkills: SkillDefinition[] = [
   },
   {
     name: 'git_branch',
-    description: 'Create or switch to a git branch for isolating multi-file refactors.',
+    description: 'Create or switch to a git branch.',
     parameters: {
       type: 'object',
       properties: {

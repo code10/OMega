@@ -423,5 +423,84 @@ export const filesystemSkills = [
         results
       };
     }
+  },
+  {
+    name: 'move_file',
+    description: 'Move or rename a file within the workspace.',
+    parameters: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'Source file path' },
+        to: { type: 'string', description: 'Destination file path' }
+      },
+      required: ['from', 'to']
+    },
+    execute: async ({ from, to }: { from: string; to: string }, context: SkillContext = {}) => {
+      let srcPath: string;
+      let destPath: string;
+      try {
+        srcPath = resolveSafePath(from, context.config?.workspaceDir, context);
+        destPath = resolveSafePath(to, context.config?.workspaceDir, context);
+      } catch (err: unknown) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+      if (!fs.existsSync(srcPath)) {
+        return { success: false, error: `Source file not found: ${from}` };
+      }
+      try {
+        fs.mkdirSync(path.dirname(destPath), { recursive: true });
+        fs.renameSync(srcPath, destPath);
+        return { success: true, from: srcPath, to: destPath, summary: `Moved ${from} -> ${to}` };
+      } catch (err: unknown) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+  },
+  {
+    name: 'delete_file',
+    description: 'Delete a file inside the workspace (requires human approval).',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Path to the file to delete' }
+      },
+      required: ['path']
+    },
+    execute: async ({ path: filePath }: { path: string }, context: SkillContext = {}) => {
+      let target: string;
+      try {
+        target = resolveSafePath(filePath, context.config?.workspaceDir, context);
+      } catch (err: unknown) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+      if (!fs.existsSync(target)) {
+        return { success: false, error: `File not found: ${filePath}` };
+      }
+      const stat = fs.statSync(target);
+      if (stat.isDirectory()) {
+        return { success: false, error: `Refusing to delete directory '${filePath}' with delete_file.` };
+      }
+
+      const confirmFn = context.confirmCommand || (context.agent as { confirmCommand?: SkillContext['confirmCommand'] } | undefined)?.confirmCommand;
+      if (!context.config?.security?.allowAllCommands || confirmFn) {
+        if (!confirmFn) {
+          return {
+            success: false,
+            error: `Tool 'delete_file' requires human approval (Delete ${filePath}), but no confirmation handler is attached.`
+          };
+        }
+        const approved = await confirmFn({ tool: 'delete_file', command: `Delete file ${filePath}`, args: { path: filePath } });
+        if (!approved) {
+          return { success: false, error: `Delete rejected by user: ${filePath}` };
+        }
+      }
+
+      try {
+        fs.unlinkSync(target);
+        return { success: true, path: target, summary: `Deleted ${filePath}` };
+      } catch (err: unknown) {
+        return { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
   }
 ];

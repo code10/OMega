@@ -8,6 +8,7 @@ import { OMGitManager } from './git.js';
 import { OMSelfImprover } from './selfImprove.js';
 import { createLogger } from './utils/logger.js';
 import { buildSafeChildEnv } from './utils/redact.js';
+import type { TokenUsage } from './types.js';
 
 const execAsync = promisify(exec);
 const log = createLogger('OMDaemon');
@@ -44,24 +45,117 @@ export function matchesCron(expr: string, date = new Date()) {
   });
 }
 
+export type DaemonTriggerType = 'cron' | 'interval' | 'watch' | 'webhook';
+
+export interface DaemonTriggerConfig {
+  id: string;
+  name?: string;
+  type?: DaemonTriggerType;
+  cron?: string | null;
+  everyMs?: number | null;
+  watchPath?: string | null;
+  prompt?: string;
+  skill?: string | null;
+  checkCommand?: string | null;
+  checkTimeoutMs?: number;
+  isolatedWorktree?: boolean;
+  maxSteps?: number;
+  maxTokens?: number;
+  maxDurationMs?: number;
+  handler?: ((payload: Record<string, unknown>, agent: OMAgent) => Promise<Record<string, unknown> | void>) | null;
+  runOnStart?: boolean;
+  enabled?: boolean;
+}
+
+export interface DaemonTrigger {
+  id: string;
+  name: string;
+  type: DaemonTriggerType;
+  cron: string | null;
+  everyMs: number | null;
+  watchPath: string | null;
+  prompt: string;
+  skill: string | null;
+  checkCommand: string | null;
+  checkTimeoutMs: number;
+  isolatedWorktree: boolean;
+  maxSteps: number;
+  maxTokens: number;
+  maxDurationMs: number;
+  handler: ((payload: Record<string, unknown>, agent: OMAgent) => Promise<Record<string, unknown> | void>) | null;
+  runOnStart: boolean;
+  enabled: boolean;
+  lastRunAt: string | null;
+  runCount: number;
+}
+
+export interface DaemonWorktreeState {
+  worktreePath: string;
+  branch: string;
+  clean: boolean;
+  files: Array<{ status: string; path: string }>;
+  diff: string;
+  diffTruncated: boolean;
+  status: 'pending' | 'merged' | 'discarded';
+  mergedAt?: string;
+  discardedAt?: string;
+}
+
+export interface DaemonRunRecord {
+  runId: string;
+  triggerId: string;
+  triggerName: string;
+  type: DaemonTriggerType;
+  startedAt: string;
+  finishedAt?: string;
+  success: boolean;
+  zeroToken: boolean;
+  isolatedWorktree: boolean;
+  budgets: {
+    maxSteps: number;
+    maxTokens: number;
+    maxDurationMs: number;
+  };
+  checkCommand?: string;
+  checkPassed?: boolean;
+  checkExitCode?: number;
+  checkOutput?: string;
+  result?: unknown;
+  answer?: string;
+  error?: string;
+  usage?: TokenUsage;
+  stopReason?: string;
+  worktree?: DaemonWorktreeState;
+}
+
+export interface DaemonStatus {
+  running: boolean;
+  triggers: DaemonTrigger[];
+  recentRuns: DaemonRunRecord[];
+}
+
+function getErrMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 /**
  * Always-On Local Daemon Mode:
  * Runs scheduled (cron / interval), file-watch, and webhook triggers against OMAgent.
  */
 export class OMDaemon extends EventEmitter {
-  agent: any;
-  agentOptions: Record<string, any>;
-  triggers: Map<string, any>;
-  timers: any[];
-  watchers: any[];
-  history: any[];
+  agent: OMAgent | null;
+  agentOptions: Record<string, unknown>;
+  triggers: Map<string, DaemonTrigger>;
+  timers: NodeJS.Timeout[];
+  watchers: fs.FSWatcher[];
+  history: DaemonRunRecord[];
   historyFile: string | null;
   running: boolean;
 
-  constructor(agentOrOptions: any = {}) {
+  constructor(agentOrOptions: OMAgent | Record<string, unknown> = {}) {
     super();
     this.agent = agentOrOptions instanceof OMAgent ? agentOrOptions : null;
-    this.agentOptions = agentOrOptions instanceof OMAgent ? agentOrOptions.options : agentOrOptions;
+    this.agentOptions = (agentOrOptions instanceof OMAgent ? agentOrOptions.options : agentOrOptions) as Record<string, unknown>;
     this.triggers = new Map();
     this.timers = [];
     this.watchers = [];
@@ -72,13 +166,13 @@ export class OMDaemon extends EventEmitter {
   }
 
   _resolveWorkspaceDir(): string {
-    return this.agent?.config?.workspaceDir || this.agentOptions?.workspaceDir || process.cwd();
+    return this.agent?.config?.workspaceDir || (typeof this.agentOptions?.workspaceDir === 'string' ? this.agentOptions.workspaceDir : process.cwd());
   }
 
   _resolveHistoryFile(): string | null {
-    const explicit = this.agentOptions?.daemonHistoryFile;
+    const explicit = typeof this.agentOptions?.daemonHistoryFile === 'string' ? this.agentOptions.daemonHistoryFile : '';
     if (explicit) return path.resolve(explicit);
-    const memDir = this.agent?.config?.memoryDir || this.agentOptions?.memoryDir;
+    const memDir = this.agent?.config?.memoryDir || (typeof this.agentOptions?.memoryDir === 'string' ? this.agentOptions.memoryDir : '');
     if (memDir) return path.join(path.resolve(memDir), 'daemon-runs.json');
     return path.join(this._resolveWorkspaceDir(), 'memory', 'daemon-runs.json');
   }
@@ -89,10 +183,10 @@ export class OMDaemon extends EventEmitter {
       const raw = fs.readFileSync(this.historyFile, 'utf8');
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        this.history = parsed.slice(-100);
+        this.history = parsed.slice(-100) as DaemonRunRecord[];
       }
-    } catch (err: any) {
-      log.warn(`Failed to load daemon run history: ${err.message}`);
+    } catch (err: unknown) {
+      log.warn(`Failed to load daemon run history: ${getErrMessage(err)}`);
     }
   }
 
@@ -102,12 +196,12 @@ export class OMDaemon extends EventEmitter {
       const dir = path.dirname(this.historyFile);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(this.historyFile, JSON.stringify(this.history.slice(-100), null, 2), 'utf8');
-    } catch (err: any) {
-      log.warn(`Failed to persist daemon run history: ${err.message}`);
+    } catch (err: unknown) {
+      log.warn(`Failed to persist daemon run history: ${getErrMessage(err)}`);
     }
   }
 
-  async _ensureAgent() {
+  async _ensureAgent(): Promise<OMAgent> {
     if (!this.agent) {
       this.agent = new OMAgent(this.agentOptions);
       await this.agent.init();
@@ -116,10 +210,10 @@ export class OMDaemon extends EventEmitter {
     return this.agent;
   }
 
-  addTrigger(trigger: Record<string, any>) {
+  addTrigger(trigger: DaemonTriggerConfig): DaemonTrigger {
     if (!trigger || !trigger.id) throw new Error('Trigger requires an id');
     const existing = this.triggers.get(trigger.id);
-    const normalized = {
+    const normalized: DaemonTrigger = {
       id: trigger.id,
       name: trigger.name || trigger.id,
       type: trigger.type || (trigger.cron ? 'cron' : trigger.everyMs ? 'interval' : trigger.watchPath ? 'watch' : 'webhook'),
@@ -148,24 +242,40 @@ export class OMDaemon extends EventEmitter {
     return this.triggers.delete(triggerId);
   }
 
-  toggleTrigger(triggerId: string, enabled?: boolean) {
+  toggleTrigger(triggerId: string, enabled?: boolean): DaemonTrigger {
     const trigger = this.triggers.get(triggerId);
     if (!trigger) throw new Error(`Trigger '${triggerId}' not found`);
     trigger.enabled = enabled !== undefined ? Boolean(enabled) : !trigger.enabled;
     return trigger;
   }
 
-  getRun(runId: string) {
+  getRun(runId: string): DaemonRunRecord | null {
     return this.history.find((r) => r.runId === runId) || null;
   }
 
-  loadFromConfig(config: Record<string, any> = {}) {
-    const list = Array.isArray(config.daemon?.triggers) ? config.daemon.triggers : [];
-    for (const t of list) {
-      this.addTrigger(t);
+  clearHistory() {
+    const workspaceDir = this._resolveWorkspaceDir();
+    for (const run of this.history) {
+      if (run?.worktree?.status === 'pending') {
+        try {
+          new OMGitManager(workspaceDir).discardWorktree(run.worktree.worktreePath, run.worktree.branch);
+        } catch (_err: unknown) {}
+      }
     }
-    if (config.daemon?.distillation?.enabled) {
-      this.enableAutonomousDistillation(config.daemon.distillation);
+    this.history = [];
+    this._saveHistory();
+    this.emit('history_cleared');
+    return { cleared: true };
+  }
+
+  loadFromConfig(config: { daemon?: { triggers?: Array<DaemonTriggerConfig | Record<string, unknown>>; distillation?: Record<string, unknown> } } = {}) {
+    const daemonCfg = config.daemon;
+    const list = Array.isArray(daemonCfg?.triggers) ? daemonCfg.triggers : [];
+    for (const t of list) {
+      this.addTrigger(t as DaemonTriggerConfig);
+    }
+    if (daemonCfg?.distillation?.enabled) {
+      this.enableAutonomousDistillation(daemonCfg.distillation as Parameters<OMDaemon['enableAutonomousDistillation']>[0]);
     }
     return this;
   }
@@ -193,7 +303,7 @@ export class OMDaemon extends EventEmitter {
       everyMs: useCron ? null : (options.intervalMs ?? 3600_000),
       runOnStart: Boolean(options.runOnStart),
       enabled: true,
-      handler: async (_payload: Record<string, any>, activeAgent: any) => {
+      handler: async (_payload: Record<string, unknown>, activeAgent: OMAgent) => {
         const result = await OMSelfImprover.distill(activeAgent, {
           useLLM: false,
           prune: options.prune ?? true,
@@ -221,11 +331,12 @@ export class OMDaemon extends EventEmitter {
         exitCode: 0,
         output: combined.slice(0, 8000)
       };
-    } catch (err: any) {
-      const combined = [err?.stdout, err?.stderr, err?.message].filter(Boolean).join('\n').trim();
+    } catch (err: unknown) {
+      const execErr = err as { stdout?: string; stderr?: string; message?: string; code?: number };
+      const combined = [execErr?.stdout, execErr?.stderr, execErr?.message].filter(Boolean).join('\n').trim();
       return {
         passed: false,
-        exitCode: typeof err?.code === 'number' ? err.code : 1,
+        exitCode: typeof execErr?.code === 'number' ? execErr.code : 1,
         output: combined.slice(0, 8000)
       };
     }
@@ -243,7 +354,7 @@ export class OMDaemon extends EventEmitter {
     trigger.lastRunAt = new Date().toISOString();
     trigger.runCount += 1;
 
-    const record: Record<string, any> = {
+    const record: DaemonRunRecord = {
       runId,
       triggerId,
       triggerName: trigger.name || triggerId,
@@ -261,7 +372,7 @@ export class OMDaemon extends EventEmitter {
 
     let wt: { worktreePath: string; branch: string } | null = null;
     let gitMgr: OMGitManager | null = null;
-    let scopedAgent: any = null;
+    let scopedAgent: OMAgent | null = null;
 
     try {
       let execDir = workspaceDir;
@@ -345,7 +456,7 @@ export class OMDaemon extends EventEmitter {
         record.success = Boolean(res.success);
         record.answer = res.content;
         if (res.usage) record.usage = res.usage;
-        if (res.stopReason) record.stopReason = res.stopReason;
+        if (res.stopReason) record.stopReason = String(res.stopReason);
       }
 
       if (wt && gitMgr) {
@@ -358,8 +469,8 @@ export class OMDaemon extends EventEmitter {
       }
 
       return this._finalizeRun(record, 'trigger_run');
-    } catch (err: any) {
-      record.error = err.message;
+    } catch (err: unknown) {
+      record.error = getErrMessage(err);
       if (wt && gitMgr) {
         try {
           const summary = gitMgr.getWorktreeSummary(wt.worktreePath);
@@ -368,17 +479,17 @@ export class OMDaemon extends EventEmitter {
           } else {
             record.worktree = { ...summary, status: 'pending' };
           }
-        } catch (_: any) {}
+        } catch (_err: unknown) {}
       }
       return this._finalizeRun(record, 'trigger_error');
     } finally {
       if (scopedAgent) {
-        try { await scopedAgent.close?.(); } catch (_: any) {}
+        try { await scopedAgent.close?.(); } catch (_err: unknown) {}
       }
     }
   }
 
-  _finalizeRun(record: Record<string, any>, eventName: 'trigger_run' | 'trigger_error') {
+  _finalizeRun(record: DaemonRunRecord, eventName: 'trigger_run' | 'trigger_error'): DaemonRunRecord {
     if (!record.finishedAt) record.finishedAt = new Date().toISOString();
     this.history.push(record);
     if (this.history.length > 100) this.history.shift();
@@ -446,14 +557,15 @@ export class OMDaemon extends EventEmitter {
       if (t.runOnStart) {
         this.fireTrigger(t.id, { runOnStart: true }).catch((e) => log.warn(e.message));
       }
-      if (t.type === 'interval' && t.everyMs > 0) {
+      if (t.type === 'interval' && t.everyMs && t.everyMs > 0) {
+        const everyMs = t.everyMs;
         const timer = setInterval(() => {
-          this.fireTrigger(t.id, { intervalMs: t.everyMs }).catch((e) => log.warn(e.message));
-        }, t.everyMs);
+          this.fireTrigger(t.id, { intervalMs: everyMs }).catch((e) => log.warn(e.message));
+        }, everyMs);
         timer.unref?.();
         this.timers.push(timer);
       } else if (t.type === 'watch' && t.watchPath) {
-        const resolved = path.resolve(this.agent.config.workspaceDir || process.cwd(), t.watchPath);
+        const resolved = path.resolve(this._resolveWorkspaceDir(), t.watchPath);
         if (fs.existsSync(resolved)) {
           let debounce: NodeJS.Timeout | null = null;
           const watcher = fs.watch(resolved, { recursive: true }, (eventType, filename) => {
@@ -477,7 +589,7 @@ export class OMDaemon extends EventEmitter {
     for (const timer of this.timers) clearInterval(timer);
     this.timers = [];
     for (const w of this.watchers) {
-      try { w.close(); } catch (_: any) {}
+      try { w.close(); } catch (_err: unknown) {}
     }
     this.watchers = [];
     this.emit('stopped');

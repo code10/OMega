@@ -280,6 +280,7 @@ test('OMega Autonomous Evaluation & Benchmark Suite', async (t) => {
       assert.equal(res.totalSteps, 4);
       assert.ok(res.content.includes('STATUS=verified'));
       assert.equal(fs.readFileSync(targetFile, 'utf8').includes('STATUS=verified'), true);
+      await agent.close();
     });
 
     await sub.test('2c. Autonomous Error Recovery when a tool fails mid-trajectory', async () => {
@@ -331,6 +332,7 @@ test('OMega Autonomous Evaluation & Benchmark Suite', async (t) => {
       assert.equal(res.totalSteps, 3);
       assert.equal(fs.existsSync(recoveryFile), true);
       assert.ok(res.content.includes('Successfully recovered'));
+      await agent.close();
     });
   });
 

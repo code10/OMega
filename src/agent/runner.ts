@@ -73,7 +73,7 @@ export async function executeAgentRun(
       : options.selfHeal && typeof options.selfHeal === 'object'
         ? options.selfHeal
         : undefined;
-  const effectiveSelfHeal = { ...(agent.config?.selfHeal || {}), ...(selfHealOverride || {}) };
+  const effectiveSelfHeal = { ...agent.config?.selfHeal, ...selfHealOverride };
   const maxHealAttempts = Number(effectiveSelfHeal.maxHealAttempts ?? 1);
   const canSelfHeal = (source: 'tool_failure' | 'unhandled_error') => {
     if (!effectiveSelfHeal.enabled) return false;
@@ -121,7 +121,7 @@ export async function executeAgentRun(
   const startedAt = resumeCp?.startedAt || new Date().toISOString();
   const runWallStart = Date.now();
   const effectiveBudgets: CheckpointBudgets = {
-    ...(resumeCp?.budgets || {}),
+    ...resumeCp?.budgets,
     ...(options.budgets && typeof options.budgets === 'object' ? options.budgets : {})
   };
   const maxBudgetTokens = Number(effectiveBudgets.maxTokens || 0);

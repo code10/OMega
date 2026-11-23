@@ -80,7 +80,7 @@ export function createProvider(config: Record<string, any> = {}) {
   const providerName = (config.provider || 'om').toLowerCase();
 
   const getOptions = (key: string) => ({
-    ...(config.providers?.[key] || {}),
+    ...config.providers?.[key],
     ...config,
     ...(config.model ? { model: config.model } : {})
   });

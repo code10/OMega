@@ -432,7 +432,7 @@ console.log(fibonacci(8)); // [0, 1, 1, 2, 3, 5, 8, 13]
     }
 
     // 7. Conversational math queries
-    const directMath = trimmed.match(/^what\s+is\s+(\d+(?:\.\d+)?)\s*([\+\-\*\/])\s*(\d+(?:\.\d+)?)\s*\??$/i);
+    const directMath = trimmed.match(/^what\s+is\s+(\d+(?:\.\d+)?)\s*([+*/-])\s*(\d+(?:\.\d+)?)\s*\??$/i);
     if (directMath) {
       const a = parseFloat(directMath[1]);
       const op = directMath[2];

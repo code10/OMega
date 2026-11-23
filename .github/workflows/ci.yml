@@ -35,6 +35,9 @@ jobs:
       - name: Typecheck internal and public contracts
         run: npm run check:types
 
+      - name: Lint TypeScript sources (zero warnings)
+        run: npm run lint
+
       - name: Run unit & integration suite
         run: npm test
 

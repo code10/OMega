@@ -14,6 +14,7 @@ import { initTraceRenderer } from './traceRenderer.js';
 import { initAgents } from './agents.js';
 import { initAutomations } from './automations.js';
 import { initDeviceSpecs } from './device.js';
+import { renderConfigRowsHtml, renderSkillCardHtml, renderErrorMessage } from './components.js';
 
 function resolveGatewayToken(): string {
   const params = new URLSearchParams(window.location.search);
@@ -434,14 +435,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (data.workspaceDir !== undefined) setSpecDirValue(specWorkspaceDir, data.workspaceDir);
 
     if (configTable) {
-      configTable.innerHTML = `
-        <div class="config-row"><span class="config-key">Agent Name</span><span class="config-val">${escapeHtml(data.name || 'OMega')}</span></div>
-        <div class="config-row"><span class="config-key">Active Provider</span><span class="config-val">${displayProvName}</span></div>
-        <div class="config-row"><span class="config-key">Active Model</span><span class="config-val">${mod}</span></div>
-        <div class="config-row"><span class="config-key">Active Session ID</span><span class="config-val">${data.sessionId || 'session_1'}</span></div>
-        <div class="config-row"><span class="config-key">Memory Directory</span><span class="config-val">${data.memoryDir || './memory'}</span></div>
-        <div class="config-row"><span class="config-key">Workspace Directory</span><span class="config-val">${data.workspaceDir || '.'}</span></div>
-      `;
+      configTable.innerHTML = renderConfigRowsHtml([
+        ['Agent Name', String(data.name || 'OMega')],
+        ['Active Provider', String(displayProvName)],
+        ['Active Model', String(mod)],
+        ['Active Session ID', String(data.sessionId || 'session_1')],
+        ['Memory Directory', String(data.memoryDir || './memory')],
+        ['Workspace Directory', String(data.workspaceDir || '.')]
+      ]);
     }
 
     updateModelUsageBar();
@@ -1515,30 +1516,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const card = document.createElement('div');
         card.className = 'skill-card';
-        const isWorkflow = skill.type === 'workflow';
-
-        let refsHtml = '';
-        if (skill.references && skill.references.length > 0) {
-          const pillBtns = skill.references.map((ref: string) => {
-            return `<button class="ref-pill-btn" type="button" data-skill="${escapeHtml(skill.name)}" data-ref="${escapeHtml(ref)}" title="Read ${escapeHtml(ref)} runbook">
-              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-              <span>${escapeHtml(ref)}</span>
-            </button>`;
-          }).join('');
-          refsHtml = `<div class="skill-refs"><span class="skill-refs-title">References:</span> ${pillBtns}</div>`;
-        }
-
-        card.innerHTML = `
-          <div class="skill-card-top">
-            <span class="skill-title"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:5px;"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polyline></svg>${escapeHtml(skill.name)}</span>
-            <span class="skill-tag ${isWorkflow ? 'workflow-tag' : ''}">${isWorkflow ? 'Workflow' : 'Tool'}</span>
-          </div>
-          <div class="skill-desc">${escapeHtml(skill.description)}</div>
-          ${refsHtml}
-          <div class="skill-params">
-            <pre><code>${escapeHtml(JSON.stringify(skill.parameters || {}, null, 2))}</code></pre>
-          </div>
-        `;
+        card.innerHTML = renderSkillCardHtml(skill);
 
         card.querySelectorAll<HTMLElement>('.ref-pill-btn').forEach((btn) => {
           btn.addEventListener('click', (ev) => {
@@ -1549,8 +1527,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         skillsList.appendChild(card);
       }
-    } catch (e: any) {
-      skillsList.innerHTML = `<p style="color:var(--accent-red)">Failed to load skills: ${e?.message || e}</p>`;
+    } catch (e: unknown) {
+      skillsList.innerHTML = renderErrorMessage('Failed to load skills', e);
     }
   }
 

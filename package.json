@@ -1,5 +1,5 @@
 {
-  "name": "OMega",
+  "name": "omega-agent",
   "version": "1.0.0",
   "description": "A local-first framework for building and running AI agents.",
   "type": "module",
@@ -28,7 +28,9 @@
     "benchmark:eval": "npm run build && node scripts/run-benchmark.js",
     "check:types": "tsc --noEmit && tsc -p tsconfig.public.json --noEmit",
     "docs:check": "node scripts/sync-docs.js --check",
-    "docs:sync": "node scripts/sync-docs.js --write"
+    "docs:sync": "node scripts/sync-docs.js --write",
+    "lint": "oxlint --deny-warnings src",
+    "format": "prettier --write \"src/**/*.ts\" \"*.md\""
   },
   "keywords": [
     "ai",
@@ -43,14 +45,24 @@
     "local-first",
     "framework"
   ],
-  "author": "OM Framework Contributors",
+  "author": "Saad Abbas <saadeddine.abbas@bau.edu.lb>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/code10/OMega.git"
+  },
+  "bugs": {
+    "url": "https://github.com/code10/OMega/issues"
+  },
+  "homepage": "https://github.com/code10/OMega#readme",
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "oxlint": "^1.94.0",
     "playwright": "^1.65.1",
+    "prettier": "^3.10.1",
     "typescript": "^7.0.2"
   },
   "optionalDependencies": {

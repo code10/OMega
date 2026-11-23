@@ -222,7 +222,7 @@ export class OMAgent extends EventEmitter {
       providers: {
         ...this.config.providers,
         [pName]: {
-          ...(this.config.providers?.[pName] || {}),
+          ...this.config.providers?.[pName],
           model: this.config.model
         }
       }

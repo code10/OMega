@@ -37,8 +37,9 @@ export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boole
         maxSteps: data.maxSteps
       });
       sendJson(res, 202, { success: true, run });
-    } catch (err: any) {
-      sendJson(res, 400, { success: false, error: err?.message || String(err) });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendJson(res, 400, { success: false, error: message });
     }
     return true;
   }
@@ -79,8 +80,9 @@ export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boole
     try {
       const diff = agentManager.getRunDiff(runId);
       sendJson(res, 200, { success: true, ...diff });
-    } catch (err: any) {
-      sendJson(res, 404, { success: false, error: err?.message || String(err) });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendJson(res, 404, { success: false, error: message });
     }
     return true;
   }
@@ -91,8 +93,9 @@ export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boole
     try {
       const result = agentManager.rollbackRun(runId);
       sendJson(res, 200, { ...result });
-    } catch (err: any) {
-      sendJson(res, 404, { success: false, error: err?.message || String(err) });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendJson(res, 404, { success: false, error: message });
     }
     return true;
   }
@@ -121,8 +124,9 @@ export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boole
         autoStart: data.autoStart
       });
       sendJson(res, 201, { success: true, agent });
-    } catch (err: any) {
-      sendJson(res, 400, { success: false, error: err?.message || String(err) });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendJson(res, 400, { success: false, error: message });
     }
     return true;
   }
@@ -135,9 +139,10 @@ export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boole
     try {
       const agent = agentManager.updatePersistentAgent(id, data);
       sendJson(res, 200, { success: true, agent });
-    } catch (err: any) {
-      const status = String(err?.message || '').includes('not found') ? 404 : 400;
-      sendJson(res, status, { success: false, error: err?.message || String(err) });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      const status = message.includes('not found') ? 404 : 400;
+      sendJson(res, status, { success: false, error: message });
     }
     return true;
   }
@@ -150,9 +155,10 @@ export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boole
     try {
       const run = await agentManager.runPersistentAgent(id, data.prompt);
       sendJson(res, 202, { success: true, run });
-    } catch (err: any) {
-      const status = String(err?.message || '').includes('not found') ? 404 : 400;
-      sendJson(res, status, { success: false, error: err?.message || String(err) });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      const status = message.includes('not found') ? 404 : 400;
+      sendJson(res, status, { success: false, error: message });
     }
     return true;
   }
@@ -172,8 +178,9 @@ export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boole
       const payloadStr = Object.keys(data).length > 0 ? `\n[Webhook Payload]: ${JSON.stringify(data)}` : '';
       const run = await agentManager.runPersistentAgent(id, `${basePrompt}${payloadStr}`);
       sendJson(res, 202, { success: true, run });
-    } catch (err: any) {
-      sendJson(res, 400, { success: false, error: err?.message || String(err) });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendJson(res, 400, { success: false, error: message });
     }
     return true;
   }
@@ -184,8 +191,9 @@ export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boole
     try {
       const agent = agentManager.startPersistentAgent(id);
       sendJson(res, 200, { success: true, agent });
-    } catch (err: any) {
-      sendJson(res, 404, { success: false, error: err?.message || String(err) });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendJson(res, 404, { success: false, error: message });
     }
     return true;
   }
@@ -196,8 +204,9 @@ export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boole
     try {
       const agent = agentManager.stopPersistentAgent(id);
       sendJson(res, 200, { success: true, agent });
-    } catch (err: any) {
-      sendJson(res, 404, { success: false, error: err?.message || String(err) });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendJson(res, 404, { success: false, error: message });
     }
     return true;
   }
@@ -245,8 +254,9 @@ export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boole
         budgets: data.budgets
       });
       sendJson(res, 202, { success: true, ...handle });
-    } catch (err: any) {
-      sendJson(res, 400, { success: false, error: err?.message || String(err) });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendJson(res, 400, { success: false, error: message });
     }
     return true;
   }
@@ -265,8 +275,9 @@ export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boole
         budgets: data.budgets
       });
       sendJson(res, 202, { success: true, ...result }, true);
-    } catch (err: any) {
-      sendJson(res, 400, { success: false, error: err?.message || String(err) });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendJson(res, 400, { success: false, error: message });
     }
     return true;
   }
@@ -277,8 +288,9 @@ export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boole
     try {
       const session = getDetachedManager().inspectSession(sessionId);
       sendJson(res, 200, { success: true, session }, true);
-    } catch (err: any) {
-      sendJson(res, 404, { success: false, error: err?.message || String(err) });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendJson(res, 404, { success: false, error: message });
     }
     return true;
   }
@@ -300,8 +312,9 @@ export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boole
         prompt: data.prompt
       });
       sendJson(res, 202, { success: true, ...handle });
-    } catch (err: any) {
-      sendJson(res, 400, { success: false, error: err?.message || String(err) });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendJson(res, 400, { success: false, error: message });
     }
     return true;
   }
@@ -318,8 +331,9 @@ export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boole
         autoStart: Boolean(data.autoStart)
       });
       sendJson(res, 201, { success: true, ...result }, true);
-    } catch (err: any) {
-      sendJson(res, 400, { success: false, error: err?.message || String(err) });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendJson(res, 400, { success: false, error: message });
     }
     return true;
   }
@@ -330,8 +344,9 @@ export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boole
     try {
       const result = getDetachedManager().stopSession(sessionId);
       sendJson(res, 200, { success: true, ...result });
-    } catch (err: any) {
-      sendJson(res, 404, { success: false, error: err?.message || String(err) });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendJson(res, 404, { success: false, error: message });
     }
     return true;
   }

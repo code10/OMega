@@ -174,7 +174,7 @@ export function createHttpEmbedder(options: HttpEmbedderOptions = {}): (text: st
   const baseHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.apiKey ? { Authorization: `Bearer ${options.apiKey}` } : {}),
-    ...(options.headers || {})
+    ...options.headers
   };
 
   return async function httpEmbed(text: string): Promise<number[]> {

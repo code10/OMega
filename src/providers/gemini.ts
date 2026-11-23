@@ -165,9 +165,9 @@ export class GeminiProvider extends BaseProvider {
 
       if (okRes.status === 429) {
         if (cleanMsg.includes('limit: 0')) {
-          throw makeHttpError(`Model '${this.model}' is not available on the Free Tier (quota limit: 0). Switch to an active free-tier model with: /model gemini-3.5-flash`);
+          throw makeHttpError(`Model '${this.model}' is not available on your current API tier (quota limit: 0). Switch to an active model with: /model gemini-3.8-flash`);
         }
-        throw makeHttpError(`Gemini Free Tier rate limit reached on '${this.model}' (5 RPM limit). Switch to 'gemini-3.5-flash' (higher quota) using: /model gemini-3.5-flash or /model gemini-3.5-flash-lite`);
+        throw makeHttpError(`Gemini rate limit reached on '${this.model}'. Switch to 'gemini-3.8-flash' or 'gemini-3.5-flash-lite' using: /model gemini-3.8-flash`);
       }
       if (okRes.status === 404 && (cleanMsg.includes('no longer available') || cleanMsg.includes('NOT_FOUND') || this.model.includes('2.5') || this.model.includes('1.5'))) {
         throw makeHttpError(`Model '${this.model}' is no longer available from Google (404). Please switch to an active, up-to-date model with: /model gemini-3.5-flash or /model gemini-3.8-flash`);
