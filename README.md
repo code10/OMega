@@ -7,7 +7,7 @@
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.19.0-brightgreen.svg)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-1-blue.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-161%20passed-success.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-170%20passed-success.svg)](tests/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](README.md)
 
 **OMega** is a lightweight, local-first Node.js agent harness you control completely | Running offline on your hardware or routed across cloud models, with human-in-the-loop approvals, isolated git worktrees, rollback snapshots, and Git-inspectable memory built in.
@@ -51,7 +51,9 @@ node bin/om.js service install               # Install 24/7 native OS service (s
 - **Desktop GUI, Clipboard & Documents**: Native OS controls (`screen_capture`, `list_windows`, approval-gated `desktop_click` / `desktop_type` / `desktop_hotkey`), `clipboard_read` / `clipboard_write`, `notify_user`, pure Node.js `pdf_read`, and Playwright `markdown_to_pdf`.
 - **Git-Inspectable Memory & Vector Search**: Markdown memory (`memory/MEMORY.md`, `memory/daily/YYYY-MM-DD.md`), session trajectories (`memory/sessions/`), local `node:sqlite`/JSON vector search, and zero-token memory distillation.
 - **Autonomous Self-Healing & Swarms**: `OMSelfHealer` diagnoses failures, applies minimal patches, verifies with `testCommand`, and rolls back on failure; `spawn_subagent` and `DetachedSwarmManager` support worktree-isolated and process-detached execution with checkpoints.
-- **Security & Multi-User Gateway**: Native OS sandboxing (`bwrap`, `win-job`, `sandbox-exec`), HITL approvals, secret redaction, workspace snapshots/rollback, and `local` / `multiuser` JWT + RBAC (`viewer < operator < admin`) with per-tenant isolation.
+- **Security & Multi-User Gateway**: Native OS sandboxing (`bwrap` on Linux, `sandbox-exec` on macOS, and `win-job` on Windows with race-free suspended Job Objects, `CreateRestrictedToken` privilege dropping, and `JOBOBJECT_BASIC_UI_RESTRICTIONS`), HITL approvals, SSRF redirect/IPv6 protection, secret redaction, workspace snapshots/rollback, and `local` / `multiuser` JWT + RBAC (`viewer < operator < admin`) with per-tenant isolation.
+- **Tamper-Evident Audit Log & Cost Ledger**: `OMAuditLedger` (`src/audit.ts`) records every tool call, approval decision, LLM usage turn, and daemon run into an append-only, SHA-256 hash-chained `audit-ledger.jsonl` with automatic secret redaction, USD cost attribution (`estimateCostUsd`), `verifyChain()` tamper detection, `GET /api/audit` & `GET /api/audit/costs` endpoints, and a live **Audit Ledger & Cost Telemetry** panel in the Web UI Developer tab.
+- **Deterministic Replay & Eval Harness**: Export recorded runs to portable `SessionTape` files (`SessionReplay.exportTape`), replay them 100% offline via `ReplayProvider` with zero network calls, and run `OMEvalRunner.compareBaseline()` to catch pass-rate drops, tool-sequence regressions, step bloat, and cost spikes automatically.
 
 ---
 
@@ -125,7 +127,7 @@ Add a `SKILL.md` with YAML frontmatter (`name`, `description`, optional `trigger
 ### 3. Programmatic API
 
 ```javascript
-import { OM } from './dist/index.js';
+import { OM, SessionReplay, OMEvalRunner } from './dist/index.js';
 
 const agent = new OM({ provider: 'om', maxSteps: 10 });
 await agent.init();
@@ -133,6 +135,15 @@ await agent.init();
 agent.on('tool_start', ({ name }) => console.log('Running:', name));
 const res = await agent.run('Check memory and write a summary to notes.txt');
 console.log(res.content);
+
+// Verify tamper-evident audit chain & inspect USD cost summary
+console.log(agent.audit.verifyChain(), agent.audit.getCostSummary());
+
+// Export a portable SessionTape and replay it deterministically offline
+const tape = SessionReplay.exportTape(agent.memory, agent.sessionId);
+const diff = await SessionReplay.replayTape(tape);
+console.log('Replay passed:', diff.passed);
+
 await agent.close();
 ```
 
@@ -163,7 +174,7 @@ npm run benchmark:eval       # Coding-task scorecard runner (--live for real API
 node scripts/security-audit.js  # Dependency, secret & eval() audit
 ```
 
-All 161 unit & integration tests pass using Node's built-in `node:test` runner (Playwright is used for `test:e2e`).
+All 170 unit & integration tests pass using Node's built-in `node:test` runner across Linux, macOS, and Windows CI (`.github/workflows/ci.yml`), covering core agent loops, security hardening, Windows/OS sandboxing, audit chain integrity, deterministic replay evals, and monorepo/LLM-failover battle tests (Playwright is used for `test:e2e`).
 
 ---
 
