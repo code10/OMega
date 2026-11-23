@@ -18,25 +18,42 @@ export class SessionManager {
     }
   }
 
+  private _syncRuntimeConfig(targetAgent: any) {
+    if (!targetAgent || targetAgent === this.defaultAgent) return;
+    const base = this.defaultAgent.config;
+    targetAgent.config.maxSteps = base.maxSteps;
+    targetAgent.config.temperature = base.temperature;
+    targetAgent.config.effort = base.effort;
+    targetAgent.config.systemPrompt = base.systemPrompt;
+    targetAgent.config.security = base.security;
+  }
+
   getAgent(sessionId?: string) {
     if (!sessionId || sessionId === this.defaultAgent.sessionId) {
       return this.defaultAgent;
     }
     if (this.sessions.has(sessionId)) {
-      return this.sessions.get(sessionId);
+      const existing = this.sessions.get(sessionId);
+      this._syncRuntimeConfig(existing);
+      return existing;
     }
 
     const isolated = new OMAgent({
       ...this.defaultAgent.options,
       provider: this.defaultAgent.config.provider,
       model: this.defaultAgent.config.model,
+      maxSteps: this.defaultAgent.config.maxSteps,
+      temperature: this.defaultAgent.config.temperature,
+      effort: this.defaultAgent.config.effort,
+      systemPrompt: this.defaultAgent.config.systemPrompt,
       memoryDir: this.defaultAgent.config.memoryDir,
       skillsDir: this.defaultAgent.config.skillsDir,
       workspaceDir: this.defaultAgent.config.workspaceDir,
       sessionId
     });
-    // Share loaded skills & memory vector store
+    // Share loaded skills, security config & memory vector store
     isolated.skills = this.defaultAgent.skills;
+    isolated.config.security = this.defaultAgent.config.security;
     try {
       isolated.resumeSession(sessionId);
     } catch (_) {

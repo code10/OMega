@@ -594,8 +594,44 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentEffort: EffortLevel =
     storedEffort === 'low' || storedEffort === 'medium' || storedEffort === 'high' ? storedEffort : 'medium';
 
+  function setRunControlsLocked(locked: boolean) {
+    const lockTitle = locked ? 'Locked while model is running' : '';
+
+    // 1. Reasoning Effort
+    if (chatEffortToggle) {
+      chatEffortToggle.classList.toggle('is-locked', locked);
+      if (locked) setEffortDrawerOpen(false);
+    }
+    if (effortTriggerBtn) {
+      effortTriggerBtn.disabled = locked;
+      effortTriggerBtn.title = locked ? lockTitle : 'Reasoning effort (click to adjust)';
+    }
+    effortButtons.forEach((btn) => {
+      btn.disabled = locked;
+    });
+
+    // 2. Temperature, Max Steps, and Machine Permissions sections
+    for (const sectionId of ['temperatureSection', 'maxStepsSection', 'machinePermissionsSection']) {
+      const section = document.getElementById(sectionId);
+      if (!section) continue;
+      section.classList.toggle('is-locked', locked);
+      section.setAttribute('aria-disabled', locked ? 'true' : 'false');
+      if (locked) {
+        section.setAttribute('title', lockTitle);
+      } else {
+        section.removeAttribute('title');
+      }
+      section
+        .querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement>('button, input, select')
+        .forEach((el) => {
+          el.disabled = locked;
+        });
+    }
+  }
+
   function setEffortDrawerOpen(isOpen: boolean) {
     if (!chatEffortToggle) return;
+    if (isOpen && isStreaming) return;
     chatEffortToggle.classList.toggle('open', isOpen);
     if (effortTriggerBtn) effortTriggerBtn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
     if (chatEffortOptions) chatEffortOptions.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
@@ -1249,6 +1285,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     isStreaming = true;
     sendBtn.disabled = true;
+    setRunControlsLocked(true);
 
     // Append user message with attached chips
     appendUserMessage(text || (currentAttachments.length ? 'Attached file(s)' : ''), currentAttachments);
@@ -1485,6 +1522,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (runningBadge && runningBadge.parentNode) runningBadge.remove();
       isStreaming = false;
       sendBtn.disabled = false;
+      setRunControlsLocked(false);
       promptInput.focus();
       updateSendBtnState();
       loadStatus();

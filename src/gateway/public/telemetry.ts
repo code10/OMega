@@ -32,8 +32,10 @@ export function initTelemetry() {
     switch (entry.type) {
       case 'start':
         return `Task started: "${(d.prompt || '').slice(0, 55)}"`;
-      case 'step_start':
-        return `Step ${d.step}/${d.maxSteps} [${d.provider || entry.provider}:${d.model || entry.model}]`;
+      case 'step_start': {
+        const maxStepsLabel = !d.maxSteps || Number(d.maxSteps) <= 0 ? 'Unlimited' : String(d.maxSteps);
+        return `Step ${d.step}/${maxStepsLabel} [${d.provider || entry.provider}:${d.model || entry.model}]`;
+      }
       case 'thought':
         return `Thought (Step ${d.step}): ${(d.content || '').slice(0, 75)}`;
       case 'tool_start':

@@ -66,11 +66,11 @@
 
             <!-- Tamper-Evident Audit Ledger & Cost Telemetry -->
             <div class="specs-card" style="margin-top: 1.5rem;" id="auditLedgerCard">
-              <div class="specs-card-header" style="flex-wrap: wrap; gap: 0.75rem;">
+              <div class="specs-card-header audit-card-header">
                 <h4>Audit Ledger &amp; Cost Telemetry</h4>
-                <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                <div class="audit-toolbar-controls">
                   <span class="status-chip-online" id="auditChainBadge">● Verifying chain...</span>
-                  <select id="auditTypeFilter" class="param-select" style="width:auto; min-width:130px; padding:0.25rem 0.5rem; font-size:0.78rem;">
+                  <select id="auditTypeFilter" class="audit-filter-select" aria-label="Filter audit events">
                     <option value="">All Events</option>
                     <option value="tool_call">Tool Calls</option>
                     <option value="approval_decision">Approvals</option>
@@ -78,7 +78,13 @@
                     <option value="daemon_run">Daemon Runs</option>
                     <option value="security_event">Security</option>
                   </select>
-                  <button type="button" class="btn-secondary" id="refreshAuditBtn" style="padding:0.25rem 0.65rem; font-size:0.78rem;">Refresh</button>
+                  <button type="button" class="audit-refresh-btn" id="refreshAuditBtn" title="Refresh audit ledger">
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <polyline points="23 4 23 10 17 10"></polyline>
+                      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                    </svg>
+                    <span>Refresh</span>
+                  </button>
                 </div>
               </div>
               <div class="telemetry-grid" id="auditCostSummary" style="margin: 0.85rem 0;">
