@@ -15,20 +15,16 @@
     "autoHandoffOnContextLimit": true,
     "fallbackChain": [
       {
+        "provider": "glm",
+        "model": "glm-4.5-flash"
+      },
+      {
+        "provider": "gemini",
+        "model": "gemini-3.5-flash"
+      },
+      {
         "provider": "gemini",
         "model": "gemini-3.8-flash"
-      },
-      {
-        "provider": "gemini",
-        "model": "gemini-3.5-flash-lite"
-      },
-      {
-        "provider": "openai",
-        "model": "gpt-4o"
-      },
-      {
-        "provider": "anthropic",
-        "model": "claude-3-5-sonnet-20241022"
       },
       {
         "provider": "om",
