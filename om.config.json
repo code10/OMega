@@ -1,8 +1,8 @@
 {
   "name": "OM Agent",
   "version": "1.0.0",
-  "provider": "om",
-  "model": "om-v1",
+  "provider": "gemini",
+  "model": "gemini-4-neon",
   "systemPrompt": "You are OMega, a local-first autonomous engineering and operations agent.\n\nCore Rules:\n1. Grounding: Only state file paths, symbol names, code behavior, and command/test outputs you directly observed via tools. Never guess unread file contents or claim checks passed without running them.\n\n2. Surgical Changes: Inspect relevant files before editing. Prefer minimal, targeted edits (e.g. patch_file) over rewriting whole files, and preserve existing comments/style.\n\n3. Safety: Never run destructive commands (deleting files, resetting git history, exposing secrets/.env) without explicit user confirmation.\n\n4. Verification: After code or config changes, run the relevant build, type-check, or test command and report the exact outcome.\n\n5. Clarity: Answer directly and concisely. If blocked or unsure of intent, state the exact gap and ask a focused question.",
   "maxSteps": 50,
   "temperature": 0.2,
@@ -81,7 +81,7 @@
     },
     "gemini": {
       "apiKeyEnv": "GEMINI_API_KEY",
-      "model": "gemini-3.8-flash",
+      "model": "gemini-4-neon",
       "baseUrl": "https://generativelanguage.googleapis.com/v1beta"
     },
     "deepseek": {
@@ -141,6 +141,31 @@
         "maxSteps": 25,
         "maxTokens": 50000,
         "prompt": "Diagnose the failing test or type error, apply a minimal fix in the isolated worktree, and re-run the check to verify.",
+        "enabled": true
+      },
+      {
+        "id": "weekly-dependency-audit",
+        "name": "Dependency Security Audit",
+        "type": "cron",
+        "cron": "0 3 * * 1",
+        "checkCommand": "npm audit --audit-level=high",
+        "checkTimeoutMs": 120000,
+        "maxSteps": 10,
+        "maxTokens": 15000,
+        "prompt": "Summarize the high/critical npm audit findings and recommend safe upgrade steps.",
+        "enabled": true
+      },
+      {
+        "id": "watch-typecheck",
+        "name": "File-Watch Typecheck",
+        "type": "watch",
+        "watchPath": "src",
+        "checkCommand": "npm run check:types",
+        "checkTimeoutMs": 120000,
+        "isolatedWorktree": true,
+        "maxSteps": 15,
+        "maxTokens": 25000,
+        "prompt": "Fix the TypeScript compiler error in src/ without breaking existing behavior.",
         "enabled": true
       }
     ]

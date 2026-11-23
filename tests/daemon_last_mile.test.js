@@ -41,6 +41,14 @@ test('Deterministic-first check skips LLM on pass and wakes LLM with guardrails 
   const daemon = new OMDaemon({ workspaceDir: dir, memoryDir: memDir });
   daemon.agent = mockAgent;
 
+  let sawRunInStatusDuringEvent = false;
+  daemon.on('trigger_run', (rec) => {
+    const runs = daemon.getStatus().recentRuns;
+    if (runs.some((r) => r.runId === rec.runId)) {
+      sawRunInStatusDuringEvent = true;
+    }
+  });
+
   daemon.addTrigger({
     id: 'pass-check',
     checkCommand: 'node -e "process.exit(0)"',
@@ -54,6 +62,7 @@ test('Deterministic-first check skips LLM on pass and wakes LLM with guardrails 
   assert.equal(passRec.zeroToken, true);
   assert.equal(passRec.checkPassed, true);
   assert.equal(llmCalls, 0);
+  assert.equal(sawRunInStatusDuringEvent, true);
 
   daemon.addTrigger({
     id: 'fail-check',
@@ -188,8 +197,8 @@ test('Gateway daemon API routes create, run, inspect, and delete triggers', asyn
 
     const statusRes = await fetch(`${baseUrl}/api/daemon/status`, { headers });
     const statusData = await statusRes.json();
-    assert.equal(statusData.triggers.length, 1);
-    assert.equal(statusData.recentRuns.length, 1);
+    assert.ok(statusData.triggers.some((t) => t.id === 'api-check'));
+    assert.ok(statusData.recentRuns.some((r) => r.triggerId === 'api-check'));
 
     const delRes = await fetch(`${baseUrl}/api/daemon/triggers/api-check`, {
       method: 'DELETE',

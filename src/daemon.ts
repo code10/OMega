@@ -287,7 +287,6 @@ export class OMDaemon extends EventEmitter {
           record.success = true;
           record.zeroToken = true;
           record.answer = `Deterministic check passed (0 tokens): ${trigger.checkCommand}`;
-          record.finishedAt = new Date().toISOString();
           if (wt && gitMgr) {
             const summary = gitMgr.getWorktreeSummary(wt.worktreePath);
             if (summary.clean) {
@@ -296,8 +295,7 @@ export class OMDaemon extends EventEmitter {
               record.worktree = { ...summary, status: 'pending' };
             }
           }
-          this.emit('trigger_run', record);
-          return record;
+          return this._finalizeRun(record, 'trigger_run');
         }
 
         checkFailureContext = `\nDeterministic check FAILED:\nCommand: ${trigger.checkCommand}\nExit code: ${checkRes.exitCode}\nOutput:\n${checkRes.output}`;
@@ -305,9 +303,7 @@ export class OMDaemon extends EventEmitter {
           record.success = false;
           record.zeroToken = true;
           record.error = `Check failed (exit ${checkRes.exitCode}): ${trigger.checkCommand}`;
-          record.finishedAt = new Date().toISOString();
-          this.emit('trigger_error', record);
-          return record;
+          return this._finalizeRun(record, 'trigger_error');
         }
       }
 
@@ -361,12 +357,9 @@ export class OMDaemon extends EventEmitter {
         }
       }
 
-      record.finishedAt = new Date().toISOString();
-      this.emit('trigger_run', record);
-      return record;
+      return this._finalizeRun(record, 'trigger_run');
     } catch (err: any) {
       record.error = err.message;
-      record.finishedAt = new Date().toISOString();
       if (wt && gitMgr) {
         try {
           const summary = gitMgr.getWorktreeSummary(wt.worktreePath);
@@ -377,16 +370,21 @@ export class OMDaemon extends EventEmitter {
           }
         } catch (_: any) {}
       }
-      this.emit('trigger_error', record);
-      return record;
+      return this._finalizeRun(record, 'trigger_error');
     } finally {
       if (scopedAgent) {
         try { await scopedAgent.close?.(); } catch (_: any) {}
       }
-      this.history.push(record);
-      if (this.history.length > 100) this.history.shift();
-      this._saveHistory();
     }
+  }
+
+  _finalizeRun(record: Record<string, any>, eventName: 'trigger_run' | 'trigger_error') {
+    if (!record.finishedAt) record.finishedAt = new Date().toISOString();
+    this.history.push(record);
+    if (this.history.length > 100) this.history.shift();
+    this._saveHistory();
+    this.emit(eventName, record);
+    return record;
   }
 
   mergeRunWorktree(runId: string, commitMessage?: string) {

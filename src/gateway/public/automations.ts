@@ -56,6 +56,7 @@ interface AutomationsState {
   triggers: DaemonTrigger[];
   recentRuns: DaemonRun[];
   expandedDiffs: string[];
+  runningTriggerIds: string[];
   error: string | null;
 }
 
@@ -130,6 +131,7 @@ export function initAutomations() {
     triggers: [],
     recentRuns: [],
     expandedDiffs: [],
+    runningTriggerIds: [],
     error: null
   });
 
@@ -199,7 +201,9 @@ export function initAutomations() {
                   ${t.enabled === false ? renderChip('disabled') : ''}
                 </div>
                 <div class="automation-card-actions">
-                  ${renderActionBtn('Run', { 'data-action': 'run-trigger', 'data-id': t.id }, 'primary')}
+                  ${state.runningTriggerIds.includes(t.id)
+                    ? `<button type="button" class="btn-xs primary-xs" disabled>Running...</button>`
+                    : renderActionBtn('Run', { 'data-action': 'run-trigger', 'data-id': t.id }, 'primary')}
                   ${renderActionBtn(t.enabled === false ? 'Enable' : 'Disable', { 'data-action': 'toggle-trigger', 'data-id': t.id })}
                   ${renderActionBtn('Delete', { 'data-action': 'delete-trigger', 'data-id': t.id }, 'danger')}
                 </div>
@@ -372,16 +376,25 @@ export function initAutomations() {
     if (!id) return;
     try {
       if (action === 'run-trigger') {
-        btn.disabled = true;
-        btn.textContent = 'Running...';
+        store.set((prev) => ({
+          ...prev,
+          runningTriggerIds: prev.runningTriggerIds.includes(id)
+            ? prev.runningTriggerIds
+            : [...prev.runningTriggerIds, id]
+        }));
         const res = await fetch(`/api/daemon/triggers/${encodeURIComponent(id)}/run?async=1`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: '{}'
         });
         const data = await res.json();
-        if (!res.ok || !data.success) throw new Error(data.error || 'Failed to run trigger');
-        setTimeout(loadAutomations, 400);
+        if (!res.ok || !data.success) {
+          store.set((prev) => ({
+            ...prev,
+            runningTriggerIds: prev.runningTriggerIds.filter((x) => x !== id)
+          }));
+          throw new Error(data.error || 'Failed to run trigger');
+        }
       } else if (action === 'toggle-trigger') {
         const res = await fetch(`/api/daemon/triggers/${encodeURIComponent(id)}/toggle`, {
           method: 'POST',
@@ -441,6 +454,16 @@ export function initAutomations() {
   });
 
   function handleDaemonUpdate(payload: any) {
+    const finishedTriggerId =
+      payload?.eventType === 'trigger_run' || payload?.eventType === 'trigger_error'
+        ? payload?.payload?.triggerId
+        : null;
+    if (finishedTriggerId) {
+      store.set((prev) => ({
+        ...prev,
+        runningTriggerIds: prev.runningTriggerIds.filter((x) => x !== finishedTriggerId)
+      }));
+    }
     if (payload && (Array.isArray(payload.triggers) || Array.isArray(payload.recentRuns))) {
       applyDaemonPayload(payload);
     } else {
