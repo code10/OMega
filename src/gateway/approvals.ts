@@ -1,5 +1,6 @@
 import type http from 'node:http';
 import { readJsonBody, sendJson } from './httpUtils.js';
+import type { OMAuditLedger } from '../audit.js';
 
 const MULTI_SUBCOMMAND_CLIS = new Set([
   'git', 'npm', 'npx', 'pnpm', 'yarn', 'bun', 'cargo', 'docker', 'kubectl', 'pip', 'python', 'node'
@@ -61,11 +62,13 @@ export class ApprovalManager {
   sessionApprovedCommandPrefixesByOwner: Map<string, Set<string>>;
   onAlwaysAllow?: (tool: string, rule?: { commandPrefix?: string }) => void;
   getCommandRules?: () => CommandRulesConfig;
+  audit?: OMAuditLedger;
 
   constructor(
     broadcastSSE: (eventName: string, data: any, ownerId?: string) => void,
     onAlwaysAllow?: (tool: string, rule?: { commandPrefix?: string }) => void,
-    getCommandRules?: () => CommandRulesConfig
+    getCommandRules?: () => CommandRulesConfig,
+    audit?: OMAuditLedger
   ) {
     this.broadcastSSE = broadcastSSE;
     this.pending = new Map();
@@ -73,6 +76,7 @@ export class ApprovalManager {
     this.sessionApprovedCommandPrefixesByOwner = new Map();
     this.onAlwaysAllow = onAlwaysAllow;
     this.getCommandRules = getCommandRules;
+    this.audit = audit;
   }
 
   private _getOwnerTools(ownerId: string): Set<string> {
@@ -132,6 +136,16 @@ export class ApprovalManager {
       return new Promise((resolve) => {
         const timer = setTimeout(() => {
           this.pending.delete(id);
+          try {
+            this.audit?.recordApproval({
+              requestId: id,
+              toolName,
+              command: commandText || null,
+              approved: false,
+              reason: 'timeout',
+              ownerId
+            });
+          } catch (_) {}
           resolve(false);
         }, 120000);
         timer.unref?.();
@@ -185,6 +199,17 @@ export class ApprovalManager {
       }
     }
     entry.resolve(approved);
+    try {
+      this.audit?.recordApproval({
+        requestId: id,
+        toolName: String(entry.payload.tool || 'unknown'),
+        command: entry.payload.command || null,
+        approved,
+        scope,
+        commandPrefix: commandPrefix || undefined,
+        ownerId: entry.ownerId
+      });
+    } catch (_) {}
     this.broadcastSSE('approval_resolved', { id, approved, scope, commandPrefix: commandPrefix || undefined }, entry.ownerId);
     sendJson(res, 200, { success: true, id, approved, scope, commandPrefix: commandPrefix || undefined });
   }

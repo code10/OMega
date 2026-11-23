@@ -62,9 +62,8 @@ jobs:
       - name: Run Playwright UI E2E tests
         run: npm run test:e2e
 
-  cross-os-sandbox:
-    name: ${{ matrix.os }} (OS Sandbox & Detached Swarm)
-    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+  cross-os-ci:
+    name: ${{ matrix.os }} (Build, Lint & Full Test Suite)
     strategy:
       fail-fast: false
       matrix:
@@ -84,8 +83,11 @@ jobs:
       - name: Build project
         run: npm run build
 
-      - name: Verify OS sandbox & detached worker tests
-        run: node --test tests/improvements.test.js tests/detached_swarm.test.js tests/skills.test.js
+      - name: Lint TypeScript sources (zero warnings)
+        run: npm run lint
+
+      - name: Run full unit & integration test suite
+        run: npm test
 
   remote-execution-ci:
     name: Linux (Live Docker & SSH ExecutionBackend E2E)

@@ -133,7 +133,8 @@ export async function startGateway(options: Record<string, any> = {}) {
         saveConfigPatch({ security: sec }, agent.config.rootDir);
       }
     },
-    () => agent.config.security?.commandRules || { allow: [], deny: [] }
+    () => agent.config.security?.commandRules || { allow: [], deny: [] },
+    agent.audit
   );
   const gatewayConfirmHandler = approvals.createConfirmHandler() as (info: Record<string, any>) => Promise<boolean>;
   agent.confirmCommand = gatewayConfirmHandler;
@@ -634,6 +635,38 @@ ${prompt && prompt.trim() ? prompt.trim() : `Execute procedure for ${cleanName}.
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: false, error: err.message }));
       }
+      return;
+    }
+
+    // GET /api/audit & GET /api/audit/costs (Tamper-evident audit ledger & cost summary)
+    if (pathname === '/api/audit' && req.method === 'GET') {
+      const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit') || 100)));
+      const type = url.searchParams.get('type') as any;
+      const sessionId = url.searchParams.get('sessionId') || undefined;
+      const daemonId = url.searchParams.get('daemonId') || undefined;
+      const ownerFilter = isMultiUser && authUser?.role !== 'admin' ? authUser?.id : (url.searchParams.get('ownerId') || undefined);
+      const ledger = reqAgent.audit;
+      const entries = ledger.query({
+        ownerId: ownerFilter,
+        sessionId,
+        daemonId,
+        type: type || undefined,
+        limit
+      });
+      const chain = ledger.verifyChain();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ chain, count: entries.length, entries }));
+      return;
+    }
+
+    if (pathname === '/api/audit/costs' && req.method === 'GET') {
+      const sessionId = url.searchParams.get('sessionId') || undefined;
+      const daemonId = url.searchParams.get('daemonId') || undefined;
+      const since = url.searchParams.get('since') || undefined;
+      const ownerFilter = isMultiUser && authUser?.role !== 'admin' ? authUser?.id : (url.searchParams.get('ownerId') || undefined);
+      const summary = reqAgent.audit.getCostSummary({ ownerId: ownerFilter, sessionId, daemonId, since });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(summary));
       return;
     }
 

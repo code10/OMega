@@ -77,6 +77,7 @@ export class TenantManager {
 
     const tenantConfig = {
       ...this.baseConfig,
+      ownerId: safeId,
       memoryDir,
       workspaceDir,
       skillsDir

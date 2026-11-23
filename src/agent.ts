@@ -19,6 +19,7 @@ import { OMSystemOne } from './systemOne.js';
 import { createExecutionBackend } from './execution/remote.js';
 import { defaultTerminalManager } from './skills/terminal.js';
 import { disposeAllLspClients } from './skills/codeIntel.js';
+import { OMAuditLedger } from './audit.js';
 import type {
   AgentActivityEntry,
   AgentHook,
@@ -80,6 +81,7 @@ export class OMAgent extends EventEmitter {
   _steeringQueue: string[];
   confirmCommand: ConfirmCommandHandler | null;
   usageStats: AgentUsageStats;
+  audit: OMAuditLedger;
 
   static normalizeModel(model: string) {
     if (typeof model !== 'string') return model;
@@ -136,6 +138,11 @@ export class OMAgent extends EventEmitter {
       totalTokens: 0,
       calls: 0
     };
+    this.audit = new OMAuditLedger(this.config.memoryDir, {
+      ownerId: typeof (options as Record<string, unknown>).ownerId === 'string'
+        ? String((options as Record<string, unknown>).ownerId)
+        : 'local'
+    });
   }
 
   _getTarget(providerName = this.config.provider) {

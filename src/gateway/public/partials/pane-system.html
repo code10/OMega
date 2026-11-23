@@ -51,6 +51,55 @@
                   <div class="endpoint-path">/api/status</div>
                   <div class="endpoint-desc">Query agent status, version, and loaded capabilities</div>
                 </div>
+                <div class="endpoint-item">
+                  <div class="endpoint-method get">GET</div>
+                  <div class="endpoint-path">/api/audit</div>
+                  <div class="endpoint-desc">Query tamper-evident SHA-256 hash-chained audit ledger &amp; integrity status</div>
+                </div>
+                <div class="endpoint-item">
+                  <div class="endpoint-method get">GET</div>
+                  <div class="endpoint-path">/api/audit/costs</div>
+                  <div class="endpoint-desc">Aggregated token &amp; USD cost ledger breakdown by model, session, and tenant</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tamper-Evident Audit Ledger & Cost Telemetry -->
+            <div class="specs-card" style="margin-top: 1.5rem;" id="auditLedgerCard">
+              <div class="specs-card-header" style="flex-wrap: wrap; gap: 0.75rem;">
+                <h4>Audit Ledger &amp; Cost Telemetry</h4>
+                <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
+                  <span class="status-chip-online" id="auditChainBadge">● Verifying chain...</span>
+                  <select id="auditTypeFilter" class="param-select" style="width:auto; min-width:130px; padding:0.25rem 0.5rem; font-size:0.78rem;">
+                    <option value="">All Events</option>
+                    <option value="tool_call">Tool Calls</option>
+                    <option value="approval_decision">Approvals</option>
+                    <option value="llm_usage">LLM Usage</option>
+                    <option value="daemon_run">Daemon Runs</option>
+                    <option value="security_event">Security</option>
+                  </select>
+                  <button type="button" class="btn-secondary" id="refreshAuditBtn" style="padding:0.25rem 0.65rem; font-size:0.78rem;">Refresh</button>
+                </div>
+              </div>
+              <div class="telemetry-grid" id="auditCostSummary" style="margin: 0.85rem 0;">
+                <div class="stat-card">
+                  <span class="stat-label">Estimated Spend</span>
+                  <span class="stat-val" id="auditTotalCostUsd">$0.0000</span>
+                  <span class="stat-sub">USD across tracked calls</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-label">Total Tokens</span>
+                  <span class="stat-val" id="auditTotalTokens">0</span>
+                  <span class="stat-sub">Prompt + completion</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-label">LLM Calls</span>
+                  <span class="stat-val" id="auditTotalCalls">0</span>
+                  <span class="stat-sub" id="auditTopModels">No usage recorded yet</span>
+                </div>
+              </div>
+              <div id="auditLedgerList" class="sys-activity-timeline">
+                <div class="activity-empty">No audit ledger entries recorded yet.</div>
               </div>
             </div>
 

@@ -361,6 +361,20 @@ export async function executeAgentRun(
           runUsage.promptTokens += stepUsage.promptTokens;
           runUsage.completionTokens += stepUsage.completionTokens;
           runUsage.totalTokens += stepUsage.totalTokens;
+          try {
+            agent.audit?.recordLlmUsage({
+              provider: activeTurnProvider,
+              model: activeTurnModel,
+              promptTokens: stepUsage.promptTokens,
+              completionTokens: stepUsage.completionTokens,
+              totalTokens: stepUsage.totalTokens,
+              step: currentStep,
+              sessionId: agent.sessionId,
+              runId
+            });
+          } catch (_) {
+            // Never fail a run due to audit I/O
+          }
         }
 
         if (response.fallbackUsed && response.fallbackInfo) {
@@ -679,6 +693,20 @@ export async function executeAgentRun(
         };
         agent.emit('tool_end', toolEndPayload);
         agent._recordActivity('tool_end', toolEndPayload);
+        try {
+          agent.audit?.recordToolCall({
+            toolName: tc.name,
+            args: tc.args,
+            success: result?.success !== false,
+            durationMs,
+            error: result?.success === false && result?.error ? String(result.error) : undefined,
+            step: currentStep,
+            sessionId: agent.sessionId,
+            runId
+          });
+        } catch (_) {
+          // Never fail a run due to audit I/O
+        }
 
         stepRecord.toolCalls.push({
           id: tc.id,

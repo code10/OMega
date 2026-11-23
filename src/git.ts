@@ -176,7 +176,25 @@ export class OMGitManager {
     const absPath = path.resolve(this.workspaceDir, worktreePath);
     this._unlinkWorktreeDependencies(absPath);
     const args = force ? ['worktree', 'remove', '--force', absPath] : ['worktree', 'remove', absPath];
-    this._exec(args);
+    try {
+      this._exec(args);
+    } catch (err: any) {
+      if (!force) throw err;
+      // On Windows, NTFS/AV can briefly hold a handle during `git worktree remove --force`.
+      // Fall back to retryable directory removal + `git worktree prune`.
+      try {
+        if (this.execution.exists(absPath)) {
+          this.execution.rm?.(absPath, { recursive: true, force: true });
+        }
+      } catch (_) {
+        // Best-effort cleanup; prune still detaches the worktree metadata
+      }
+      try {
+        this._exec(['worktree', 'prune']);
+      } catch (_) {
+        throw err;
+      }
+    }
   }
 
   /**

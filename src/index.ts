@@ -11,7 +11,8 @@ export { startGateway } from './gateway/server.js';
 export { ModelService } from './modelService.js';
 export { runInitCommand } from './cli/init.js';
 export { WorkspaceSnapshotManager } from './snapshot.js';
-export { SessionReplay } from './replay.js';
+export { SessionReplay, ReplayProvider } from './replay.js';
+export type { SessionTape, SessionTapeTurn, SessionTapeToolResult, ReplayDiffResult } from './replay.js';
 export { OMDaemon } from './daemon.js';
 export type {
   DaemonTriggerType,
@@ -25,6 +26,7 @@ export type * from './types.js';
 export { DetachedSwarmManager } from './agent/detachedSwarm.js';
 export { saveCheckpoint, loadCheckpoint, listCheckpoints, forkCheckpoint } from './agent/checkpoint.js';
 export { OMEvalRunner } from './eval.js';
+export type { EvalRegressionThresholds, EvalBaselineComparison } from './eval.js';
 export { OMSystemOne } from './systemOne.js';
 export { collectDeviceSpecs } from './deviceSpecs.js';
 export { OMSelfImprover } from './selfImprove.js';
@@ -34,3 +36,13 @@ export { AgentManager } from './gateway/agentManager.js';
 export { LocalExecutionBackend, defaultLocalExecutionBackend, getExecutionBackend } from './execution/backend.js';
 export { DockerExecutionBackend, SSHExecutionBackend, RemoteShellExecutionBackend, createExecutionBackend } from './execution/remote.js';
 export { TerminalSessionManager, defaultTerminalManager } from './skills/terminal.js';
+export { OMAuditLedger, estimateCostUsd, DEFAULT_MODEL_PRICING_PER_1M } from './audit.js';
+export type {
+  AuditEventType,
+  AuditEntry,
+  AuditQueryFilter,
+  AuditChainVerification,
+  ModelPricing,
+  CostBucket,
+  CostSummary
+} from './audit.js';

@@ -15,6 +15,10 @@ export interface SandboxConfig {
   memoryMb?: number;
   cpus?: number;
   maxProcesses?: number;
+  /** On Windows, drop elevated privileges via CreateRestrictedToken (LUA_TOKEN | DISABLE_MAX_PRIVILEGE). Defaults to true. */
+  restrictToken?: boolean;
+  /** On Windows, apply JOBOBJECT_BASIC_UI_RESTRICTIONS (blocks clipboard, desktop switch, global atoms, system params). Defaults to true. */
+  uiRestrictions?: boolean;
 }
 
 export interface SandboxedInvocation {
@@ -92,20 +96,43 @@ export function detectSandboxBackend(
   return 'none';
 }
 
-const WIN_JOB_HELPER_PATH = path.join(os.tmpdir(), 'om-winjob-v1.exe');
+const WIN_JOB_HELPER_PATH = path.join(os.tmpdir(), 'om-winjob-v2.exe');
 
 function getOrBuildWinJobHelper(): string | null {
   if (fs.existsSync(WIN_JOB_HELPER_PATH)) return WIN_JOB_HELPER_PATH;
   const csharp = [
     'using System;',
-    'using System.Diagnostics;',
     'using System.Runtime.InteropServices;',
     'using System.Text;',
     'public static class OmWinJobRunner {',
-    '  [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string lpName);',
-    '  [DllImport("kernel32.dll")] public static extern bool SetInformationJobObject(IntPtr hJob, int infoClass, IntPtr lpJobObjectInfo, uint cbJobObjectInfoLength);',
-    '  [DllImport("kernel32.dll")] public static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);',
-    '  [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr hObject);',
+    '  const uint CREATE_SUSPENDED = 0x00000004;',
+    '  const uint TOKEN_ALL_ACCESS = 0x000F01FF;',
+    '  const uint DISABLE_MAX_PRIVILEGE = 0x1;',
+    '  const uint LUA_TOKEN = 0x4;',
+    '  const uint INFINITE = 0xFFFFFFFF;',
+    '  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern IntPtr CreateJobObject(IntPtr lpJobAttributes, string lpName);',
+    '  [DllImport("kernel32.dll", SetLastError = true)] public static extern bool SetInformationJobObject(IntPtr hJob, int infoClass, IntPtr lpJobObjectInfo, uint cbJobObjectInfoLength);',
+    '  [DllImport("kernel32.dll", SetLastError = true)] public static extern bool AssignProcessToJobObject(IntPtr hJob, IntPtr hProcess);',
+    '  [DllImport("kernel32.dll", SetLastError = true)] public static extern uint ResumeThread(IntPtr hThread);',
+    '  [DllImport("kernel32.dll", SetLastError = true)] public static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);',
+    '  [DllImport("kernel32.dll", SetLastError = true)] public static extern bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);',
+    '  [DllImport("kernel32.dll", SetLastError = true)] public static extern bool TerminateProcess(IntPtr hProcess, uint uExitCode);',
+    '  [DllImport("kernel32.dll", SetLastError = true)] public static extern bool CloseHandle(IntPtr hObject);',
+    '  [DllImport("kernel32.dll")] public static extern IntPtr GetCurrentProcess();',
+    '  [DllImport("advapi32.dll", SetLastError = true)] public static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);',
+    '  [DllImport("advapi32.dll", SetLastError = true)] public static extern bool CreateRestrictedToken(IntPtr ExistingTokenHandle, uint Flags, uint DisableSidCount, IntPtr SidsToDisable, uint DeletePrivilegeCount, IntPtr PrivilegesToDelete, uint RestrictedSidCount, IntPtr SidsToRestrict, out IntPtr NewTokenHandle);',
+    '  [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern bool CreateProcessAsUser(IntPtr hToken, string lpApplicationName, StringBuilder lpCommandLine, IntPtr lpProcessAttributes, IntPtr lpThreadAttributes, bool bInheritHandles, uint dwCreationFlags, IntPtr lpEnvironment, string lpCurrentDirectory, ref STARTUPINFO lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);',
+    '  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern bool CreateProcess(string lpApplicationName, StringBuilder lpCommandLine, IntPtr lpProcessAttributes, IntPtr lpThreadAttributes, bool bInheritHandles, uint dwCreationFlags, IntPtr lpEnvironment, string lpCurrentDirectory, ref STARTUPINFO lpStartupInfo, out PROCESS_INFORMATION lpProcessInformation);',
+    '  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] public struct STARTUPINFO {',
+    '    public uint cb; public string lpReserved; public string lpDesktop; public string lpTitle;',
+    '    public uint dwX; public uint dwY; public uint dwXSize; public uint dwYSize;',
+    '    public uint dwXCountChars; public uint dwYCountChars; public uint dwFillAttribute; public uint dwFlags;',
+    '    public short wShowWindow; public short cbReserved2; public IntPtr lpReserved2;',
+    '    public IntPtr hStdInput; public IntPtr hStdOutput; public IntPtr hStdError;',
+    '  }',
+    '  [StructLayout(LayoutKind.Sequential)] public struct PROCESS_INFORMATION {',
+    '    public IntPtr hProcess; public IntPtr hThread; public uint dwProcessId; public uint dwThreadId;',
+    '  }',
     '  [StructLayout(LayoutKind.Sequential)] public struct JOBOBJECT_BASIC_LIMIT_INFORMATION {',
     '    public long PerProcessUserTimeLimit; public long PerJobUserTimeLimit; public uint LimitFlags;',
     '    public UIntPtr MinimumWorkingSetSize; public UIntPtr MaximumWorkingSetSize; public uint ActiveProcessLimit;',
@@ -116,37 +143,69 @@ function getOrBuildWinJobHelper(): string | null {
     '    public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation; public IO_COUNTERS IoInfo;',
     '    public UIntPtr ProcessMemoryLimit; public UIntPtr JobMemoryLimit; public UIntPtr PeakProcessMemoryUsed; public UIntPtr PeakJobMemoryUsed;',
     '  }',
+    '  [StructLayout(LayoutKind.Sequential)] public struct JOBOBJECT_BASIC_UI_RESTRICTIONS { public uint UIRestrictionsClass; }',
     '  static string QuoteArg(string a) {',
     '    if (string.IsNullOrEmpty(a)) return "\\"\\"";',
     '    if (a.IndexOfAny(new char[] { \' \', \'\\t\', \'\\"\' }) < 0) return a;',
     '    return "\\"" + a.Replace("\\\\", "\\\\\\\\").Replace("\\"", "\\\\\\"") + "\\"";',
     '  }',
     '  public static int Main(string[] args) {',
-    '    if (args.Length < 3) return 2;',
+    '    if (args.Length < 5) return 2;',
     '    ulong memMb = ulong.Parse(args[0]);',
     '    uint maxProcs = uint.Parse(args[1]);',
+    '    bool restrictToken = args[2] == "1";',
+    '    bool uiRestrict = args[3] == "1";',
     '    IntPtr job = CreateJobObject(IntPtr.Zero, null);',
+    '    if (job == IntPtr.Zero) return 3;',
     '    var info = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();',
-    '    info.BasicLimitInformation.LimitFlags = 0x2000 | 0x0100 | 0x0008;',
+    '    info.BasicLimitInformation.LimitFlags = 0x2000 | 0x0400 | 0x0200 | 0x0100 | 0x0008;',
     '    info.BasicLimitInformation.ActiveProcessLimit = maxProcs;',
-    '    info.ProcessMemoryLimit = (UIntPtr)(memMb * 1024UL * 1024UL);',
+    '    ulong memBytes = memMb * 1024UL * 1024UL;',
+    '    info.ProcessMemoryLimit = (UIntPtr)memBytes;',
+    '    info.JobMemoryLimit = (UIntPtr)memBytes;',
     '    int size = Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));',
     '    IntPtr ptr = Marshal.AllocHGlobal(size);',
     '    try { Marshal.StructureToPtr(info, ptr, false); SetInformationJobObject(job, 9, ptr, (uint)size); } finally { Marshal.FreeHGlobal(ptr); }',
-    '    var psi = new ProcessStartInfo();',
-    '    psi.FileName = args[2];',
-    '    psi.UseShellExecute = false;',
-    '    if (args.Length > 3) {',
-    '      var sb = new StringBuilder();',
-    '      for (int i = 3; i < args.Length; i++) { if (i > 3) sb.Append(" "); sb.Append(QuoteArg(args[i])); }',
-    '      psi.Arguments = sb.ToString();',
+    '    if (uiRestrict) {',
+    '      var ui = new JOBOBJECT_BASIC_UI_RESTRICTIONS();',
+    '      ui.UIRestrictionsClass = 0x00FF;',
+    '      int uiSize = Marshal.SizeOf(typeof(JOBOBJECT_BASIC_UI_RESTRICTIONS));',
+    '      IntPtr uiPtr = Marshal.AllocHGlobal(uiSize);',
+    '      try { Marshal.StructureToPtr(ui, uiPtr, false); SetInformationJobObject(job, 4, uiPtr, (uint)uiSize); } finally { Marshal.FreeHGlobal(uiPtr); }',
     '    }',
-    '    var proc = Process.Start(psi);',
-    '    AssignProcessToJobObject(job, proc.Handle);',
-    '    proc.WaitForExit();',
-    '    int code = proc.ExitCode;',
-    '    CloseHandle(job);',
-    '    return code;',
+    '    var cmdLine = new StringBuilder();',
+    '    for (int i = 4; i < args.Length; i++) { if (i > 4) cmdLine.Append(" "); cmdLine.Append(QuoteArg(args[i])); }',
+    '    var si = new STARTUPINFO();',
+    '    si.cb = (uint)Marshal.SizeOf(typeof(STARTUPINFO));',
+    '    var pi = new PROCESS_INFORMATION();',
+    '    bool started = false;',
+    '    if (restrictToken) {',
+    '      IntPtr curTok = IntPtr.Zero; IntPtr resTok = IntPtr.Zero;',
+    '      if (OpenProcessToken(GetCurrentProcess(), TOKEN_ALL_ACCESS, out curTok)) {',
+    '        if (CreateRestrictedToken(curTok, DISABLE_MAX_PRIVILEGE | LUA_TOKEN, 0, IntPtr.Zero, 0, IntPtr.Zero, 0, IntPtr.Zero, out resTok)) {',
+    '          started = CreateProcessAsUser(resTok, null, new StringBuilder(cmdLine.ToString()), IntPtr.Zero, IntPtr.Zero, true, CREATE_SUSPENDED, IntPtr.Zero, null, ref si, out pi);',
+    '          CloseHandle(resTok);',
+    '        }',
+    '        CloseHandle(curTok);',
+    '      }',
+    '      if (!started) {',
+    '        started = CreateProcess(null, new StringBuilder(cmdLine.ToString()), IntPtr.Zero, IntPtr.Zero, true, CREATE_SUSPENDED, IntPtr.Zero, null, ref si, out pi);',
+    '      }',
+    '    } else {',
+    '      started = CreateProcess(null, cmdLine, IntPtr.Zero, IntPtr.Zero, true, CREATE_SUSPENDED, IntPtr.Zero, null, ref si, out pi);',
+    '    }',
+    '    if (!started) { CloseHandle(job); return 127; }',
+    '    if (!AssignProcessToJobObject(job, pi.hProcess)) {',
+    '      TerminateProcess(pi.hProcess, 1);',
+    '      CloseHandle(pi.hThread); CloseHandle(pi.hProcess); CloseHandle(job);',
+    '      return 126;',
+    '    }',
+    '    ResumeThread(pi.hThread);',
+    '    WaitForSingleObject(pi.hProcess, INFINITE);',
+    '    uint code = 0;',
+    '    GetExitCodeProcess(pi.hProcess, out code);',
+    '    CloseHandle(pi.hThread); CloseHandle(pi.hProcess); CloseHandle(job);',
+    '    return (int)code;',
     '  }',
     '}'
   ].join('\n');
@@ -234,13 +293,15 @@ export function buildSandboxedCommand(
   if (backend === 'win-job') {
     const memoryMb = Math.max(64, Number(config.memoryMb) || 512);
     const maxProcs = Math.max(1, Number(config.maxProcesses) || 16);
+    const restrictToken = config.restrictToken !== false ? '1' : '0';
+    const uiRestrictions = config.uiRestrictions !== false ? '1' : '0';
     if (!options.probe) {
       const helperExe = getOrBuildWinJobHelper();
       if (helperExe) {
         return {
           backend: 'win-job',
           executable: helperExe,
-          args: [String(memoryMb), String(maxProcs), executable, ...args],
+          args: [String(memoryMb), String(maxProcs), restrictToken, uiRestrictions, executable, ...args],
           cleanup: () => {}
         };
       }
@@ -268,21 +329,29 @@ export function buildSandboxedCommand(
       '    public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation; public IO_COUNTERS IoInfo;',
       '    public UIntPtr ProcessMemoryLimit; public UIntPtr JobMemoryLimit; public UIntPtr PeakProcessMemoryUsed; public UIntPtr PeakJobMemoryUsed;',
       '  }',
-      '  public static IntPtr CreateLimitedJob(ulong memBytes, uint maxProcs) {',
+      '  [StructLayout(LayoutKind.Sequential)] public struct JOBOBJECT_BASIC_UI_RESTRICTIONS { public uint UIRestrictionsClass; }',
+      '  public static IntPtr CreateLimitedJob(ulong memBytes, uint maxProcs, bool uiRestrict) {',
       '    IntPtr job = CreateJobObject(IntPtr.Zero, null);',
       '    var info = new JOBOBJECT_EXTENDED_LIMIT_INFORMATION();',
-      '    info.BasicLimitInformation.LimitFlags = 0x2000 | 0x0100 | 0x0008;', // KILL_ON_JOB_CLOSE | PROCESS_MEMORY | ACTIVE_PROCESS
+      '    info.BasicLimitInformation.LimitFlags = 0x2000 | 0x0400 | 0x0200 | 0x0100 | 0x0008;', // KILL_ON_JOB_CLOSE | DIE_ON_UNHANDLED_EXCEPTION | JOB_MEMORY | PROCESS_MEMORY | ACTIVE_PROCESS
       '    info.BasicLimitInformation.ActiveProcessLimit = maxProcs;',
       '    info.ProcessMemoryLimit = (UIntPtr)memBytes;',
+      '    info.JobMemoryLimit = (UIntPtr)memBytes;',
       '    int size = Marshal.SizeOf(typeof(JOBOBJECT_EXTENDED_LIMIT_INFORMATION));',
       '    IntPtr ptr = Marshal.AllocHGlobal(size);',
       '    try { Marshal.StructureToPtr(info, ptr, false); SetInformationJobObject(job, 9, ptr, (uint)size); } finally { Marshal.FreeHGlobal(ptr); }',
+      '    if (uiRestrict) {',
+      '      var ui = new JOBOBJECT_BASIC_UI_RESTRICTIONS(); ui.UIRestrictionsClass = 0x00FF;',
+      '      int uiSize = Marshal.SizeOf(typeof(JOBOBJECT_BASIC_UI_RESTRICTIONS));',
+      '      IntPtr uiPtr = Marshal.AllocHGlobal(uiSize);',
+      '      try { Marshal.StructureToPtr(ui, uiPtr, false); SetInformationJobObject(job, 4, uiPtr, (uint)uiSize); } finally { Marshal.FreeHGlobal(uiPtr); }',
+      '    }',
       '    return job;',
       '  }',
       '}',
       '"@',
       'Add-Type -TypeDefinition $src',
-      `$job = [OmWinJob]::CreateLimitedJob([uint64](${memoryMb} * 1024 * 1024), [uint32]${maxProcs})`,
+      `$job = [OmWinJob]::CreateLimitedJob([uint64](${memoryMb} * 1024 * 1024), [uint32]${maxProcs}, $${uiRestrictions === '1' ? 'true' : 'false'})`,
       '$psi = New-Object System.Diagnostics.ProcessStartInfo',
       '$psi.FileName = $spec.exe',
       '$psi.UseShellExecute = $false',

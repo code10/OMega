@@ -504,6 +504,19 @@ export class OMDaemon extends EventEmitter {
     this.history.push(record);
     if (this.history.length > 100) this.history.shift();
     this._saveHistory();
+    try {
+      const totalTokens = Number(record.usage?.totalTokens || 0);
+      this.agent?.audit?.recordDaemonRun({
+        daemonId: record.triggerId,
+        daemonName: record.triggerName || record.triggerId,
+        status: record.zeroToken ? 'zero_token_pass' : record.success ? 'success' : 'error',
+        triggerType: record.type,
+        totalTokens: totalTokens || undefined,
+        worktreeBranch: record.worktree?.branch,
+        error: record.error || undefined,
+        runId: record.runId
+      });
+    } catch (_err: unknown) {}
     this.emit(eventName, record);
     return record;
   }

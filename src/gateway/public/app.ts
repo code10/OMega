@@ -65,7 +65,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 };
 
 document.addEventListener('DOMContentLoaded', () => {
-  const { appendActivityLogEntry, loadActivityHistory, loadMemory } = initTelemetry();
+  const { appendActivityLogEntry, loadActivityHistory, loadAuditLedger, loadMemory } = initTelemetry();
   const { openRefViewer, closeRefViewer, closeSkillCreator } = initModals({ loadSkills: () => loadSkills() });
   const { refreshRouting } = initRoutingModal();
   const { loadAgents, handleAgentUpdate } = initAgents();
@@ -279,7 +279,7 @@ document.addEventListener('DOMContentLoaded', () => {
       models: loadModels,
       skills: loadSkills,
       memory: loadMemory,
-      system: () => { loadStatus(); loadModels(); loadActivityHistory(); },
+      system: () => { loadStatus(); loadModels(); loadActivityHistory(); loadAuditLedger(); },
       device: loadDeviceSpecs
     };
     tabLoaders[tab]?.();

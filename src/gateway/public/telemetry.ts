@@ -16,6 +16,15 @@ export function initTelemetry() {
   const vectorSearchBtn = byId<HTMLButtonElement>('vectorSearchBtn');
   const vectorSearchResults = byId('vectorSearchResults');
 
+  const auditChainBadge = byId('auditChainBadge');
+  const auditTypeFilter = byId<HTMLSelectElement>('auditTypeFilter');
+  const refreshAuditBtn = byId<HTMLButtonElement>('refreshAuditBtn');
+  const auditTotalCostUsd = byId('auditTotalCostUsd');
+  const auditTotalTokens = byId('auditTotalTokens');
+  const auditTotalCalls = byId('auditTotalCalls');
+  const auditTopModels = byId('auditTopModels');
+  const auditLedgerList = byId('auditLedgerList');
+
   const activityEntries: any[] = [];
 
   function formatActivitySummary(entry: any): string {
@@ -193,9 +202,102 @@ export function initTelemetry() {
     });
   }
 
+  function formatAuditEntrySummary(entry: any): string {
+    const d = entry.data || {};
+    switch (entry.type) {
+      case 'tool_call':
+        return `${d.toolName || 'tool'} — ${d.success !== false ? 'ok' : `failed (${d.error || 'error'})`} (${d.durationMs || 0}ms)`;
+      case 'approval_decision':
+        return `${d.approved ? 'APPROVED' : 'DENIED'} ${d.toolName || 'tool'}${d.command ? `: ${d.command}` : ''}${d.scope ? ` [${d.scope}]` : ''}`;
+      case 'llm_usage':
+        return `${d.provider || 'om'}/${d.model || 'model'} — ${d.totalTokens || 0} tok ($${Number(d.estimatedCostUsd || 0).toFixed(6)})`;
+      case 'daemon_run':
+        return `Daemon ${d.daemonName || entry.daemonId || ''} — ${d.status || 'done'}${d.worktreeBranch ? ` (${d.worktreeBranch})` : ''}`;
+      case 'security_event':
+        return `[${d.category || 'security'}] ${d.detail || ''}`;
+      default:
+        return JSON.stringify(d).slice(0, 120);
+    }
+  }
+
+  async function loadAuditLedger() {
+    try {
+      const selectedType = auditTypeFilter?.value || '';
+      const auditUrl = `/api/audit?limit=60${selectedType ? `&type=${encodeURIComponent(selectedType)}` : ''}`;
+      const [auditRes, costRes] = await Promise.all([fetch(auditUrl), fetch('/api/audit/costs')]);
+
+      if (auditRes.ok) {
+        const auditData = await auditRes.json();
+        const chain = auditData.chain || { valid: true, entriesChecked: 0 };
+        if (auditChainBadge) {
+          if (chain.valid) {
+            auditChainBadge.className = 'status-chip-online';
+            auditChainBadge.textContent = `● Chain Verified (${chain.entriesChecked || 0} entries)`;
+          } else {
+            auditChainBadge.className = 'status-chip-offline';
+            auditChainBadge.textContent = `⚠ Chain Tampered (#${chain.brokenAtSeq || '?'})`;
+          }
+        }
+        if (auditLedgerList) {
+          const entries = Array.isArray(auditData.entries) ? [...auditData.entries].reverse() : [];
+          if (entries.length === 0) {
+            auditLedgerList.innerHTML = '<div class="activity-empty">No audit ledger entries recorded yet.</div>';
+          } else {
+            auditLedgerList.innerHTML = entries
+              .map((e: any) => {
+                const time = e.timestamp ? new Date(e.timestamp).toLocaleTimeString([], { hour12: false }) : '';
+                const hashShort = typeof e.hash === 'string' ? e.hash.slice(0, 10) : '';
+                const meta = [e.ownerId, e.sessionId].filter(Boolean).join(' · ');
+                return `
+                  <div class="activity-item">
+                    <div class="activity-item-top">
+                      <span class="act-badge act-${escapeHtml(String(e.type || 'audit'))}">#${escapeHtml(String(e.seq || ''))} ${escapeHtml(String(e.type || '').toUpperCase())}</span>
+                      <span class="activity-time">${escapeHtml(meta)}${meta ? ' · ' : ''}${escapeHtml(time)} · <code>${escapeHtml(hashShort)}</code></span>
+                    </div>
+                    <div class="activity-summary">${escapeHtml(formatAuditEntrySummary(e))}</div>
+                  </div>
+                `;
+              })
+              .join('');
+          }
+        }
+      }
+
+      if (costRes.ok) {
+        const costs = await costRes.json();
+        if (auditTotalCostUsd) auditTotalCostUsd.textContent = `$${Number(costs.costUsd || 0).toFixed(4)}`;
+        if (auditTotalTokens) auditTotalTokens.textContent = Number(costs.totalTokens || 0).toLocaleString();
+        if (auditTotalCalls) auditTotalCalls.textContent = Number(costs.calls || 0).toLocaleString();
+        if (auditTopModels) {
+          const modelEntries = Object.entries(costs.byModel || {}) as Array<[string, any]>;
+          auditTopModels.textContent = modelEntries.length > 0
+            ? modelEntries
+                .slice(0, 3)
+                .map(([k, v]) => `${k}: $${Number(v.costUsd || 0).toFixed(4)}`)
+                .join(' · ')
+            : 'No usage recorded yet';
+        }
+      }
+    } catch (_) {
+      // Non-fatal UI refresh failure
+    }
+  }
+
+  if (refreshAuditBtn) {
+    refreshAuditBtn.addEventListener('click', () => {
+      loadAuditLedger();
+    });
+  }
+  if (auditTypeFilter) {
+    auditTypeFilter.addEventListener('change', () => {
+      loadAuditLedger();
+    });
+  }
+
   return {
     appendActivityLogEntry,
     loadActivityHistory,
+    loadAuditLedger,
     loadMemory
   };
 }
