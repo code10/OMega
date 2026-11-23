@@ -72,6 +72,32 @@ export class SessionManager {
     }
   }
 
+  /**
+   * Abort an active in-process run for a specific session (or all active sessions if omitted).
+   */
+  abortSession(sessionId?: string, reason = 'Stopped by user'): string[] {
+    const aborted: string[] = [];
+    if (sessionId) {
+      const target =
+        sessionId === this.defaultAgent.sessionId
+          ? this.defaultAgent
+          : this.sessions.get(sessionId);
+      if (target?.abort?.(reason)) {
+        aborted.push(sessionId);
+      }
+      return aborted;
+    }
+    const seen = new Set<any>();
+    for (const [id, agent] of this.sessions.entries()) {
+      seen.add(agent);
+      if (agent?.abort?.(reason)) aborted.push(id);
+    }
+    if (this.defaultAgent && !seen.has(this.defaultAgent) && this.defaultAgent.abort?.(reason)) {
+      aborted.push(this.defaultAgent.sessionId || 'default');
+    }
+    return aborted;
+  }
+
   async runExclusive<T>(sessionId: string | undefined, taskFn: (sessionAgent: any) => Promise<T>): Promise<T> {
     const key = sessionId || this.defaultAgent.sessionId || 'default';
     const prev = this.locks.get(key) || Promise.resolve();

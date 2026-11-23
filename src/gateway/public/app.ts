@@ -230,6 +230,41 @@ document.addEventListener('DOMContentLoaded', () => {
   const modelsTable = byId('modelsTable');
 
   let isStreaming = false;
+  let activeStreamAbortController: AbortController | null = null;
+  const SEND_BTN_ICON = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>`;
+  const STOP_BTN_ICON = `<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" stroke="none"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg>`;
+
+  function setSendBtnStopMode(stopping: boolean) {
+    if (!sendBtn) return;
+    sendBtn.classList.toggle('is-stopping', stopping);
+    if (stopping) {
+      sendBtn.disabled = false;
+      sendBtn.classList.add('active');
+      sendBtn.title = 'Stop generation';
+      sendBtn.setAttribute('aria-label', 'Stop generation');
+      sendBtn.innerHTML = STOP_BTN_ICON;
+    } else {
+      sendBtn.title = 'Send Task';
+      sendBtn.setAttribute('aria-label', 'Send message');
+      sendBtn.innerHTML = SEND_BTN_ICON;
+    }
+  }
+
+  async function stopActiveGeneration() {
+    if (activeStreamAbortController) {
+      try { activeStreamAbortController.abort(); } catch (_) {}
+      activeStreamAbortController = null;
+    }
+    try {
+      await fetch('/api/chat/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: topbarSessionTag?.textContent?.trim() || undefined })
+      });
+    } catch (_) {
+      // ignore network error during stop
+    }
+  }
   let activeTab = 'chat';
   let attachedFiles: any[] = [];
 
@@ -1139,7 +1174,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  sendBtn.addEventListener('click', sendMessage);
+  sendBtn.addEventListener('click', () => {
+    if (isStreaming) {
+      stopActiveGeneration();
+    } else {
+      sendMessage();
+    }
+  });
 
   // Voice Input (Speech-to-Text via Web Speech API)
   let voiceRecognition: any = null;
@@ -1284,7 +1325,8 @@ document.addEventListener('DOMContentLoaded', () => {
     updateSendBtnState();
 
     isStreaming = true;
-    sendBtn.disabled = true;
+    activeStreamAbortController = new AbortController();
+    setSendBtnStopMode(true);
     setRunControlsLocked(true);
 
     // Append user message with attached chips
@@ -1325,7 +1367,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const response = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: fullPrompt, effort: currentEffort, worktree: currentWorktree })
+        body: JSON.stringify({ prompt: fullPrompt, effort: currentEffort, worktree: currentWorktree }),
+        signal: activeStreamAbortController?.signal
       });
 
       if (!response.ok || !response.body) {
@@ -1515,12 +1558,20 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err: any) {
       if (runningBadge && runningBadge.parentNode) runningBadge.remove();
       const errBox = document.createElement('div');
-      errBox.style.color = 'var(--accent-red)';
-      errBox.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg><strong>Error:</strong> ${escapeHtml(err?.message || err)}`;
+      if (err?.name === 'AbortError') {
+        errBox.style.color = 'var(--text-muted)';
+        errBox.style.fontSize = '0.84rem';
+        errBox.textContent = 'Generation stopped by user.';
+      } else {
+        errBox.style.color = 'var(--accent-red)';
+        errBox.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg><strong>Error:</strong> ${escapeHtml(err?.message || err)}`;
+      }
       bubble.appendChild(errBox);
     } finally {
       if (runningBadge && runningBadge.parentNode) runningBadge.remove();
+      activeStreamAbortController = null;
       isStreaming = false;
+      setSendBtnStopMode(false);
       sendBtn.disabled = false;
       setRunControlsLocked(false);
       promptInput.focus();

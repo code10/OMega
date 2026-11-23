@@ -276,8 +276,73 @@ describe('Production Battle-Testing: Diverse Repo Topologies & Edge-Case LLM Pro
       ]) {
         assert.ok(html.includes(`id="${id}"`), `Rendered Web UI missing #${id}`);
       }
+      assert.ok(html.includes('id="clearAuditBtn"'), 'Rendered Web UI missing #clearAuditBtn');
     } finally {
       gw.server.close();
+      safeRm(tmp);
+    }
+  });
+
+  it('5. Loop circuit breaker halts runaway Unlimited runs repeating identical tool calls and /api/chat/stop works', async () => {
+    const tmp = makeTempDir('om-battle-loop-');
+    const wsDir = path.join(tmp, 'ws');
+    fs.mkdirSync(wsDir, { recursive: true });
+    fs.writeFileSync(path.join(wsDir, 'loop.txt'), 'same-content', 'utf8');
+
+    try {
+      // Provider that forever calls read_file on loop.txt even with maxSteps: 0 (Unlimited)
+      const loopingProvider = new FlakyEdgeCaseProvider([
+        {
+          content: 'Reading loop.txt again.',
+          toolCalls: [{ id: 'loop_tc', name: 'read_file', args: { path: 'loop.txt' } }],
+          usage: { promptTokens: 50, completionTokens: 10, totalTokens: 60 }
+        }
+      ], { name: 'om', model: 'om-turbo' });
+
+      const agent = new OMAgent({
+        workspaceDir: wsDir,
+        memoryDir: path.join(tmp, 'mem'),
+        provider: 'om',
+        model: 'om-turbo',
+        maxSteps: 0,
+        providerInstance: loopingProvider
+      });
+      await agent.init();
+
+      const res = await agent.run('Infinite loop test', { maxSteps: 0, disableFailover: true });
+      assert.equal(res.paused, true);
+      assert.equal(res.pauseReason, 'loop_circuit_breaker');
+      assert.ok(res.totalSteps <= 5, `Expected circuit breaker within 5 steps, ran ${res.totalSteps}`);
+      await agent.close();
+
+      // Verify POST /api/chat/stop and DELETE /api/audit endpoints
+      const gw = await startGateway({
+        port: 0,
+        host: '127.0.0.1',
+        authToken: 'stop-test-token',
+        workspaceDir: wsDir,
+        memoryDir: path.join(tmp, 'gw_mem'),
+        persistConfig: false
+      });
+      try {
+        const headers = { Authorization: 'Bearer stop-test-token', 'Content-Type': 'application/json' };
+        const stopRes = await fetch(`${gw.url}/api/chat/stop`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ sessionId: 'session_1' })
+        });
+        assert.equal(stopRes.status, 200);
+        const stopBody = await stopRes.json();
+        assert.equal(stopBody.success, true);
+
+        const delRes = await fetch(`${gw.url}/api/audit`, { method: 'DELETE', headers });
+        assert.equal(delRes.status, 200);
+        const delBody = await delRes.json();
+        assert.equal(delBody.cleared, true);
+      } finally {
+        gw.server.close();
+      }
+    } finally {
       safeRm(tmp);
     }
   });

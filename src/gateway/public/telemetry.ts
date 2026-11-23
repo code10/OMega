@@ -19,6 +19,7 @@ export function initTelemetry() {
   const auditChainBadge = byId('auditChainBadge');
   const auditTypeFilter = byId<HTMLSelectElement>('auditTypeFilter');
   const refreshAuditBtn = byId<HTMLButtonElement>('refreshAuditBtn');
+  const clearAuditBtn = byId<HTMLButtonElement>('clearAuditBtn');
   const auditTotalCostUsd = byId('auditTotalCostUsd');
   const auditTotalTokens = byId('auditTotalTokens');
   const auditTotalCalls = byId('auditTotalCalls');
@@ -275,7 +276,11 @@ export function initTelemetry() {
           auditTopModels.textContent = modelEntries.length > 0
             ? modelEntries
                 .slice(0, 3)
-                .map(([k, v]) => `${k}: $${Number(v.costUsd || 0).toFixed(4)}`)
+                .map(([k, v]) => {
+                  const rawName = String(v?.model || k || 'model');
+                  const modelName = rawName.split(/[\\/]/).pop() || rawName;
+                  return `${modelName}: $${Number(v.costUsd || 0).toFixed(4)}`;
+                })
                 .join(' · ')
             : 'No usage recorded yet';
         }
@@ -288,6 +293,20 @@ export function initTelemetry() {
   if (refreshAuditBtn) {
     refreshAuditBtn.addEventListener('click', () => {
       loadAuditLedger();
+    });
+  }
+  if (clearAuditBtn) {
+    clearAuditBtn.addEventListener('click', async () => {
+      if (!confirm('Clear all audit ledger entries and reset cost telemetry?')) return;
+      clearAuditBtn.disabled = true;
+      try {
+        const res = await fetch('/api/audit', { method: 'DELETE' });
+        if (res.ok) {
+          await loadAuditLedger();
+        }
+      } finally {
+        clearAuditBtn.disabled = false;
+      }
     });
   }
   if (auditTypeFilter) {

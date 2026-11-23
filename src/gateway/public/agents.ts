@@ -1245,10 +1245,12 @@ export function initAgents() {
             : statusRaw === 'failed' || statusRaw === 'aborted'
               ? 'error'
               : 'paused';
-        const stepInfo = `Step ${s.currentStep ?? 0}/${s.maxSteps ?? 15}`;
+        const maxStepsLabel = !s.maxSteps || Number(s.maxSteps) <= 0 ? 'Unlimited' : String(s.maxSteps);
+        const stepInfo = `Step ${s.currentStep ?? 0}/${maxStepsLabel}`;
         const tokInfo = `${s.usage?.totalTokens ?? 0} tok`;
         const wsMode = s.workspaceMode === 'worktree' ? 'worktree' : 'shared';
         const kindChip = isDetached ? 'Detached Worker' : 'Chat Checkpoint';
+        const isActiveRunning = isAlive || statusRaw === 'running';
 
         return `
           <div class="agent-card">
@@ -1269,9 +1271,9 @@ export function initAgents() {
             </div>
             <div class="agent-card-actions">
               ${renderActionBtn('Logs', { 'data-detached-inspect': s.sessionId })}
-              ${!isAlive && statusRaw !== 'completed' ? renderActionBtn('Resume', { 'data-detached-resume': s.sessionId }, 'primary') : ''}
+              ${!isActiveRunning && statusRaw !== 'completed' ? renderActionBtn('Resume', { 'data-detached-resume': s.sessionId }, 'primary') : ''}
               ${renderActionBtn('Fork', { 'data-detached-fork': s.sessionId })}
-              ${isAlive ? renderActionBtn('Stop', { 'data-detached-stop': s.sessionId }, 'danger') : renderActionBtn('Delete', { 'data-detached-delete': s.sessionId })}
+              ${isActiveRunning ? renderActionBtn('Stop', { 'data-detached-stop': s.sessionId }, 'danger') : renderActionBtn('Delete', { 'data-detached-delete': s.sessionId })}
             </div>
           </div>
         `;

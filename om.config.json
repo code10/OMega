@@ -39,8 +39,7 @@
   "security": {
     "requireConfirmationForShell": true,
     "requireConfirmationForTools": [
-      "http_request",
-      "fetch_page"
+      "http_request"
     ],
     "allowedCommands": [
       "git"

@@ -8,10 +8,11 @@ export interface AgentsRouteContext {
   res: http.ServerResponse;
   pathname: string;
   agentManager: AgentManager;
+  sessionManager?: { abortSession?: (sessionId?: string, reason?: string) => string[] };
 }
 
 export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boolean> {
-  const { req, res, pathname, agentManager } = ctx;
+  const { req, res, pathname, agentManager, sessionManager } = ctx;
 
   if (pathname === '/api/agents' && req.method === 'GET') {
     sendJson(res, 200, { success: true, ...agentManager.getState() });
@@ -297,6 +298,7 @@ export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boole
 
   if (dInspectMatch && req.method === 'DELETE') {
     const sessionId = decodeURIComponent(dInspectMatch[1]);
+    sessionManager?.abortSession?.(sessionId, 'Session deleted by user');
     const deleted = getDetachedManager().deleteSession(sessionId);
     sendJson(res, deleted ? 200 : 404, { success: deleted, sessionId });
     return true;
@@ -341,12 +343,17 @@ export async function handleAgentsRoutes(ctx: AgentsRouteContext): Promise<boole
   const dStopMatch = pathname.match(/^\/api\/agents\/detached\/([^/]+)\/stop$/);
   if (dStopMatch && req.method === 'POST') {
     const sessionId = decodeURIComponent(dStopMatch[1]);
+    const abortedInProcess = sessionManager?.abortSession?.(sessionId, 'Stopped from Agents panel') || [];
     try {
       const result = getDetachedManager().stopSession(sessionId);
-      sendJson(res, 200, { success: true, ...result });
+      sendJson(res, 200, { success: true, ...result, abortedInProcess });
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      sendJson(res, 404, { success: false, error: message });
+      if (abortedInProcess.length > 0) {
+        sendJson(res, 200, { success: true, sessionId, stopped: true, abortedInProcess });
+      } else {
+        const message = err instanceof Error ? err.message : String(err);
+        sendJson(res, 404, { success: false, error: message });
+      }
     }
     return true;
   }

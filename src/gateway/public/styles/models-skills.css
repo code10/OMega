@@ -1272,6 +1272,12 @@
   transform: translateY(0.5px);
 }
 
+.audit-clear-btn:hover {
+  color: var(--accent-red);
+  border-color: rgba(224, 90, 71, 0.45);
+  background: rgba(224, 90, 71, 0.08);
+}
+
 /* Locked runtime controls while model is streaming/running */
 .chat-effort-toggle.is-locked,
 .param-section.is-locked {
@@ -1286,6 +1292,19 @@
 .param-section.is-locked label {
   pointer-events: none;
   cursor: not-allowed;
+}
+
+/* Red Stop button state while chat model is running */
+.send-circle-btn.is-stopping {
+  background: var(--accent-red) !important;
+  color: #ffffff !important;
+  border-color: var(--accent-red) !important;
+  opacity: 1 !important;
+  cursor: pointer !important;
+}
+
+.send-circle-btn.is-stopping:hover {
+  filter: brightness(1.1);
 }
 
 .endpoint-cards-list {

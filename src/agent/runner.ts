@@ -137,8 +137,9 @@ export async function executeAgentRun(
       ? effectiveBudgets.maxConsecutiveErrors
       : options.detached
         ? 4
-        : 0
+        : 6
   );
+  const maxIdenticalToolRepeats = 4;
   let consecutiveErrors = 0;
 
   agent.lastRunId = runId;
@@ -738,6 +739,22 @@ export async function executeAgentRun(
 
       steps.push(stepRecord);
       persistCheckpoint('running', { pendingStep: null });
+
+      // Hard repeat-loop circuit breaker: stop runaway agents repeating the exact same tool call
+      let maxRepeatCount = 0;
+      let repeatedToolName = '';
+      for (const [sig, count] of seenToolSignatures.entries()) {
+        if (count > maxRepeatCount) {
+          maxRepeatCount = count;
+          repeatedToolName = String(sig).split(':')[0];
+        }
+      }
+      if (maxRepeatCount >= maxIdenticalToolRepeats) {
+        return pauseRun(
+          'loop_circuit_breaker',
+          `[OM Notice] Paused by loop circuit breaker after repeating '${repeatedToolName}' with identical arguments ${maxRepeatCount} times.`
+        );
+      }
     }
 
     if (currentStep >= maxSteps && !finalAnswer) {

@@ -303,7 +303,7 @@ export async function startGateway(options: Record<string, any> = {}) {
     if (await handleGitRoutes({ req, res, pathname, url, agent: reqAgent })) return;
 
     // 3c. Agents Routes (/api/agents*)
-    if (await handleAgentsRoutes({ req, res, pathname, agentManager: reqAgentManager })) return;
+    if (await handleAgentsRoutes({ req, res, pathname, agentManager: reqAgentManager, sessionManager: reqSessionManager })) return;
 
     // 3d. GET /api/activity (Live activity trace history & router stats)
     if (pathname === '/api/activity' && req.method === 'GET') {
@@ -359,6 +359,9 @@ export async function startGateway(options: Record<string, any> = {}) {
         sessionAgent.on('retry', onRetry);
         sessionAgent.on('fallback', onFallback);
 
+        let finished = false;
+        const streamAbort = new AbortController();
+
         const cleanup = () => {
           sessionAgent.off('step_start', onStepStart);
           sessionAgent.off('thought', onThought);
@@ -369,7 +372,13 @@ export async function startGateway(options: Record<string, any> = {}) {
           sessionAgent.off('fallback', onFallback);
         };
 
-        req.on('close', cleanup);
+        req.on('close', () => {
+          cleanup();
+          if (!finished) {
+            streamAbort.abort(new Error('Client disconnected'));
+            sessionAgent.abort?.('Client disconnected');
+          }
+        });
 
         try {
           const result = await sessionAgent.run(prompt, {
@@ -377,16 +386,32 @@ export async function startGateway(options: Record<string, any> = {}) {
             responseFormat,
             ...(parsedEffort ? { effort: parsedEffort } : {}),
             ...(useWorktree ? { worktree: true } : {}),
+            signal: streamAbort.signal,
             stream: true
           });
+          finished = true;
           sendEvent('done', result);
         } catch (err: any) {
+          finished = true;
           sendEvent('error', { error: err.message });
         } finally {
+          finished = true;
           cleanup();
           res.end();
         }
       });
+      return;
+    }
+
+    // 5b. POST /api/chat/stop (Abort active in-process chat run)
+    if (pathname === '/api/chat/stop' && req.method === 'POST') {
+      const data: Record<string, any> = (await readJsonBody(req, res)) || {};
+      const targetSessionId = typeof data.sessionId === 'string' && data.sessionId.trim()
+        ? data.sessionId.trim()
+        : undefined;
+      const aborted = reqSessionManager.abortSession(targetSessionId, 'Stopped by user');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, aborted }));
       return;
     }
 
@@ -404,14 +429,24 @@ export async function startGateway(options: Record<string, any> = {}) {
         return;
       }
       try {
-        const result = await reqSessionManager.runExclusive(targetSessionId, (sessionAgent: any) =>
-          sessionAgent.run(prompt, {
+        let chatFinished = false;
+        const chatAbort = new AbortController();
+        const result = await reqSessionManager.runExclusive(targetSessionId, (sessionAgent: any) => {
+          req.on('close', () => {
+            if (!chatFinished) {
+              chatAbort.abort(new Error('Client disconnected'));
+              sessionAgent.abort?.('Client disconnected');
+            }
+          });
+          return sessionAgent.run(prompt, {
             attachments,
             responseFormat,
             ...(parsedEffort ? { effort: parsedEffort } : {}),
-            ...(useWorktree ? { worktree: true } : {})
-          })
-        );
+            ...(useWorktree ? { worktree: true } : {}),
+            signal: chatAbort.signal
+          });
+        });
+        chatFinished = true;
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(result, null, 2));
       } catch (err: any) {
@@ -667,6 +702,13 @@ ${prompt && prompt.trim() ? prompt.trim() : `Execute procedure for ${cleanName}.
       const summary = reqAgent.audit.getCostSummary({ ownerId: ownerFilter, sessionId, daemonId, since });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(summary));
+      return;
+    }
+
+    if (pathname === '/api/audit' && req.method === 'DELETE') {
+      const result = reqAgent.audit.clear();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, ...result }));
       return;
     }
 

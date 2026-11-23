@@ -7,7 +7,7 @@
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.19.0-brightgreen.svg)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-1-blue.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-170%20passed-success.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-171%20passed-success.svg)](tests/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](README.md)
 
 **OMega** is a lightweight, local-first Node.js agent harness you control completely | Running offline on your hardware or routed across cloud models, with human-in-the-loop approvals, isolated git worktrees, rollback snapshots, and Git-inspectable memory built in.
@@ -174,7 +174,7 @@ npm run benchmark:eval       # Coding-task scorecard runner (--live for real API
 node scripts/security-audit.js  # Dependency, secret & eval() audit
 ```
 
-All 170 unit & integration tests pass using Node's built-in `node:test` runner across Linux, macOS, and Windows CI (`.github/workflows/ci.yml`), covering core agent loops, security hardening, Windows/OS sandboxing, audit chain integrity, deterministic replay evals, and monorepo/LLM-failover battle tests (Playwright is used for `test:e2e`).
+All 171 unit & integration tests pass using Node's built-in `node:test` runner across Linux, macOS, and Windows CI (`.github/workflows/ci.yml`), covering core agent loops, security hardening, Windows/OS sandboxing, audit chain integrity, deterministic replay evals, and monorepo/LLM-failover battle tests (Playwright is used for `test:e2e`).
 
 ---
 

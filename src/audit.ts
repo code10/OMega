@@ -401,6 +401,16 @@ export class OMAuditLedger {
     return entries;
   }
 
+  /**
+   * Reset the audit ledger file back to an empty genesis state.
+   */
+  clear(): { cleared: boolean } {
+    if (fs.existsSync(this.filePath)) {
+      fs.writeFileSync(this.filePath, '', 'utf8');
+    }
+    return { cleared: true };
+  }
+
   verifyChain(): AuditChainVerification {
     if (!fs.existsSync(this.filePath)) {
       return { valid: true, entriesChecked: 0 };
