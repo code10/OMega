@@ -61,6 +61,7 @@ export function compactHistoryIfNeeded(agent: any) {
   };
 
   agent.history = [compactedMsg, ...recent];
+  agent.lastContextUsage = null;
   log.debug(`Compacted history from ${older.length + recent.length} to ${agent.history.length} messages (~${totalTokens} tokens)`);
 }
 
@@ -106,6 +107,7 @@ export async function compactHistory(
           role: 'user',
           content: `[LLM-Compacted Earlier Context (${older.length} turns)]\n${summary}`
         }, ...recent];
+        agent.lastContextUsage = null;
         log.debug(`LLM-compacted history from ${older.length + recent.length} to ${agent.history.length} messages`);
         return { compacted: true, mode: 'llm' };
       }

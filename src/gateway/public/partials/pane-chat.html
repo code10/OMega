@@ -24,7 +24,7 @@
                 </div>
               </div>
               <div class="sessions-search-box">
-                <input type="text" id="sessionSearchInput" placeholder="Search..." />
+                <input type="text" id="sessionSearchInput" placeholder="Search..." aria-label="Search sessions" />
               </div>
               <div class="sessions-list" id="sessionsListContainer">
                 <!-- Dynamically loaded from /api/sessions -->
@@ -56,33 +56,12 @@
 
               <!-- FLOATING PROMPT INPUT -->
               <div class="input-panel">
-                <!-- Model Context & Token Usage Bar -->
-                <div class="model-usage-bar" id="modelUsageBar">
-                  <div class="usage-bar-meta">
-                    <div class="usage-bar-left">
-                      <span class="usage-status-dot" id="usageStatusDot"></span>
-                      <span class="usage-model-label" id="usageModelLabel" style="display:none;"
-                        title="Click to switch model">om-v1</span>
-                      <span class="usage-mode-tag local" id="usageModeTag" style="display:none;">LOCAL</span>
-                      <span class="usage-meta-sep" style="display:none;">•</span>
-                      <span class="usage-tokens-counter" id="usageTokensCounter">0 / 128k tokens</span>
-                    </div>
-                    <div class="usage-bar-right">
-                      <span class="usage-pct-badge" id="usagePctBadge">0.0%</span>
-                      <span class="usage-limit-label" id="usageLimitLabel">128k context</span>
-                    </div>
-                  </div>
-                  <div class="usage-progress-track">
-                    <div class="usage-progress-fill" id="usageProgressFill" style="width: 0%;"></div>
-                  </div>
-                </div>
-
                 <div class="floating-input-box">
                   <!-- Attached files & folders preview chips -->
                   <div class="attached-chips-row" id="attachedChipsRow" style="display: none;"></div>
 
                   <textarea id="promptInput" placeholder="Ask anything, @ to mention, / for actions..."
-                    rows="1"></textarea>
+                    aria-label="Message prompt" rows="1"></textarea>
 
                   <div class="input-meta-bar">
                     <div class="input-meta-left">
@@ -319,9 +298,89 @@
                         </svg>
                         <span>Worktree</span>
                       </button>
+
+                      <!-- Plugins Switcher & Connect Catalog -->
+                      <div class="chat-plugins-wrap" id="pluginsMenuWrap">
+                        <button type="button" class="chat-plugins-btn" id="pluginsTriggerBtn"
+                          aria-expanded="false" aria-haspopup="true"
+                          title="Manage connected plugins and MCP integrations">
+                          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                            stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M12 22v-5"></path>
+                            <path d="M9 8V2"></path>
+                            <path d="M15 8V2"></path>
+                            <path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"></path>
+                          </svg>
+                          <span class="chat-plugins-label">Plugins</span>
+                          <span class="chat-plugins-count" id="pluginsCountBadge" hidden>0</span>
+                        </button>
+
+                        <div class="plugins-popover" id="pluginsPopover" role="menu" aria-label="Connected plugins">
+                          <div class="plugins-connected-list" id="pluginsConnectedList"></div>
+                          <div class="plugins-menu-sep"></div>
+                          <div class="plugins-flyout-anchor">
+                            <button type="button" class="plugins-connect-trigger" id="pluginsConnectFlyoutTrigger">
+                              <span class="plugins-connect-left">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+                                  stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                  <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+                                  <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+                                  <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+                                  <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+                                </svg>
+                                <span>Connect plugins</span>
+                              </span>
+                              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                                stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                <polyline points="9 18 15 12 9 6"></polyline>
+                              </svg>
+                            </button>
+
+                            <div class="plugins-catalog-submenu" id="pluginsCatalogSubmenu" role="menu"
+                              aria-label="Available plugins">
+                              <div class="plugins-catalog-list" id="pluginsCatalogList"></div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
                     <div class="input-meta-right">
+                      <!-- Compact Inline Context Meter (full breakdown on hover) -->
+                      <div class="model-usage-bar" id="modelUsageBar" tabindex="0" aria-label="Context window usage">
+                        <div class="usage-compact-trigger">
+                          <svg class="usage-ring-svg" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+                            <circle class="usage-ring-track" cx="10" cy="10" r="7.5" fill="none" stroke-width="2.2"></circle>
+                            <circle class="usage-ring-arc" id="usageRingArc" cx="10" cy="10" r="7.5" fill="none"
+                              stroke-width="2.2" stroke-linecap="round"
+                              stroke-dasharray="47.12" stroke-dashoffset="47.12"></circle>
+                          </svg>
+                          <span class="usage-pct-badge" id="usagePctBadge">0.0%</span>
+                        </div>
+                        <div class="usage-breakdown-popover" id="usageBreakdownPopover" role="tooltip">
+                          <div class="usage-popover-top">
+                            <div class="usage-popover-title-row">
+                              <span class="usage-status-dot" id="usageStatusDot"></span>
+                              <span class="usage-context-title">Context</span>
+                              <span class="usage-source-badge" id="usageSourceBadge" hidden></span>
+                            </div>
+                            <span class="usage-limit-label" id="usageLimitLabel">128k window</span>
+                          </div>
+                          <div class="usage-popover-counter-row">
+                            <span class="usage-tokens-counter" id="usageTokensCounter">0 / 128k tokens</span>
+                            <span class="usage-draft-badge" id="usageDraftBadge" hidden></span>
+                          </div>
+                          <div class="usage-progress-track">
+                            <div class="usage-progress-fill" id="usageProgressFill" style="width: 0%;"></div>
+                            <span class="usage-track-tick" style="left: 25%;"></span>
+                            <span class="usage-track-tick" style="left: 50%;"></span>
+                            <span class="usage-track-tick" style="left: 75%;"></span>
+                          </div>
+                          <div class="usage-popover-rows" id="usagePopoverRows"></div>
+                          <span class="usage-model-label" id="usageModelLabel" style="display:none;">om-v1</span>
+                          <span class="usage-mode-tag local" id="usageModeTag" style="display:none;">LOCAL</span>
+                        </div>
+                      </div>
                       <button id="voiceBtn" class="voice-circle-btn" title="Voice Input (Speech-to-Text)" type="button"
                         aria-label="Voice input">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
@@ -380,7 +439,8 @@
                     <span>Temperature</span>
                     <span class="param-badge-val" id="tempValBadge">0.2</span>
                   </div>
-                  <input type="range" id="tempSlider" min="0" max="1" step="0.05" value="0.2" class="param-range" />
+                  <input type="range" id="tempSlider" min="0" max="1" step="0.05" value="0.2" class="param-range"
+                    aria-label="Sampling temperature" />
                   <div class="param-slider-legend">
                     <span>0.0 (Precise)</span>
                     <span>1.0 (Creative)</span>
@@ -403,6 +463,7 @@
                         </svg>
                       </button>
                       <input type="number" id="maxStepsInput" min="0" max="500" step="5" value="50"
+                        aria-label="Maximum agent steps"
                         class="param-number-input" title="Maximum steps per run (0 = Unlimited)" />
                       <button type="button" class="param-stepper-btn" id="maxStepsIncBtn"
                         aria-label="Increase max steps" title="Increase by 5">

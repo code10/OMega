@@ -14,6 +14,7 @@ import { initTraceRenderer } from './traceRenderer.js';
 import { initAgents } from './agents.js';
 import { initAutomations } from './automations.js';
 import { initDeviceSpecs } from './device.js';
+import { initPlugins } from './plugins.js';
 import { renderConfigRowsHtml, renderSkillCardHtml, renderErrorMessage } from './components.js';
 
 function resolveGatewayToken(): string {
@@ -308,7 +309,13 @@ document.addEventListener('DOMContentLoaded', () => {
   function switchTab(tab: string) {
     activeTab = tab;
     railItems.forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.tab === tab);
+      const isCurrent = btn.dataset.tab === tab;
+      btn.classList.toggle('active', isCurrent);
+      if (isCurrent) {
+        btn.setAttribute('aria-current', 'page');
+      } else {
+        btn.removeAttribute('aria-current');
+      }
     });
 
     tabPanes.forEach((p) => p.classList.remove('active'));
@@ -358,7 +365,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const {
     closeModelDropdown,
     loadModels,
-    updateModelUsageBar
+    updateModelUsageBar,
+    setServerContextUsage
   } = initModels({
     modelDropdownMenu,
     dropdownCloseBtn,
@@ -388,6 +396,20 @@ document.addEventListener('DOMContentLoaded', () => {
     applyStatusToUI,
     closePlusMenu: () => { if (typeof closePlusMenu === 'function') closePlusMenu(); },
     closeInlineSuggestions: () => { if (typeof closeInlineSuggestions === 'function') closeInlineSuggestions(); }
+  });
+
+  const {
+    loadPlugins,
+    closePluginsMenu,
+    closePluginConnectModal
+  } = initPlugins({
+    skillsCountBadge,
+    setServerContextUsage,
+    closeOtherPopovers: () => {
+      closeModelDropdown();
+      if (typeof closePlusMenu === 'function') closePlusMenu();
+      if (typeof closeInlineSuggestions === 'function') closeInlineSuggestions();
+    }
   });
 
   createChatBtn.addEventListener('click', async () => {
@@ -492,7 +514,11 @@ document.addEventListener('DOMContentLoaded', () => {
       ]);
     }
 
-    updateModelUsageBar();
+    if (data.contextUsage !== undefined) {
+      setServerContextUsage(data.contextUsage);
+    } else {
+      updateModelUsageBar();
+    }
   }
 
   async function loadStatus() {
@@ -637,6 +663,7 @@ document.addEventListener('DOMContentLoaded', () => {
     appendCopyAction,
     scrollToBottom,
     updateModelUsageBar,
+    setServerContextUsage,
     clearAttachments: () => {
       attachedFiles = [];
       renderAttachedChips();
@@ -1419,6 +1446,9 @@ document.addEventListener('DOMContentLoaded', () => {
             payload = rawData;
           }
           handleAgentEvent(eventName, payload, bubble, runningBadge, streamState);
+          if (eventName === 'done' && payload?.contextUsage) {
+            setServerContextUsage(payload.contextUsage);
+          }
           if (eventName === 'done' && payload?.worktree?.hasChanges) {
             const wt = payload.worktree;
             const wtCard = document.createElement('div');
@@ -1648,6 +1678,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Escape') {
       closeRefViewer();
       closeSkillCreator();
+      closePluginConnectModal();
+      closePluginsMenu();
     }
   });
 
@@ -1655,6 +1687,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // 10. INITIALIZATION
   // --------------------------------------------------------------------------
   loadStatus();
+  void loadModels();
+  void loadPlugins();
   loadParameters();
   loadSessions();
   loadActivityHistory();

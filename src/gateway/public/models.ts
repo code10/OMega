@@ -1,6 +1,20 @@
 import { escapeHtml, formatTokens, isLocalProviderName, MODEL_LIMITS_MAP } from './utils.js';
 import { renderModelCardHtml } from './components.js';
 
+export interface ContextUsageSnapshot {
+  usedTokens: number;
+  contextLimit?: number;
+  historyTokens?: number;
+  systemTokens?: number;
+  toolsTokens?: number;
+  overheadTokens?: number;
+  lastPromptTokens?: number;
+  lastCompletionTokens?: number;
+  sessionTotalTokens?: number;
+  messageCount?: number;
+  source?: 'provider' | 'bpe' | 'idle';
+}
+
 export interface ModelsDeps {
   modelDropdownMenu: HTMLElement;
   dropdownCloseBtn: HTMLButtonElement;
@@ -67,6 +81,23 @@ export function initModels(deps: ModelsDeps) {
   let cachedModels: any[] = [];
   let activeModelScope = 'all';
   let currentProviderFilter = 'all';
+  let serverContextUsage: ContextUsageSnapshot | null = null;
+
+  const usageStatusDot = document.getElementById('usageStatusDot');
+  const usageDraftBadge = document.getElementById('usageDraftBadge');
+  const usageSourceBadge = document.getElementById('usageSourceBadge');
+  const usagePopoverRows = document.getElementById('usagePopoverRows');
+  const usageRingArc = document.getElementById('usageRingArc') as SVGCircleElement | null;
+  const RING_CIRCUMFERENCE = 2 * Math.PI * 7.5;
+
+  function setServerContextUsage(usage: ContextUsageSnapshot | null | undefined) {
+    if (usage && typeof usage === 'object' && typeof usage.usedTokens === 'number') {
+      serverContextUsage = usage;
+    } else if (usage === null) {
+      serverContextUsage = null;
+    }
+    updateModelUsageBar();
+  }
 
   function toggleModelDropdown() {
     const isShowing = modelDropdownMenu.classList.contains('show');
@@ -159,65 +190,166 @@ export function initModels(deps: ModelsDeps) {
     }
   }
 
+  function formatCompactTokens(count: number): string {
+    if (count >= 1000000) return `${(count / 1000000).toFixed(2).replace(/\.?0+$/, '')}M`;
+    if (count >= 1000) return `${(count / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+    return count.toLocaleString();
+  }
+
   function updateModelUsageBar() {
     if (!modelUsageBar) return;
 
     const currentModelId = ((inputModelTag && inputModelTag.textContent) || (topLoadedModel && topLoadedModel.textContent) || 'om-v1').trim();
-    const modelMeta = (cachedModels || []).find((m: any) => m.id && m.id.toLowerCase() === currentModelId.toLowerCase()) || (MODEL_LIMITS_MAP as Record<string, any>)[currentModelId.toLowerCase()] || {};
+    const modelLower = currentModelId.toLowerCase();
+    const modelMeta =
+      (cachedModels || []).find((m: any) => m.id && m.id.toLowerCase() === modelLower) ||
+      (MODEL_LIMITS_MAP as Record<string, any>)[modelLower] ||
+      {};
 
-    const inputLimit = modelMeta.inputTokenLimit || modelMeta.input || 128000;
+    const inputLimit =
+      modelMeta.inputTokenLimit ||
+      modelMeta.input ||
+      serverContextUsage?.contextLimit ||
+      128000;
     const modelDisplayName = modelMeta.displayName || modelMeta.name || currentModelId;
 
-    let totalChars = 0;
-    if (messagesContainer) {
-      const bubbles = messagesContainer.querySelectorAll('.msg-bubble');
-      bubbles.forEach((b) => {
-        totalChars += (b.textContent || '').length;
-      });
-    }
-
+    // Live draft & staged attachments token estimate
+    let draftChars = 0;
     if (promptInput) {
-      totalChars += (promptInput.value || '').length;
+      draftChars += (promptInput.value || '').length;
     }
-
     const attachedFiles = getAttachedFiles();
     if (Array.isArray(attachedFiles)) {
       attachedFiles.forEach((f) => {
-        totalChars += (f.content || '').length || (f.size || 0);
+        draftChars += (f.content || '').length || (f.size || 0);
       });
     }
+    const draftTokens = draftChars > 0 ? Math.ceil(draftChars / 4) : 0;
 
-    const usedTokens = Math.max(0, Math.ceil(totalChars / 4));
-    const pct = Math.min(100, (usedTokens / inputLimit) * 100);
+    // Prefer accurate backend context telemetry (provider API usage or BPE tokenizer over system + tools + history).
+    // Fall back to clean message text only when backend telemetry has not arrived yet.
+    let baseTokens = 0;
+    let sourceLabel = 'Estimate';
+    let isLiveProvider = false;
+
+    if (serverContextUsage) {
+      baseTokens = Math.max(0, Math.round(serverContextUsage.usedTokens || 0));
+      if (serverContextUsage.source === 'provider') {
+        sourceLabel = 'Provider API';
+        isLiveProvider = true;
+      } else if (serverContextUsage.source === 'bpe') {
+        sourceLabel = 'BPE Tokenizer';
+      } else {
+        sourceLabel = 'Ready';
+      }
+    } else if (messagesContainer) {
+      let domChars = 0;
+      const agentAnswers = messagesContainer.querySelectorAll('.message-row.agent-msg .final-markdown-response');
+      agentAnswers.forEach((el) => {
+        domChars += (el.textContent || '').length;
+      });
+      const userBubbles = messagesContainer.querySelectorAll('.message-row.user-msg .msg-bubble > div:not(.msg-attachments-wrap)');
+      userBubbles.forEach((el) => {
+        domChars += (el.textContent || '').length;
+      });
+      baseTokens = domChars > 0 ? Math.ceil(domChars / 4) : 0;
+    }
+
+    const usedTokens = baseTokens + draftTokens;
+    const pct = inputLimit > 0 ? Math.min(100, (usedTokens / inputLimit) * 100) : 0;
+    const remainingTokens = Math.max(0, inputLimit - usedTokens);
+    const stateClass = pct >= 90 ? 'danger' : pct >= 70 ? 'warning' : usedTokens === 0 ? 'idle' : 'healthy';
 
     if (usageModelLabel) {
       usageModelLabel.textContent = modelDisplayName;
     }
 
     if (usageTokensCounter) {
-      const formattedUsed = usedTokens >= 1000 ? (usedTokens / 1000).toFixed(1) + 'k' : usedTokens.toLocaleString();
+      const formattedUsed = formatCompactTokens(usedTokens);
       const formattedLimit = formatTokens(inputLimit);
-      usageTokensCounter.textContent = `${formattedUsed} / ${formattedLimit} tokens`;
+      usageTokensCounter.innerHTML = `<span class="usage-tokens-used">${escapeHtml(formattedUsed)}</span><span class="usage-tokens-sep">/</span><span>${escapeHtml(formattedLimit)} tokens</span>`;
+    }
+
+    if (usageDraftBadge) {
+      if (draftTokens > 0) {
+        usageDraftBadge.textContent = `+${formatCompactTokens(draftTokens)} draft`;
+        usageDraftBadge.hidden = false;
+      } else {
+        usageDraftBadge.hidden = true;
+      }
+    }
+
+    if (usageSourceBadge) {
+      if (usedTokens > 0 && serverContextUsage && serverContextUsage.source !== 'idle') {
+        usageSourceBadge.textContent = isLiveProvider ? 'LIVE' : 'BPE';
+        usageSourceBadge.classList.toggle('live', isLiveProvider);
+        usageSourceBadge.hidden = false;
+      } else {
+        usageSourceBadge.hidden = true;
+      }
+    }
+
+    if (usageStatusDot) {
+      usageStatusDot.classList.remove('idle', 'warning', 'danger');
+      if (stateClass !== 'healthy') {
+        usageStatusDot.classList.add(stateClass);
+      }
     }
 
     if (usagePctBadge) {
       usagePctBadge.textContent = (pct < 0.1 && usedTokens > 0) ? '<0.1%' : `${pct.toFixed(1)}%`;
+      usagePctBadge.classList.remove('warning', 'danger');
+      if (stateClass === 'warning' || stateClass === 'danger') {
+        usagePctBadge.classList.add(stateClass);
+      }
     }
 
     if (usageLimitLabel) {
-      usageLimitLabel.textContent = `${formatTokens(inputLimit)} context`;
+      usageLimitLabel.textContent = `${formatTokens(inputLimit)} window`;
+    }
+
+    if (usageRingArc) {
+      const ringPct = usedTokens > 0 ? Math.max(pct, 2.5) : 0;
+      const offset = RING_CIRCUMFERENCE * (1 - ringPct / 100);
+      usageRingArc.setAttribute('stroke-dashoffset', offset.toFixed(2));
+      usageRingArc.classList.remove('idle', 'warning', 'danger');
+      if (stateClass !== 'healthy') {
+        usageRingArc.classList.add(stateClass);
+      }
     }
 
     if (usageProgressFill) {
-      const fillPct = usedTokens > 0 ? Math.max(pct, 0.6) : 0;
+      const fillPct = usedTokens > 0 ? Math.max(pct, 1) : 0;
       usageProgressFill.style.width = `${fillPct}%`;
 
       usageProgressFill.classList.remove('warning', 'danger');
-      if (pct >= 90) {
+      if (stateClass === 'danger') {
         usageProgressFill.classList.add('danger');
-      } else if (pct >= 70) {
+      } else if (stateClass === 'warning') {
         usageProgressFill.classList.add('warning');
       }
+    }
+
+    if (usagePopoverRows) {
+      const historyTok = serverContextUsage?.historyTokens ?? baseTokens;
+      const overheadTok = serverContextUsage?.overheadTokens ?? 0;
+      const sessionTotal = serverContextUsage?.sessionTotalTokens ?? 0;
+      const rows: string[] = [
+        `<div class="usage-popover-row"><span>Model</span><span class="val">${escapeHtml(modelDisplayName)}</span></div>`,
+        `<div class="usage-popover-row"><span>Conversation history</span><span class="val">${historyTok.toLocaleString()} tok</span></div>`
+      ];
+      if (overheadTok > 0) {
+        rows.push(`<div class="usage-popover-row"><span>System prompt &amp; tools</span><span class="val">${overheadTok.toLocaleString()} tok</span></div>`);
+      }
+      if (draftTokens > 0) {
+        rows.push(`<div class="usage-popover-row"><span>Pending draft &amp; files</span><span class="val">+${draftTokens.toLocaleString()} tok</span></div>`);
+      }
+      rows.push(`<div class="usage-popover-row"><span>Remaining headroom</span><span class="val">${remainingTokens.toLocaleString()} tok</span></div>`);
+      rows.push(`<div class="usage-popover-row subtle"><span>Source</span><span class="val">${escapeHtml(sourceLabel)}</span></div>`);
+      if (sessionTotal > 0) {
+        rows.push(`<div class="usage-popover-row"><span>Session cumulative</span><span class="val">${sessionTotal.toLocaleString()} tok</span></div>`);
+      }
+      usagePopoverRows.innerHTML = rows.join('');
     }
   }
 
@@ -253,6 +385,7 @@ export function initModels(deps: ModelsDeps) {
         });
       }
     } catch (_) { }
+    updateModelUsageBar();
     return cachedModels;
   }
 
@@ -439,6 +572,7 @@ export function initModels(deps: ModelsDeps) {
     closeModelDropdown,
     loadModels,
     renderFullModelsGrid,
-    updateModelUsageBar
+    updateModelUsageBar,
+    setServerContextUsage
   };
 }

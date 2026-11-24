@@ -11,6 +11,7 @@ export interface SessionsDeps {
   appendCopyAction: (parentEl: HTMLElement, getTextFn: () => string, timestamp?: number | string) => void;
   scrollToBottom: () => void;
   updateModelUsageBar: () => void;
+  setServerContextUsage?: (usage: any) => void;
   clearAttachments: () => void;
 }
 
@@ -26,6 +27,7 @@ export function initSessions(deps: SessionsDeps) {
     appendCopyAction,
     scrollToBottom,
     updateModelUsageBar,
+    setServerContextUsage,
     clearAttachments
   } = deps;
 
@@ -97,6 +99,9 @@ export function initSessions(deps: SessionsDeps) {
         const data = await res.json();
         if (topbarSessionTag) topbarSessionTag.textContent = data.session?.title || sessionId;
         renderLoadedSession(data.session);
+        if (data.contextUsage !== undefined) {
+          setServerContextUsage?.(data.contextUsage);
+        }
         await loadSessions();
       }
     } catch (e) {
@@ -215,6 +220,14 @@ export function initSessions(deps: SessionsDeps) {
  ╚██████╔╝██║ ╚═╝ ██║███████╗╚██████╔╝██║  ██║
   ╚═════╝ ╚═╝     ╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝</pre></h2>`;
 
+  const syncContextUsage = (usage: any) => {
+    if (setServerContextUsage) {
+      setServerContextUsage(usage);
+    } else {
+      updateModelUsageBar();
+    }
+  };
+
   async function clearChatPage() {
     try {
       const res = await fetch('/api/clear', { method: 'POST' });
@@ -229,7 +242,7 @@ export function initSessions(deps: SessionsDeps) {
       `;
       clearAttachments();
       await loadSessions();
-      updateModelUsageBar();
+      syncContextUsage(data.contextUsage ?? null);
     } catch (_) {
       messagesContainer.innerHTML = `
         <div class="welcome-card">
@@ -237,7 +250,7 @@ export function initSessions(deps: SessionsDeps) {
           <p>Page cleared.</p>
         </div>
       `;
-      updateModelUsageBar();
+      syncContextUsage(null);
     }
   }
 
@@ -253,7 +266,7 @@ export function initSessions(deps: SessionsDeps) {
         </div>
       `;
       await loadSessions();
-      updateModelUsageBar();
+      syncContextUsage(data.contextUsage ?? null);
     } catch (_) { }
   }
 
@@ -289,7 +302,7 @@ export function initSessions(deps: SessionsDeps) {
             </div>
           `;
           await loadSessions();
-          updateModelUsageBar();
+          syncContextUsage(data.contextUsage ?? null);
         } else {
           alert(data.error || 'Failed to reset sessions');
         }

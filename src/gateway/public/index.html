@@ -27,8 +27,8 @@
         <div class="lm-logo" aria-label="OMega">
           <img src="om.svg?v=4" alt="OMega" class="om-rail-logo" width="32" height="32">
         </div>
-        <nav class="rail-nav">
-          <button class="rail-item active" data-tab="chat" aria-label="Chat">
+        <nav class="rail-nav" aria-label="Primary navigation">
+          <button class="rail-item active" data-tab="chat" aria-label="Chat" aria-current="page">
             <svg class="rail-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
             </svg>
@@ -155,7 +155,7 @@
       </header>
 
       <!-- CONTENT BODY (Tabs) -->
-      <div class="lm-body">
+      <main class="lm-body" id="mainWorkspace">
 
         <!-- TAB 1: CHAT VIEW (LM Studio 3-Column Layout) -->
         <!-- @include partials/pane-chat.html -->
@@ -166,7 +166,7 @@
         <!-- @include partials/pane-memory.html -->
         <!-- @include partials/pane-system.html -->
         <!-- @include partials/pane-device.html -->
-      </div>
+      </main>
     </div>
   </div>
 

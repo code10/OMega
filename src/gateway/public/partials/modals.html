@@ -1,3 +1,68 @@
+  <!-- CONNECT PLUGIN MODAL -->
+  <div class="modal-backdrop" id="pluginConnectModal" style="display: none;">
+    <div class="modal-dialog plugin-connect-dialog" role="dialog" aria-modal="true" aria-labelledby="pluginModalTitle">
+      <div class="modal-header">
+        <div class="modal-header-left">
+          <h3 class="modal-title" id="pluginModalTitle">Connect Plugin</h3>
+          <span class="modal-subtitle" id="pluginModalSubtitle">Configure MCP transport and credentials</span>
+        </div>
+        <button type="button" class="modal-close-btn" id="closePluginModalBtn" title="Close" aria-label="Close modal">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <form id="pluginConnectForm" class="modal-form">
+        <input type="hidden" id="pluginIdInput" />
+        <div class="form-row" id="pluginCustomNameRow" style="display: none;">
+          <div class="form-group flex-1">
+            <label class="form-label" for="pluginNameInput">Plugin Name <span class="required-star">*</span></label>
+            <input type="text" id="pluginNameInput" class="form-input" placeholder="e.g. Linear or Postgres" autocomplete="off" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="pluginTransportSelect">Transport</label>
+          <select id="pluginTransportSelect" class="form-input">
+            <option value="stdio">Local Stdio (npx / command)</option>
+            <option value="http">Remote Streamable HTTP (URL)</option>
+          </select>
+        </div>
+
+        <div id="pluginStdioFields">
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label class="form-label" for="pluginCommandInput">Command</label>
+              <input type="text" id="pluginCommandInput" class="form-input" placeholder="npx" autocomplete="off" />
+            </div>
+            <div class="form-group flex-2">
+              <label class="form-label" for="pluginArgsInput">Arguments</label>
+              <input type="text" id="pluginArgsInput" class="form-input" placeholder="-y @modelcontextprotocol/server-github" autocomplete="off" />
+            </div>
+          </div>
+        </div>
+
+        <div id="pluginHttpFields" style="display: none;">
+          <div class="form-group">
+            <label class="form-label" for="pluginUrlInput">MCP Server URL</label>
+            <input type="url" id="pluginUrlInput" class="form-input" placeholder="https://mcp.example.com/mcp" autocomplete="off" />
+          </div>
+        </div>
+
+        <div id="pluginDynamicFields"></div>
+
+        <div class="modal-footer">
+          <div class="modal-footer-msg" id="pluginModalStatusMsg"></div>
+          <div class="modal-footer-actions">
+            <button type="button" class="btn-sm ghost-sm" id="cancelPluginModalBtn">Cancel</button>
+            <button type="submit" class="btn-sm primary-sm" id="submitPluginConnectBtn">Connect Plugin</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- REFERENCE VIEWER MODAL -->
   <div class="modal-backdrop" id="refViewerModal" style="display: none;">
     <div class="modal-dialog ref-viewer-dialog" role="dialog" aria-modal="true">

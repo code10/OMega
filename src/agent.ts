@@ -20,6 +20,7 @@ import { createExecutionBackend } from './execution/remote.js';
 import { defaultTerminalManager } from './skills/terminal.js';
 import { disposeAllLspClients } from './skills/codeIntel.js';
 import { OMAuditLedger } from './audit.js';
+import { countTokens, estimateMessagesTokens, getModelContextLimit } from './tokenizer.js';
 import type {
   AgentActivityEntry,
   AgentHook,
@@ -81,6 +82,13 @@ export class OMAgent extends EventEmitter {
   _steeringQueue: string[];
   confirmCommand: ConfirmCommandHandler | null;
   usageStats: AgentUsageStats;
+  lastContextUsage: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    historyLength: number;
+    model: string;
+  } | null;
   audit: OMAuditLedger;
 
   static normalizeModel(model: string) {
@@ -138,6 +146,7 @@ export class OMAgent extends EventEmitter {
       totalTokens: 0,
       calls: 0
     };
+    this.lastContextUsage = null;
     this.audit = new OMAuditLedger(this.config.memoryDir, {
       ownerId: typeof (options as Record<string, unknown>).ownerId === 'string'
         ? String((options as Record<string, unknown>).ownerId)
@@ -379,6 +388,7 @@ export class OMAgent extends EventEmitter {
   reset() {
     this.history = [];
     this.answers = [];
+    this.lastContextUsage = null;
     this.sessionId = this.memory.getNextSessionId();
     return this;
   }
@@ -389,6 +399,7 @@ export class OMAgent extends EventEmitter {
   clearCurrentSession() {
     this.history = [];
     this.answers = [];
+    this.lastContextUsage = null;
     this.memory.saveSession(this.sessionId, {
       sessionId: this.sessionId,
       timestamp: new Date().toISOString(),
@@ -410,6 +421,7 @@ export class OMAgent extends EventEmitter {
     this.memory.clearAllSessions();
     this.history = [];
     this.answers = [];
+    this.lastContextUsage = null;
     this.sessionId = 'session_1';
     this._emitConfigUpdate();
     return {
@@ -428,6 +440,7 @@ export class OMAgent extends EventEmitter {
     this.sessionId = sessionId;
     this.history = data.history || [];
     this.answers = data.answers || [];
+    this.lastContextUsage = null;
     return data;
   }
 
@@ -487,7 +500,105 @@ export class OMAgent extends EventEmitter {
     this.usageStats.completionTokens += completion;
     this.usageStats.totalTokens += total;
     this.usageStats.calls += 1;
+    if (prompt > 0) {
+      this.lastContextUsage = {
+        promptTokens: prompt,
+        completionTokens: completion,
+        totalTokens: total,
+        historyLength: this.history.length,
+        model: this.config.model
+      };
+    }
     return { promptTokens: prompt, completionTokens: completion, totalTokens: total };
+  }
+
+  /**
+   * Compute accurate current context window occupancy using the latest provider-reported
+   * token usage when aligned with active history, falling back to the built-in BPE tokenizer
+   * over system prompt, tool schemas, and conversation history.
+   */
+  getContextUsage() {
+    const model = this.config.model || '';
+    const provider = this.config.provider || '';
+    const contextLimit =
+      Number(this.config.routing?.contextLimitTokens || 0) ||
+      getModelContextLimit(provider, model);
+
+    const history = Array.isArray(this.history) ? this.history : [];
+    const { estimatedTokens: historyTokens } = estimateMessagesTokens(history, '', model);
+
+    let systemTokens = 0;
+    let toolsTokens = 0;
+    try {
+      const sysPrompt = this.buildSystemPrompt();
+      systemTokens = sysPrompt ? countTokens(sysPrompt, model) + 4 : 0;
+    } catch (_) {
+      systemTokens = 0;
+    }
+    try {
+      const formattedTools = this.getFormattedTools();
+      toolsTokens = Array.isArray(formattedTools) && formattedTools.length > 0
+        ? countTokens(formattedTools, model)
+        : 0;
+    } catch (_) {
+      toolsTokens = 0;
+    }
+
+    const overheadTokens = systemTokens + toolsTokens;
+
+    if (history.length === 0) {
+      return {
+        usedTokens: 0,
+        contextLimit,
+        historyTokens: 0,
+        systemTokens,
+        toolsTokens,
+        overheadTokens,
+        lastPromptTokens: 0,
+        lastCompletionTokens: 0,
+        sessionTotalTokens: this.usageStats.totalTokens,
+        messageCount: 0,
+        source: 'idle' as const
+      };
+    }
+
+    const last = this.lastContextUsage;
+    const providerAligned =
+      Boolean(last) &&
+      (last?.promptTokens || 0) > 0 &&
+      last?.model === model &&
+      Math.abs(history.length - (last?.historyLength ?? -99)) <= 2;
+
+    if (providerAligned && last) {
+      const usedTokens = last.promptTokens + last.completionTokens;
+      return {
+        usedTokens,
+        contextLimit,
+        historyTokens,
+        systemTokens,
+        toolsTokens,
+        overheadTokens,
+        lastPromptTokens: last.promptTokens,
+        lastCompletionTokens: last.completionTokens,
+        sessionTotalTokens: this.usageStats.totalTokens,
+        messageCount: history.length,
+        source: 'provider' as const
+      };
+    }
+
+    return {
+      usedTokens: historyTokens + overheadTokens,
+      contextLimit,
+      historyTokens,
+      systemTokens,
+      toolsTokens,
+      overheadTokens,
+      lastPromptTokens: last?.promptTokens || 0,
+      lastCompletionTokens: last?.completionTokens || 0,
+      sessionTotalTokens: this.usageStats.totalTokens,
+      messageCount: history.length,
+      source: 'bpe' as const
+    };
   }
 
   use(hookObj: AgentHook) {

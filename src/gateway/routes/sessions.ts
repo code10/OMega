@@ -104,13 +104,21 @@ export async function handleSessionRoutes(ctx: SessionRouteContext): Promise<boo
   // POST /api/reset
   if (pathname === '/api/reset' && req.method === 'POST') {
     agent.reset();
-    sendJson(res, 200, { success: true, sessionId: agent.sessionId });
+    sendJson(res, 200, {
+      success: true,
+      sessionId: agent.sessionId,
+      contextUsage: typeof agent.getContextUsage === 'function' ? agent.getContextUsage() : undefined
+    });
     return true;
   }
 
   // POST /api/clear or POST /api/sessions/clear
   if ((pathname === '/api/clear' || pathname === '/api/sessions/clear') && req.method === 'POST') {
-    sendJson(res, 200, agent.clearCurrentSession());
+    const cleared = agent.clearCurrentSession();
+    sendJson(res, 200, {
+      ...cleared,
+      contextUsage: typeof agent.getContextUsage === 'function' ? agent.getContextUsage() : undefined
+    });
     return true;
   }
 
@@ -178,7 +186,12 @@ export async function handleSessionRoutes(ctx: SessionRouteContext): Promise<boo
     }
     try {
       const sessionData = enrichPersistentSession(agent.resumeSession(sessionId), sessionId, agentManager);
-      sendJson(res, 200, { success: true, sessionId: agent.sessionId, session: sessionData });
+      sendJson(res, 200, {
+        success: true,
+        sessionId: agent.sessionId,
+        session: sessionData,
+        contextUsage: typeof agent.getContextUsage === 'function' ? agent.getContextUsage() : undefined
+      });
     } catch (err: any) {
       sendJson(res, 400, { error: err.message });
     }
@@ -188,7 +201,11 @@ export async function handleSessionRoutes(ctx: SessionRouteContext): Promise<boo
   // POST /api/sessions/reset-counter or /api/sessions/clear-all
   if ((pathname === '/api/sessions/reset-counter' || pathname === '/api/sessions/clear-all') && req.method === 'POST') {
     try {
-      sendJson(res, 200, agent.resetSessionCounter());
+      const resetRes = agent.resetSessionCounter();
+      sendJson(res, 200, {
+        ...resetRes,
+        contextUsage: typeof agent.getContextUsage === 'function' ? agent.getContextUsage() : undefined
+      });
     } catch (err: any) {
       sendJson(res, 500, { success: false, error: err.message });
     }

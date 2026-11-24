@@ -16,6 +16,8 @@ import { handleConfigRoutes } from './routes/config.js';
 import { AgentManager } from './agentManager.js';
 import { handleAgentsRoutes } from './routes/agents.js';
 import { handleDaemonRoutes } from './routes/daemon.js';
+import { PluginManager } from '../plugins.js';
+import { handlePluginRoutes } from './routes/plugins.js';
 import {
   authenticateRequest,
   getRequiredRole,
@@ -46,6 +48,8 @@ export async function startGateway(options: Record<string, any> = {}) {
   const sessionManager = new SessionManager(agent);
   const sseClients = new Set<{ res: http.ServerResponse; ownerId: string }>();
   const daemon = new OMDaemon(agent).loadFromConfig(config);
+  const pluginManager = new PluginManager(config.memoryDir);
+  pluginManager.syncInitialState(agent);
 
   const isLocalHostBind = host === '127.0.0.1' || host === 'localhost' || host === '::1';
   const persistConfig = options.persistConfig ?? (path.resolve(config.workspaceDir) === path.resolve(config.rootDir));
@@ -256,6 +260,7 @@ export async function startGateway(options: Record<string, any> = {}) {
         vectorStats: reqAgent.memory.getVectorStats(),
         routingStats: reqAgent.router?.getStats(),
         usageStats: reqAgent.usageStats,
+        contextUsage: typeof reqAgent.getContextUsage === 'function' ? reqAgent.getContextUsage() : undefined,
         authMode: authConfig.mode || 'local',
         user: authUser,
         timestamp: new Date().toISOString()
@@ -304,6 +309,9 @@ export async function startGateway(options: Record<string, any> = {}) {
 
     // 3c. Agents Routes (/api/agents*)
     if (await handleAgentsRoutes({ req, res, pathname, agentManager: reqAgentManager, sessionManager: reqSessionManager })) return;
+
+    // 3c-2. Plugins Routes (/api/plugins*)
+    if (await handlePluginRoutes({ req, res, pathname, agent: reqAgent, pluginManager })) return;
 
     // 3d. GET /api/activity (Live activity trace history & router stats)
     if (pathname === '/api/activity' && req.method === 'GET') {
@@ -390,7 +398,14 @@ export async function startGateway(options: Record<string, any> = {}) {
             stream: true
           });
           finished = true;
-          sendEvent('done', result);
+          const donePayload =
+            result && typeof result === 'object'
+              ? {
+                  ...result,
+                  contextUsage: typeof sessionAgent.getContextUsage === 'function' ? sessionAgent.getContextUsage() : undefined
+                }
+              : result;
+          sendEvent('done', donePayload);
         } catch (err: any) {
           finished = true;
           sendEvent('error', { error: err.message });

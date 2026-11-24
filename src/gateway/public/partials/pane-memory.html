@@ -16,8 +16,9 @@
               </div>
               <div class="vector-search-bar-row">
                 <input type="text" id="vectorSearchInput" class="param-input vector-search-input"
+                  aria-label="Search semantic memory"
                   placeholder="Search concepts semantically (e.g. 'preferred coding language', 'API architecture')..." />
-                <select id="vectorSearchMode" class="param-select" style="width: 140px;">
+                <select id="vectorSearchMode" class="param-select" style="width: 140px;" aria-label="Memory search mode">
                   <option value="hybrid">Hybrid (Vector + Keyword)</option>
                   <option value="semantic">Pure Semantic Vector</option>
                   <option value="exact">Exact Substring</option>
@@ -38,7 +39,8 @@
                   </div>
                   <button class="btn-sm primary-sm" id="saveMemoryBtn">Save Changes</button>
                 </div>
-                <textarea id="longTermMemoryEditor" class="memory-editor" spellcheck="false"></textarea>
+                <textarea id="longTermMemoryEditor" class="memory-editor" spellcheck="false"
+                  aria-label="Long-term memory markdown editor"></textarea>
               </div>
 
               <div class="memory-card">

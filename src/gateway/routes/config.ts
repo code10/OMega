@@ -47,7 +47,8 @@ export async function handleConfigRoutes(ctx: ConfigRouteContext): Promise<boole
         skillsCount: Array.isArray(agent.skills?.list?.()) ? agent.skills.list().length : undefined,
         sessionId: agent.sessionId,
         memoryDir: agent.config.memoryDir,
-        workspaceDir: agent.config.workspaceDir
+        workspaceDir: agent.config.workspaceDir,
+        contextUsage: typeof agent.getContextUsage === 'function' ? agent.getContextUsage() : undefined
       });
     } catch (err: any) {
       sendJson(res, 400, { error: err.message });
