@@ -81,10 +81,12 @@ export class OMGitManager {
     const branch = this.getCurrentBranch();
     const raw = this._exec(['status', '--porcelain']);
     const files = raw
-      ? raw.split(/\r?\n/).filter(Boolean).map((line) => ({
-          status: line.slice(0, 2).trim(),
-          path: line.slice(3).trim()
-        }))
+      ? raw.split(/\r?\n/).filter(Boolean).map((line) => {
+          const m = /^\s*([MADRCU?!]{1,2})\s+(.+)$/.exec(line);
+          return m
+            ? { status: m[1].trim(), path: m[2].trim() }
+            : { status: line.slice(0, 2).trim(), path: line.slice(3).trim() };
+        })
       : [];
     return { branch, clean: files.length === 0, files };
   }
