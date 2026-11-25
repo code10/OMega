@@ -401,7 +401,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const {
     loadPlugins,
     closePluginsMenu,
-    closePluginConnectModal
+    closePluginConnectModal,
+    openPluginConnectModal,
+    togglePlugin,
+    disconnectPlugin,
+    quickConnectBuiltin,
+    getPluginsState
   } = initPlugins({
     skillsCountBadge,
     setServerContextUsage,
@@ -409,6 +414,13 @@ document.addEventListener('DOMContentLoaded', () => {
       closeModelDropdown();
       if (typeof closePlusMenu === 'function') closePlusMenu();
       if (typeof closeInlineSuggestions === 'function') closeInlineSuggestions();
+    },
+    onPluginsUpdated: (_state, fromMutation) => {
+      if (fromMutation) {
+        void fetchSkillsOnly();
+      } else {
+        renderSkillsView();
+      }
     }
   });
 
@@ -1634,16 +1646,240 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // --------------------------------------------------------------------------
-  // 8. SKILLS CATALOG & INTERACTIVE REFERENCE VIEWER
+  // 8. SKILLS CATALOG, MCP & PLUGINS, AND INTERACTIVE REFERENCE VIEWER
   // --------------------------------------------------------------------------
-  async function loadSkills() {
+  let cachedSkills: Array<Record<string, any>> = [];
+  let activeSkillsSubTab: 'user' | 'mcp' | 'builtin' = 'user';
+  let skillsSearchQuery = '';
+
+  const skillsCountUserEl = byId('skillsCountUser');
+  const skillsCountMcpEl = byId('skillsCountMcp');
+  const skillsCountBuiltinEl = byId('skillsCountBuiltin');
+  const skillsSearchInput = byId('skillsSearchInput') as HTMLInputElement | null;
+  const openConnectMcpFromSkillsBtn = byId('openConnectMcpFromSkillsBtn');
+
+  function classifySkillCategory(skill: Record<string, any>): 'user' | 'mcp' | 'builtin' {
+    if (skill.type === 'mcp' || skill.source === 'mcp') return 'mcp';
+    if (skill.type === 'workflow' || (skill.source && skill.source !== 'builtin')) return 'user';
+    return 'builtin';
+  }
+
+  function createSkillCardElement(skill: Record<string, any>): HTMLElement {
+    const card = document.createElement('div');
+    card.className = 'skill-card';
+    card.innerHTML = renderSkillCardHtml(skill as any);
+    card.querySelectorAll<HTMLElement>('.ref-pill-btn').forEach((btn) => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        openRefViewer(btn.dataset.skill || '', btn.dataset.ref || '');
+      });
+    });
+    return card;
+  }
+
+  function appendSkillsSection(container: HTMLElement, title: string, meta: string, items: Array<Record<string, any>>) {
+    const heading = document.createElement('div');
+    heading.className = 'skills-section-heading';
+    heading.innerHTML = `<h4>${escapeHtml(title)}</h4><span class="skills-section-meta">${escapeHtml(meta)}</span>`;
+    container.appendChild(heading);
+
+    const grid = document.createElement('div');
+    grid.className = 'skills-grid';
+    for (const skill of items) {
+      grid.appendChild(createSkillCardElement(skill));
+    }
+    container.appendChild(grid);
+  }
+
+  function renderSkillsView() {
+    if (!skillsList) return;
+    const q = skillsSearchQuery.trim().toLowerCase();
+    const matchesSearch = (name: string, desc = '') =>
+      !q || name.toLowerCase().includes(q) || desc.toLowerCase().includes(q);
+
+    const userSkills = cachedSkills.filter((s) => classifySkillCategory(s) === 'user');
+    const mcpSkills = cachedSkills.filter((s) => classifySkillCategory(s) === 'mcp');
+    const builtinSkills = cachedSkills.filter((s) => classifySkillCategory(s) === 'builtin');
+    const { connected: connectedPlugins, catalog: catalogPlugins } = getPluginsState();
+
+    if (skillsCountUserEl) skillsCountUserEl.textContent = String(userSkills.length);
+    if (skillsCountMcpEl) skillsCountMcpEl.textContent = String(connectedPlugins.length + mcpSkills.length);
+    if (skillsCountBuiltinEl) skillsCountBuiltinEl.textContent = String(builtinSkills.length);
+
+    skillsList.innerHTML = '';
+
+    if (activeSkillsSubTab === 'user') {
+      const filtered = userSkills.filter((s) => matchesSearch(s.name || '', s.description || ''));
+      if (filtered.length === 0) {
+        skillsList.innerHTML = `
+          <div class="skills-empty-box">
+            <div>${q ? `No user skills matching "${escapeHtml(skillsSearchQuery)}".` : 'No custom JS or SKILL.md skills found in your skills directory yet.'}</div>
+            ${!q ? `<button class="btn-sm primary-sm" type="button" id="emptyCreateSkillBtn">Create Your First Skill</button>` : ''}
+          </div>
+        `;
+        byId('emptyCreateSkillBtn')?.addEventListener('click', () => {
+          byId('openCreateSkillModalBtn')?.click();
+        });
+        return;
+      }
+
+      const jsSkills = filtered.filter((s) => s.type !== 'workflow');
+      const mdWorkflows = filtered.filter((s) => s.type === 'workflow');
+      if (mdWorkflows.length > 0) {
+        appendSkillsSection(skillsList, 'SKILL.md Workflows', `${mdWorkflows.length} workflow${mdWorkflows.length === 1 ? '' : 's'}`, mdWorkflows);
+      }
+      if (jsSkills.length > 0) {
+        appendSkillsSection(skillsList, 'Custom JS Skills', `${jsSkills.length} tool${jsSkills.length === 1 ? '' : 's'}`, jsSkills);
+      }
+      return;
+    }
+
+    if (activeSkillsSubTab === 'mcp') {
+      // 1. Connected MCP Servers & Plugins
+      const filteredConnected = connectedPlugins.filter((p) => matchesSearch(p.name, p.description));
+      const connHeading = document.createElement('div');
+      connHeading.className = 'skills-section-heading';
+      connHeading.innerHTML = `<h4>Connected MCP Servers &amp; Plugins</h4><span class="skills-section-meta">${filteredConnected.length} connected</span>`;
+      skillsList.appendChild(connHeading);
+
+      if (filteredConnected.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'skills-empty-box';
+        empty.innerHTML = `
+          <div>${q ? `No connected MCP servers matching "${escapeHtml(skillsSearchQuery)}".` : 'No MCP servers or plugins connected yet.'}</div>
+          <button class="btn-sm primary-sm" type="button" id="emptyConnectMcpBtn">Connect Custom MCP Server</button>
+        `;
+        skillsList.appendChild(empty);
+        empty.querySelector('#emptyConnectMcpBtn')?.addEventListener('click', () => openPluginConnectModal(null));
+      } else {
+        const serverGrid = document.createElement('div');
+        serverGrid.className = 'skills-grid';
+        for (const plugin of filteredConnected) {
+          const card = document.createElement('div');
+          card.className = `mcp-server-card ${plugin.status === 'connected' ? 'connected' : ''}`;
+          const statusLabel = plugin.status === 'connected'
+            ? `Connected · ${plugin.toolCount} tool${plugin.toolCount === 1 ? '' : 's'}`
+            : plugin.status === 'disabled'
+              ? 'Disabled'
+              : 'Offline';
+          card.innerHTML = `
+            <div class="mcp-server-card-top">
+              <span class="mcp-server-title">
+                <span class="mcp-status-dot ${escapeHtml(plugin.status)}"></span>
+                <span>${escapeHtml(plugin.name)}</span>
+              </span>
+              <span class="skill-tag mcp-tag">${escapeHtml(plugin.transport || plugin.kind)}</span>
+            </div>
+            <div class="skill-desc">${escapeHtml(plugin.description || '')}</div>
+            ${plugin.lastError ? `<div class="skill-desc" style="color:var(--accent-red);">${escapeHtml(plugin.lastError)}</div>` : ''}
+            <div class="mcp-server-actions">
+              <span class="skills-section-meta">${escapeHtml(statusLabel)}</span>
+              <div class="skills-header-actions">
+                <button class="btn-xs ghost-xs" type="button" data-mcp-toggle="${escapeHtml(plugin.id)}">${plugin.enabled ? 'Disable' : 'Enable'}</button>
+                <button class="btn-xs danger-xs" type="button" data-mcp-disconnect="${escapeHtml(plugin.id)}">Disconnect</button>
+              </div>
+            </div>
+          `;
+          card.querySelector('[data-mcp-toggle]')?.addEventListener('click', () => {
+            void togglePlugin(plugin.id, !plugin.enabled);
+          });
+          card.querySelector('[data-mcp-disconnect]')?.addEventListener('click', () => {
+            void disconnectPlugin(plugin.id);
+          });
+          serverGrid.appendChild(card);
+        }
+        skillsList.appendChild(serverGrid);
+      }
+
+      // 2. Registered MCP Tools
+      const filteredMcpTools = mcpSkills.filter((s) => matchesSearch(s.name || '', s.description || ''));
+      if (filteredMcpTools.length > 0) {
+        appendSkillsSection(skillsList, 'Registered MCP & Plugin Tools', `${filteredMcpTools.length} tool${filteredMcpTools.length === 1 ? '' : 's'}`, filteredMcpTools);
+      }
+
+      // 3. Available Quick-Connect Catalog
+      const connectedIds = new Set(connectedPlugins.map((p) => p.id));
+      const availableCatalog = catalogPlugins.filter((c) => !connectedIds.has(c.id) && matchesSearch(c.name, c.description));
+      if (availableCatalog.length > 0) {
+        const catHeading = document.createElement('div');
+        catHeading.className = 'skills-section-heading';
+        catHeading.innerHTML = `<h4>Available MCP &amp; Plugin Integrations</h4><span class="skills-section-meta">${availableCatalog.length} available</span>`;
+        skillsList.appendChild(catHeading);
+
+        const catGrid = document.createElement('div');
+        catGrid.className = 'skills-grid';
+        for (const entry of availableCatalog) {
+          const card = document.createElement('div');
+          card.className = 'mcp-server-card';
+          card.innerHTML = `
+            <div class="mcp-server-card-top">
+              <span class="mcp-server-title">${escapeHtml(entry.name)}</span>
+              <span class="skill-tag mcp-tag">${escapeHtml(entry.category || entry.kind)}</span>
+            </div>
+            <div class="skill-desc">${escapeHtml(entry.description || '')}</div>
+            <div class="mcp-server-actions">
+              <span class="skills-section-meta">${escapeHtml(entry.defaultTransport || entry.kind)}</span>
+              <button class="btn-xs primary-xs" type="button" data-mcp-connect="${escapeHtml(entry.id)}">Connect</button>
+            </div>
+          `;
+          card.querySelector('[data-mcp-connect]')?.addEventListener('click', () => {
+            if (entry.kind === 'builtin' && (!entry.fields || entry.fields.length === 0)) {
+              void quickConnectBuiltin(entry);
+            } else {
+              openPluginConnectModal(entry);
+            }
+          });
+          catGrid.appendChild(card);
+        }
+        skillsList.appendChild(catGrid);
+      }
+      return;
+    }
+
+    // Built-in Tools tab
+    const filteredBuiltin = builtinSkills.filter((s) => matchesSearch(s.name || '', s.description || ''));
+    if (filteredBuiltin.length === 0) {
+      skillsList.innerHTML = `<div class="skills-empty-box">No built-in tools matching "${escapeHtml(skillsSearchQuery)}".</div>`;
+      return;
+    }
+    appendSkillsSection(skillsList, 'Built-in Agent Tools', `${filteredBuiltin.length} tool${filteredBuiltin.length === 1 ? '' : 's'}`, filteredBuiltin);
+  }
+
+  document.querySelectorAll<HTMLButtonElement>('[data-skills-tab]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const next = btn.dataset.skillsTab as 'user' | 'mcp' | 'builtin';
+      if (!next) return;
+      activeSkillsSubTab = next;
+      document.querySelectorAll<HTMLButtonElement>('[data-skills-tab]').forEach((b) => {
+        const isActive = b.dataset.skillsTab === next;
+        b.classList.toggle('active', isActive);
+        b.setAttribute('aria-selected', String(isActive));
+      });
+      renderSkillsView();
+    });
+  });
+
+  if (skillsSearchInput) {
+    skillsSearchInput.addEventListener('input', () => {
+      skillsSearchQuery = skillsSearchInput.value || '';
+      renderSkillsView();
+    });
+  }
+
+  if (openConnectMcpFromSkillsBtn) {
+    openConnectMcpFromSkillsBtn.addEventListener('click', () => {
+      openPluginConnectModal(null);
+    });
+  }
+
+  async function fetchSkillsOnly() {
     if (!skillsList) return;
     try {
       const res = await fetch('/api/skills');
       const data = await res.json();
-      skillsList.innerHTML = '';
+      cachedSkills = Array.isArray(data.skills) ? data.skills : [];
 
-      for (const skill of data.skills || []) {
+      for (const skill of cachedSkills) {
         // Register workflow skills in inline suggestion actions
         if (skill.type === 'workflow') {
           const actionLabel = `/${skill.name}`;
@@ -1654,23 +1890,17 @@ document.addEventListener('DOMContentLoaded', () => {
             });
           }
         }
-
-        const card = document.createElement('div');
-        card.className = 'skill-card';
-        card.innerHTML = renderSkillCardHtml(skill);
-
-        card.querySelectorAll<HTMLElement>('.ref-pill-btn').forEach((btn) => {
-          btn.addEventListener('click', (ev) => {
-            ev.stopPropagation();
-            openRefViewer(btn.dataset.skill || '', btn.dataset.ref || '');
-          });
-        });
-
-        skillsList.appendChild(card);
       }
+
+      renderSkillsView();
     } catch (e: unknown) {
       skillsList.innerHTML = renderErrorMessage('Failed to load skills', e);
     }
+  }
+
+  async function loadSkills() {
+    if (!skillsList) return;
+    await Promise.all([fetchSkillsOnly(), loadPlugins()]);
   }
 
   // Global keybindings (Escape closes open modals)

@@ -43,6 +43,26 @@ const LSP_DIAG_SEVERITY: Record<number, string> = {
   4: 'hint'
 };
 
+async function resolveTscExecutable(rootDir: string): Promise<string | null> {
+  for (const reqBase of [path.join(rootDir, 'package.json'), import.meta.url]) {
+    try {
+      const req = createRequire(reqBase);
+      const tsPkgPath = req.resolve('typescript/package.json');
+      const getExe = path.join(path.dirname(tsPkgPath), 'lib', 'getExePath.js');
+      if (fs.existsSync(getExe)) {
+        const mod = await import(pathToFileURL(getExe).href);
+        const exe = typeof mod.default === 'function' ? mod.default() : null;
+        if (exe && fs.existsSync(exe)) {
+          return exe;
+        }
+      }
+    } catch {
+      // Try next resolution root
+    }
+  }
+  return null;
+}
+
 interface OpenFileState {
   version: number;
   mtimeMs: number;
@@ -73,37 +93,8 @@ class TSLspClient {
   }
 
   private async resolveTscCommand(): Promise<{ cmd: string; args: string[] } | null> {
-    try {
-      const req = createRequire(path.join(this.rootDir, 'package.json'));
-      const tsPkgPath = req.resolve('typescript/package.json');
-      const getExe = path.join(path.dirname(tsPkgPath), 'lib', 'getExePath.js');
-      if (fs.existsSync(getExe)) {
-        const mod = await import(pathToFileURL(getExe).href);
-        const exe = typeof mod.default === 'function' ? mod.default() : null;
-        if (exe && fs.existsSync(exe)) {
-          return { cmd: exe, args: ['--lsp', '--stdio'] };
-        }
-      }
-    } catch (_) {
-      // Try OMega's own node_modules
-    }
-
-    try {
-      const selfReq = createRequire(import.meta.url);
-      const tsPkgPath = selfReq.resolve('typescript/package.json');
-      const getExe = path.join(path.dirname(tsPkgPath), 'lib', 'getExePath.js');
-      if (fs.existsSync(getExe)) {
-        const mod = await import(pathToFileURL(getExe).href);
-        const exe = typeof mod.default === 'function' ? mod.default() : null;
-        if (exe && fs.existsSync(exe)) {
-          return { cmd: exe, args: ['--lsp', '--stdio'] };
-        }
-      }
-    } catch (_) {
-      // Not available
-    }
-
-    return null;
+    const exe = await resolveTscExecutable(this.rootDir);
+    return exe ? { cmd: exe, args: ['--lsp', '--stdio'] } : null;
   }
 
   async ensureStarted(): Promise<void> {
@@ -619,22 +610,7 @@ export const codeIntelSkills = [
       const workspaceDir = path.resolve(context.config?.workspaceDir || process.cwd());
       const backend = getExecutionBackend(context);
 
-      let tscExe: string | null = null;
-      for (const reqBase of [path.join(workspaceDir, 'package.json'), import.meta.url]) {
-        try {
-          const req = createRequire(reqBase);
-          const tsPkgPath = req.resolve('typescript/package.json');
-          const getExe = path.join(path.dirname(tsPkgPath), 'lib', 'getExePath.js');
-          if (fs.existsSync(getExe)) {
-            const mod = await import(pathToFileURL(getExe).href);
-            const exe = typeof mod.default === 'function' ? mod.default() : null;
-            if (exe && fs.existsSync(exe)) {
-              tscExe = exe;
-              break;
-            }
-          }
-        } catch (_) {}
-      }
+      const tscExe = await resolveTscExecutable(workspaceDir);
 
       if (!tscExe) {
         return { success: false, error: 'TypeScript compiler (tsc) is not available in this environment.' };

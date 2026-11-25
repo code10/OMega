@@ -2,19 +2,56 @@
           <div class="pane-content-padded">
             <div class="section-intro section-intro-with-action">
               <div>
-                <h3>Agent Skills</h3>
-                <p>Tools and workflows available to OM.</p>
+                <h3>Agent Skills &amp; MCP</h3>
+                <p>Manage your custom JS / SKILL.md skills, MCP servers &amp; plugins, and built-in tools.</p>
               </div>
-              <button class="btn-sm primary-sm" id="openCreateSkillModalBtn" type="button">
-                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"
-                  stroke-linecap="round" stroke-linejoin="round">
-                  <line x1="12" y1="5" x2="12" y2="19"></line>
-                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
-                <span>Create</span>
-              </button>
+              <div class="skills-header-actions">
+                <button class="btn-sm ghost-sm" id="openConnectMcpFromSkillsBtn" type="button">
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 22v-5"></path>
+                    <path d="M9 8V2"></path>
+                    <path d="M15 8V2"></path>
+                    <path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"></path>
+                  </svg>
+                  <span>Connect MCP</span>
+                </button>
+                <button class="btn-sm primary-sm" id="openCreateSkillModalBtn" type="button">
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                  </svg>
+                  <span>Create Skill</span>
+                </button>
+              </div>
             </div>
-            <div class="skills-grid" id="skillsList">
+
+            <div class="skills-toolbar">
+              <div class="skills-subtabs" role="tablist" aria-label="Skill categories">
+                <button class="skills-subtab active" type="button" role="tab" data-skills-tab="user" aria-selected="true">
+                  <span>User Skills</span>
+                  <span class="skills-subtab-count" id="skillsCountUser">0</span>
+                </button>
+                <button class="skills-subtab" type="button" role="tab" data-skills-tab="mcp" aria-selected="false">
+                  <span>MCP &amp; Plugins</span>
+                  <span class="skills-subtab-count" id="skillsCountMcp">0</span>
+                </button>
+                <button class="skills-subtab" type="button" role="tab" data-skills-tab="builtin" aria-selected="false">
+                  <span>Built-in Tools</span>
+                  <span class="skills-subtab-count" id="skillsCountBuiltin">0</span>
+                </button>
+              </div>
+              <input
+                type="search"
+                id="skillsSearchInput"
+                class="skills-search-input"
+                placeholder="Filter by name or description..."
+                autocomplete="off"
+              />
+            </div>
+
+            <div id="skillsList">
               <!-- Populated dynamically -->
             </div>
           </div>

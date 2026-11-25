@@ -561,8 +561,11 @@ export async function executeAgentRun(
           }
           effectiveArgs = (beforeToolCtx.args as Record<string, unknown>) || tc.args;
 
-          if ((tc.name === 'write_file' || tc.name === 'patch_file') && typeof effectiveArgs?.path === 'string') {
+          if ((tc.name === 'write_file' || tc.name === 'patch_file' || tc.name === 'delete_file') && typeof effectiveArgs?.path === 'string') {
             agent.snapshots.captureBeforeMutation(runId, effectiveArgs.path);
+          } else if (tc.name === 'move_file') {
+            if (typeof effectiveArgs?.from === 'string') agent.snapshots.captureBeforeMutation(runId, effectiveArgs.from);
+            if (typeof effectiveArgs?.to === 'string') agent.snapshots.captureBeforeMutation(runId, effectiveArgs.to);
           }
 
           result = await agent.skills.execute(tc.name, effectiveArgs, {

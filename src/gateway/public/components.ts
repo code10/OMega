@@ -88,6 +88,7 @@ export function renderErrorMessage(prefix: string, err: unknown, className = 'ac
 export interface SkillCardViewModel {
   name: string;
   type?: string;
+  source?: string;
   description?: string;
   references?: string[];
   parameters?: Record<string, unknown>;
@@ -95,6 +96,11 @@ export interface SkillCardViewModel {
 
 export function renderSkillCardHtml(skill: SkillCardViewModel): string {
   const isWorkflow = skill.type === 'workflow';
+  const isMcp = skill.type === 'mcp' || skill.source === 'mcp';
+  const isUserJs = !isWorkflow && !isMcp && skill.source && skill.source !== 'builtin';
+  const tagClass = isWorkflow ? 'workflow-tag' : isMcp ? 'mcp-tag' : isUserJs ? 'user-tag' : '';
+  const tagLabel = isWorkflow ? 'SKILL.md' : isMcp ? 'MCP' : isUserJs ? 'JS Skill' : 'Built-in';
+
   let refsHtml = '';
   if (skill.references && skill.references.length > 0) {
     const pillBtns = skill.references.map((ref) => (
@@ -109,7 +115,7 @@ export function renderSkillCardHtml(skill: SkillCardViewModel): string {
   return `
     <div class="skill-card-top">
       <span class="skill-title"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;margin-right:5px;"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polyline></svg>${escapeHtml(skill.name)}</span>
-      <span class="skill-tag ${isWorkflow ? 'workflow-tag' : ''}">${isWorkflow ? 'Workflow' : 'Tool'}</span>
+      <span class="skill-tag ${tagClass}">${tagLabel}</span>
     </div>
     <div class="skill-desc">${escapeHtml(skill.description || '')}</div>
     ${refsHtml}

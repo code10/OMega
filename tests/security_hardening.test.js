@@ -140,10 +140,9 @@ test('Hardening 3 & 6: SSRF blocks bracketed IPv6/IPv4-mapped and shell blocks g
 });
 
 test('Finding 3 & 4 & Hardening 5: Gateway rejects newline in /api/providers/keys, enforces approval owner, and gates fetch_page', async () => {
-  const cfg = loadConfig({});
-  assert.ok(cfg.security?.requireConfirmationForTools?.includes('fetch_page'));
-
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omega-gw-sec-'));
+  const cfg = loadConfig({ rootDir: tmpDir });
+  assert.ok(cfg.security?.requireConfirmationForTools?.includes('fetch_page'));
   const gw = await startGateway({
     port: 0,
     host: '127.0.0.1',

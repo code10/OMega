@@ -46,6 +46,7 @@ export interface PluginsDeps {
   skillsCountBadge: HTMLElement | null;
   setServerContextUsage: (usage: any) => void;
   closeOtherPopovers: () => void;
+  onPluginsUpdated?: (state: { connected: ConnectedPluginItem[]; catalog: PluginCatalogItem[] }, fromMutation: boolean) => void;
 }
 
 function getPluginIconSvg(icon: string, accentColor = 'currentColor'): string {
@@ -73,7 +74,7 @@ function getPluginIconSvg(icon: string, accentColor = 'currentColor'): string {
 }
 
 export function initPlugins(deps: PluginsDeps) {
-  const { skillsCountBadge, setServerContextUsage, closeOtherPopovers } = deps;
+  const { skillsCountBadge, setServerContextUsage, closeOtherPopovers, onPluginsUpdated } = deps;
 
   const pluginsWrap = document.getElementById('pluginsMenuWrap');
   const pluginsTriggerBtn = document.getElementById('pluginsTriggerBtn') as HTMLButtonElement | null;
@@ -108,7 +109,7 @@ export function initPlugins(deps: PluginsDeps) {
   let catalogPlugins: PluginCatalogItem[] = [];
   let activeCatalogTarget: PluginCatalogItem | null = null;
 
-  function applyServerSync(data: any) {
+  function applyServerSync(data: any, fromMutation = false) {
     if (Array.isArray(data?.connected)) connectedPlugins = data.connected;
     if (Array.isArray(data?.catalog)) catalogPlugins = data.catalog;
     if (skillsCountBadge && data?.skillsCount !== undefined) {
@@ -118,6 +119,7 @@ export function initPlugins(deps: PluginsDeps) {
       setServerContextUsage(data.contextUsage);
     }
     renderMenus();
+    onPluginsUpdated?.({ connected: connectedPlugins, catalog: catalogPlugins }, fromMutation);
   }
 
   function closePluginsMenu() {
@@ -232,7 +234,7 @@ export function initPlugins(deps: PluginsDeps) {
         body: JSON.stringify({ id, enabled })
       });
       const data = await res.json();
-      if (res.ok) applyServerSync(data);
+      if (res.ok) applyServerSync(data, true);
     } catch (_) {}
   }
 
@@ -244,7 +246,7 @@ export function initPlugins(deps: PluginsDeps) {
         body: JSON.stringify({ id })
       });
       const data = await res.json();
-      if (res.ok) applyServerSync(data);
+      if (res.ok) applyServerSync(data, true);
     } catch (_) {}
   }
 
@@ -256,7 +258,7 @@ export function initPlugins(deps: PluginsDeps) {
         body: JSON.stringify({ id: entry.id, name: entry.name })
       });
       const data = await res.json();
-      if (res.ok) applyServerSync(data);
+      if (res.ok) applyServerSync(data, true);
     } catch (_) {}
   }
 
@@ -464,7 +466,7 @@ export function initPlugins(deps: PluginsDeps) {
         if (!res.ok || !data.success) {
           throw new Error(data.error || 'Failed to connect plugin');
         }
-        applyServerSync(data);
+        applyServerSync(data, true);
         if (data.warning && pluginModalStatusMsg) {
           pluginModalStatusMsg.textContent = data.warning;
           pluginModalStatusMsg.className = 'modal-footer-msg';
@@ -486,6 +488,11 @@ export function initPlugins(deps: PluginsDeps) {
   return {
     loadPlugins,
     closePluginsMenu,
-    closePluginConnectModal
+    closePluginConnectModal,
+    openPluginConnectModal,
+    togglePlugin,
+    disconnectPlugin,
+    quickConnectBuiltin,
+    getPluginsState: () => ({ connected: connectedPlugins, catalog: catalogPlugins })
   };
 }

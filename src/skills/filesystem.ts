@@ -587,20 +587,32 @@ export const filesystemSkills = [
       required: ['from', 'to']
     },
     execute: async ({ from, to }: { from: string; to: string }, context: SkillContext = {}) => {
+      const backend = getExecutionBackend(context);
       let srcPath: string;
       let destPath: string;
       try {
         srcPath = resolveSafePath(from, context.config?.workspaceDir, context);
         destPath = resolveSafePath(to, context.config?.workspaceDir, context);
+        assertWritablePath(srcPath, context);
+        assertWritablePath(destPath, context);
       } catch (err: unknown) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
-      if (!fs.existsSync(srcPath)) {
+      if (!(await backend.exists(srcPath))) {
         return { success: false, error: `Source file not found: ${from}` };
       }
       try {
-        fs.mkdirSync(path.dirname(destPath), { recursive: true });
-        fs.renameSync(srcPath, destPath);
+        await backend.mkdir(path.dirname(destPath), { recursive: true });
+        if (backend.name === 'local') {
+          fs.renameSync(srcPath, destPath);
+        } else if (backend.copyFile && backend.unlink) {
+          await backend.copyFile(srcPath, destPath);
+          await backend.unlink(srcPath);
+        } else {
+          const content = await backend.readFile(srcPath, 'utf8');
+          await backend.writeFile(destPath, content, 'utf8');
+          if (backend.unlink) await backend.unlink(srcPath);
+        }
         return { success: true, from: srcPath, to: destPath, summary: `Moved ${from} -> ${to}` };
       } catch (err: unknown) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
@@ -618,17 +630,19 @@ export const filesystemSkills = [
       required: ['path']
     },
     execute: async ({ path: filePath }: { path: string }, context: SkillContext = {}) => {
+      const backend = getExecutionBackend(context);
       let target: string;
       try {
         target = resolveSafePath(filePath, context.config?.workspaceDir, context);
+        assertWritablePath(target, context);
       } catch (err: unknown) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };
       }
-      if (!fs.existsSync(target)) {
+      if (!(await backend.exists(target))) {
         return { success: false, error: `File not found: ${filePath}` };
       }
-      const stat = fs.statSync(target);
-      if (stat.isDirectory()) {
+      const stat = await backend.stat(target);
+      if (stat.isDirectory) {
         return { success: false, error: `Refusing to delete directory '${filePath}' with delete_file.` };
       }
 
@@ -647,7 +661,11 @@ export const filesystemSkills = [
       }
 
       try {
-        fs.unlinkSync(target);
+        if (backend.unlink) {
+          await backend.unlink(target);
+        } else {
+          fs.unlinkSync(target);
+        }
         return { success: true, path: target, summary: `Deleted ${filePath}` };
       } catch (err: unknown) {
         return { success: false, error: err instanceof Error ? err.message : String(err) };

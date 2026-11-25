@@ -293,6 +293,7 @@ export async function startGateway(options: Record<string, any> = {}) {
         description: s.description,
         parameters: s.parameters,
         type: s.type || 'function',
+        source: s.source || 'builtin',
         references: s.references || [],
         triggers: s.triggers || []
       }));

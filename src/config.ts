@@ -42,12 +42,11 @@ export function loadConfig(overrides: OMAgentOptions = {}): OMConfig {
   const cwdConfigPath = path.join(process.cwd(), 'om.config.json');
   const rootConfigPath = path.join(ROOT_DIR, 'om.config.json');
   const explicitRootConfigPath = overrides.rootDir ? path.join(path.resolve(overrides.rootDir), 'om.config.json') : null;
-  const configPath =
-    explicitRootConfigPath && fs.existsSync(explicitRootConfigPath)
-      ? explicitRootConfigPath
-      : fs.existsSync(cwdConfigPath)
-        ? cwdConfigPath
-        : rootConfigPath;
+  const configPath = explicitRootConfigPath
+    ? explicitRootConfigPath
+    : fs.existsSync(cwdConfigPath)
+      ? cwdConfigPath
+      : rootConfigPath;
   const configBaseDir = path.dirname(configPath);
   let fileConfig: Record<string, any> = {};
   if (fs.existsSync(configPath)) {

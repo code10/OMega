@@ -190,6 +190,36 @@ export function validateShellCommandPolicy(
   };
 }
 
+function formatProcessResult(res: {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+  outputTruncated?: boolean;
+  errorMessage?: string;
+  sandboxBackend?: string;
+}) {
+  const outStr = redactSecrets((res.stdout || '').trim());
+  const errStr = redactSecrets((res.stderr || '').trim());
+  if (res.errorMessage && !outStr && !errStr) {
+    return {
+      success: false,
+      exitCode: res.exitCode,
+      error: redactSecrets(res.errorMessage),
+      ...(res.sandboxBackend ? { sandboxBackend: res.sandboxBackend } : {})
+    };
+  }
+  return {
+    success: res.exitCode === 0 && !res.timedOut && !res.outputTruncated,
+    exitCode: res.exitCode,
+    stdout: outStr || '(no stdout output)',
+    stderr: errStr ? errStr : undefined,
+    timedOut: res.timedOut,
+    ...(res.outputTruncated ? { outputTruncated: true } : {}),
+    ...(res.sandboxBackend ? { sandboxBackend: res.sandboxBackend } : {})
+  };
+}
+
 /**
  * Shell execution skill
  */
@@ -290,36 +320,6 @@ export const shellSkills = [
       // Scrub child shell env via allowlist unless explicitly opted in
       const allowedEnvVars = Array.isArray(security.allowedEnvVars) ? security.allowedEnvVars : [];
       const childEnv = buildSafeChildEnv(process.env, {}, Boolean(security.inheritSensitiveEnv), allowedEnvVars);
-
-      const formatProcessResult = (res: {
-        exitCode: number;
-        stdout: string;
-        stderr: string;
-        timedOut: boolean;
-        outputTruncated?: boolean;
-        errorMessage?: string;
-        sandboxBackend?: string;
-      }) => {
-        const outStr = redactSecrets((res.stdout || '').trim());
-        const errStr = redactSecrets((res.stderr || '').trim());
-        if (res.errorMessage && !outStr && !errStr) {
-          return {
-            success: false,
-            exitCode: res.exitCode,
-            error: redactSecrets(res.errorMessage),
-            ...(res.sandboxBackend ? { sandboxBackend: res.sandboxBackend } : {})
-          };
-        }
-        return {
-          success: res.exitCode === 0 && !res.timedOut && !res.outputTruncated,
-          exitCode: res.exitCode,
-          stdout: outStr || '(no stdout output)',
-          stderr: errStr ? errStr : undefined,
-          timedOut: res.timedOut,
-          ...(res.outputTruncated ? { outputTruncated: true } : {}),
-          ...(res.sandboxBackend ? { sandboxBackend: res.sandboxBackend } : {})
-        };
-      };
 
       if (directExecutable) {
         try {
