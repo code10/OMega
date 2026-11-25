@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execSync, execFileSync } from 'node:child_process';
 import { OMAgent, OMEvalRunner, estimateCostUsd } from '../dist/index.js';
+import { loadEnv } from '../dist/config.js';
 
 function parseArgs(argv) {
   const opts = {
@@ -193,6 +194,7 @@ function buildMarkdownSummary(report, baselineDiff) {
 }
 
 async function main() {
+  loadEnv();
   const opts = parseArgs(process.argv.slice(2));
   if (opts.live && !hasLiveKey()) {
     console.error('Error: --live requires an LLM provider API key (GEMINI_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY, GLM_API_KEY) or local endpoint.');
@@ -242,8 +244,14 @@ async function main() {
 
       let res = null;
       let runError = null;
+      if (opts.live) {
+        process.stdout.write(`▶ [${cases.length + 1}/${tasks.length}] Running ${task.id}... `);
+      }
       try {
-        res = await agent.run(task.prompt, { maxSteps: task.maxSteps || 12 });
+        res = await agent.run(task.prompt, {
+          maxSteps: task.maxSteps || 12,
+          signal: AbortSignal.timeout(90000)
+        });
         activeProvider = res?.provider || agent.config.provider;
         activeModel = res?.model || agent.config.model;
       } catch (err) {
@@ -273,6 +281,9 @@ async function main() {
             : 'hidden_test_failure';
 
       const latencyMs = Date.now() - startedAt;
+      if (opts.live) {
+        console.log(`${passed ? '✅ PASS' : `❌ ${failureCategory}`} (${latencyMs}ms, ${res?.totalSteps ?? 0} steps${runError ? `, err: ${runError.slice(0, 120)}` : ''})`);
+      }
       const usage = res?.usage || { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
       const costUsd = opts.live ? estimateCostUsd(activeProvider, activeModel, usage) : 0;
       const usedTools = (res?.steps || []).flatMap((s) => (s.toolCalls || []).map((tc) => tc.name));
