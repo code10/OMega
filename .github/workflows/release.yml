@@ -17,14 +17,71 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Publish GitHub Release
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install, build, and pack tarball
+        run: |
+          npm ci
+          npm run build
+          npm pack
+
+      - name: Generate release notes
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          node -e '
+            const fs = require("fs");
+            const version = process.argv[1];
+            const changelog = fs.existsSync("CHANGELOG.md") ? fs.readFileSync("CHANGELOG.md", "utf8") : "";
+            const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const re = new RegExp(`## \\[${escaped}\\][^\\n]*\\n([\\s\\S]*?)(?=\\n## \\[|$)`);
+            const match = re.exec(changelog);
+            const section = match ? match[1].trim() : "";
+
+            const notes = [
+              `## OMega ${version}`,
+              "",
+              "**OMega** is a lightweight, local-first Node.js agent harness you control completely — running offline on your hardware or routed across cloud models, with human-in-the-loop approvals, isolated git worktrees, rollback snapshots, and Git-inspectable memory built in.",
+              "",
+              "### Quick Start",
+              "Requires **Node.js >= 20.19.0**:",
+              "```bash",
+              "git clone https://github.com/code10/OMega.git",
+              "cd OMega && npm install && npm run build",
+              "npm start          # Interactive CLI REPL (works offline with built-in om provider)",
+              "npm run gateway    # Web Dashboard at http://127.0.0.1:3000",
+              "```",
+              "",
+              section ? `### What\x27s in ${version}\n\n${section}` : "",
+              "",
+              "### Platform & Verification",
+              "- Verified on **Linux, macOS, and Windows** via GitHub Actions CI (`npm run build`, `npm run check:types`, `npm run lint`, `npm test`).",
+              `- Pre-packed npm tarball attached below (\`omega-agent-${version}.tgz\`).`
+            ].filter((line, idx, arr) => !(line === "" && arr[idx - 1] === "")).join("\n") + "\n";
+
+            fs.writeFileSync("RELEASE_NOTES.md", notes, "utf8");
+          ' "$VERSION"
+
+      - name: Publish or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#v}"
+          TARBALL="$(ls omega-agent-*.tgz | head -n 1)"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "OMega ${VERSION}" --latest
+            gh release edit "$TAG" --title "OMega ${VERSION}" --notes-file RELEASE_NOTES.md --latest
+            if [ -n "$TARBALL" ]; then
+              gh release upload "$TAG" "$TARBALL" --clobber
+            fi
           else
-            gh release create "$TAG" --title "OMega ${VERSION}" --generate-notes --latest
+            if [ -n "$TARBALL" ]; then
+              gh release create "$TAG" "$TARBALL" --title "OMega ${VERSION}" --notes-file RELEASE_NOTES.md --latest
+            else
+              gh release create "$TAG" --title "OMega ${VERSION}" --notes-file RELEASE_NOTES.md --latest
+            fi
           fi
