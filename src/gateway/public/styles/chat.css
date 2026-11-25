@@ -1176,7 +1176,7 @@ body.light-theme .floating-input-box:focus-within,
 }
 
 .input-model-wrap {
-  min-width: 0;
+  min-width: 118px;
   flex: 0 1 auto;
 }
 
@@ -2442,21 +2442,19 @@ body.light-theme .send-circle-btn,
 }
 
 /* Container-Query Responsive Composer Tiers (adapts to sidebars & viewports automatically) */
-@container composer (max-width: 760px) {
-  .chat-mode-text {
+@container composer (max-width: 960px) {
+  .chat-compact-tool-btn .chat-tool-label {
     display: none;
   }
-  .chat-mode-btn {
+  .chat-compact-tool-btn {
     padding: 0 7px;
-  }
-  .input-model-selector-btn {
-    max-width: 165px;
+    gap: 4px;
   }
 }
 
-@container composer (max-width: 630px) {
+@container composer (max-width: 820px) {
   .chat-effort-trigger span,
-  .chat-worktree-btn span,
+  .chat-worktree-btn > span:not(.chat-plugins-count),
   .chat-plugins-label {
     display: none;
   }
@@ -2466,7 +2464,19 @@ body.light-theme .send-circle-btn,
     padding: 0 7px;
   }
   .input-model-selector-btn {
-    max-width: 145px;
+    max-width: 175px;
+  }
+}
+
+@container composer (max-width: 680px) {
+  .chat-mode-text {
+    display: none;
+  }
+  .chat-mode-btn {
+    padding: 0 7px;
+  }
+  .input-model-selector-btn {
+    max-width: 155px;
   }
 }
 
