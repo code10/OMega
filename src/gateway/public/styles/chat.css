@@ -2675,3 +2675,98 @@ body.light-theme .send-circle-btn,
 }
 
 
+
+/* Diff Review Slide-Over Drawer & Replay Arena */
+.diff-review-drawer {
+  width: 380px;
+  min-width: 320px;
+  background-color: var(--bg-surface);
+  border-left: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+}
+.diff-review-drawer.hidden {
+  display: none;
+}
+.diff-drawer-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 10px 12px;
+  gap: 10px;
+}
+.diff-files-list {
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.diff-file-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 5px 8px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+}
+.diff-file-select {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  cursor: pointer;
+  text-align: left;
+}
+.diff-file-status {
+  color: var(--accent-primary);
+  font-weight: 700;
+}
+.diff-file-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diff-code-view {
+  flex: 1;
+  margin: 0;
+  padding: 10px;
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  line-height: 1.45;
+  overflow: auto;
+  color: var(--text-secondary);
+}
+.diff-line-add {
+  color: #4ade80;
+}
+.diff-line-del {
+  color: #f87171;
+}
+.arena-results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+.arena-result-card {
+  background: var(--bg-base);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}

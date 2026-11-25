@@ -299,6 +299,30 @@
                         <span>Worktree</span>
                       </button>
 
+                      <!-- First-Class Plan Mode Toggle (Read-only Plan -> Approve -> Execute) -->
+                      <button type="button" class="chat-worktree-btn" id="planModeToggleBtn" aria-pressed="false"
+                        title="Plan Mode: read-only exploration to produce an approval plan before editing files">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                          stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <path d="M9 11l3 3L22 4"></path>
+                          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+                        </svg>
+                        <span>Plan</span>
+                      </button>
+
+                      <!-- Diff Review Drawer Trigger -->
+                      <button type="button" class="chat-worktree-btn" id="openDiffDrawerBtn"
+                        title="Inspect changed files and revert individual file diffs">
+                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor"
+                          stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                          <polyline points="14 2 14 8 20 8"></polyline>
+                          <line x1="9" y1="15" x2="15" y2="15"></line>
+                        </svg>
+                        <span>Diff</span>
+                        <span class="chat-plugins-count" id="diffFilesCountBadge" hidden>0</span>
+                      </button>
+
                       <!-- Plugins Switcher & Connect Catalog -->
                       <div class="chat-plugins-wrap" id="pluginsMenuWrap">
                         <button type="button" class="chat-plugins-btn" id="pluginsTriggerBtn"
@@ -403,6 +427,23 @@
                 </div>
               </div>
             </div>
+
+            <!-- DIFF REVIEW SLIDE-OVER DRAWER -->
+            <aside class="diff-review-drawer hidden" id="diffReviewDrawer" aria-label="Changed files diff review">
+              <div class="params-header">
+                <h3>Diff Review</h3>
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <button type="button" class="btn-xs ghost-xs" id="refreshDiffDrawerBtn">Refresh</button>
+                  <button type="button" class="params-close-btn" id="closeDiffDrawerBtn" aria-label="Close diff review">&times;</button>
+                </div>
+              </div>
+              <div class="diff-drawer-body">
+                <div class="diff-files-list" id="diffDrawerFilesList">
+                  <div class="activity-empty">No uncommitted changes.</div>
+                </div>
+                <pre class="diff-code-view" id="diffDrawerCodeView">Select a changed file to inspect its diff.</pre>
+              </div>
+            </aside>
 
             <!-- RIGHT SUB-SIDEBAR: Parameters & System Settings (LM Studio Inspector) -->
             <aside class="chat-params-sidebar" id="paramsSidebar">

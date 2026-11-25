@@ -76,5 +76,30 @@ export function handleSlashControl(agent: any, trimmedPrompt: string) {
     return completion;
   }
 
+  const planMatch = trimmedPrompt.match(/^\/plan(?:\s+(on|off))?$/i);
+  if (planMatch || trimmedPrompt.toLowerCase() === '/execute') {
+    const nextPlan = trimmedPrompt.toLowerCase() === '/execute'
+      ? false
+      : planMatch?.[1]
+        ? planMatch[1].toLowerCase() === 'on'
+        : !agent.config.planMode;
+    agent.config.planMode = nextPlan;
+    const msg = nextPlan
+      ? '**Plan Mode ON** (read-only exploration; no file mutations will be executed). Run `/execute` or `/plan off` when ready to implement.'
+      : '**Plan Mode OFF** — execution mode active. Tools can now edit files and run commands.';
+    const completion = {
+      content: msg,
+      answer: msg,
+      provider: agent.config.provider,
+      model: agent.config.model,
+      sessionId: agent.sessionId,
+      planMode: nextPlan,
+      steps: [],
+      success: true
+    };
+    agent.emit('done', completion);
+    return completion;
+  }
+
   return null;
 }

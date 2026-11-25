@@ -1,0 +1,83 @@
+name: SWE Coding Benchmark
+
+on:
+  schedule:
+    # Weekly Monday 06:00 UTC
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run mode (deterministic = free harness check, live = real LLM API)'
+        required: true
+        default: 'deterministic'
+        type: choice
+        options:
+          - deterministic
+          - live
+      provider:
+        description: 'Optional provider override (e.g. gemini, openai, anthropic, deepseek)'
+        required: false
+        default: ''
+      model:
+        description: 'Optional model override (e.g. gemini-3.5-flash, gpt-4o)'
+        required: false
+        default: ''
+      task:
+        description: 'Optional single task ID to run'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  swe-benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install and build
+        run: npm ci && npm run build
+
+      - name: Run SWE-style real-repo coding benchmark
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          ARGS="--markdown=benchmark-summary.md --report=benchmark-report.json"
+          if [ "${{ inputs.mode }}" = "live" ] || { [ "${{ github.event_name }}" = "schedule" ] && [ -n "$GEMINI_API_KEY$OPENAI_API_KEY$ANTHROPIC_API_KEY$DEEPSEEK_API_KEY" ]; }; then
+            ARGS="$ARGS --live"
+          fi
+          if [ -n "${{ inputs.provider }}" ]; then
+            ARGS="$ARGS --provider=${{ inputs.provider }}"
+          fi
+          if [ -n "${{ inputs.model }}" ]; then
+            ARGS="$ARGS --model=${{ inputs.model }}"
+          fi
+          if [ -n "${{ inputs.task }}" ]; then
+            ARGS="$ARGS --task=${{ inputs.task }}"
+          fi
+          if [ -f "benchmarks/baseline.json" ] && [ "${{ inputs.mode }}" != "live" ]; then
+            ARGS="$ARGS --baseline=benchmarks/baseline.json"
+          fi
+          node scripts/run-benchmark.js $ARGS
+
+      - name: Publish Job Summary
+        if: always() && hashFiles('benchmark-summary.md') != ''
+        run: cat benchmark-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Benchmark Report Artifact
+        if: always() && hashFiles('benchmark-report.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: swe-benchmark-report
+          path: |
+            benchmark-report.json
+            benchmark-summary.md

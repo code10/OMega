@@ -1,3 +1,4 @@
+import os from 'node:os';
 import { createProvider } from '../providers/index.js';
 import { compactHistory } from './compaction.js';
 import { OMSelfHealer, type SelfHealResult } from '../selfHeal.js';
@@ -9,7 +10,7 @@ import {
   type CheckpointBudgets,
   type CheckpointStatus
 } from './checkpoint.js';
-import { redactSecrets } from '../utils/redact.js';
+import { buildSafeChildEnv, redactSecrets } from '../utils/redact.js';
 import type { OMAgent } from '../agent.js';
 import type { AgentRunOptions, AgentRunResult, ChatMessage, SkillResult, ToolCall } from '../types.js';
 
@@ -101,12 +102,33 @@ export async function executeAgentRun(
   }
 
   const seenToolSignatures = new Map();
+  const mutatedFiles = new Set<string>();
+  const isPlanMode = Boolean((options as Record<string, any>).planMode ?? agent.config.planMode);
+  const verificationCfg = {
+    ...agent.config.verification,
+    ...(options as Record<string, any>).verification
+  };
+  const verificationCommands: string[] = Array.isArray(verificationCfg.onCodeEdit)
+    ? verificationCfg.onCodeEdit.filter((c: unknown): c is string => typeof c === 'string' && c.trim().length > 0)
+    : [];
+  const verificationEnabled = verificationCfg.enabled !== false && verificationCommands.length > 0 && !isPlanMode;
+  const maxVerificationRetries = Math.max(0, Number(verificationCfg.maxRetries ?? 2));
+  const verificationTimeoutMs = Math.max(5000, Number(verificationCfg.timeoutMs ?? 120000));
+  let verificationAttempts = 0;
+  let lastVerificationSummary: { passed: boolean; attempts: number; results: Array<{ command: string; exitCode: number; output: string }> } | null = null;
+
   let activeTools = agent.getFormattedTools();
+  if (isPlanMode) {
+    const MUTATING_TOOLS = new Set(['write_file', 'patch_file', 'delete_file', 'move_file', 'exec_command', 'terminal_start', 'terminal_write', 'desktop_click', 'desktop_type', 'desktop_hotkey']);
+    activeTools = activeTools.filter((t: any) => !MUTATING_TOOLS.has(t.name || t.function?.name));
+  }
   if (agent.systemOne?.isConfigured() && effectivePrompt) {
     activeTools = await agent.systemOne.shortlistTools(effectivePrompt, activeTools, undefined, { maxWaitMs: 150 });
   }
   const initialPromptParts = agent.buildPromptParts({ query: effectivePrompt });
-  let systemPrompt = initialPromptParts.staticSystemPrompt;
+  let systemPrompt = isPlanMode
+    ? `${initialPromptParts.staticSystemPrompt}\n\n[PLAN MODE ACTIVE — READ-ONLY]\nYou are in Plan Mode. Inspect the codebase using read-only tools only, do NOT modify files, and produce a clear, numbered implementation plan listing exact files to edit, key changes, and verification steps. Wait for user approval before execution.`
+    : initialPromptParts.staticSystemPrompt;
   let dynamicContext = initialPromptParts.dynamicContext;
   let promptNeedsRefresh = false;
   const runUsage: { promptTokens: number; completionTokens: number; totalTokens: number } = resumeCp?.usage
@@ -467,6 +489,62 @@ export async function executeAgentRun(
 
       // Final synthesis when no tool calls remain
       if (toolCalls.length === 0) {
+        // Deterministic Post-Edit Verification Gate: run configured checks before allowing completion
+        if (verificationEnabled && mutatedFiles.size > 0 && verificationAttempts <= maxVerificationRetries) {
+          verificationAttempts++;
+          const shell = os.platform() === 'win32' ? 'powershell.exe' : '/bin/bash';
+          const verifyEnv = buildSafeChildEnv(process.env);
+          const verifyResults: Array<{ command: string; exitCode: number; output: string }> = [];
+          let allPassed = true;
+
+          agent.emit('verification_start', {
+            step: currentStep,
+            attempt: verificationAttempts,
+            commands: verificationCommands,
+            mutatedFiles: Array.from(mutatedFiles)
+          });
+          agent._recordActivity('verification_start', {
+            step: currentStep,
+            attempt: verificationAttempts,
+            commands: verificationCommands
+          });
+
+          for (const cmd of verificationCommands) {
+            const execRes = await agent.execution.exec(cmd, {
+              cwd: agent.config.workspaceDir || process.cwd(),
+              shell,
+              env: verifyEnv,
+              timeoutMs: verificationTimeoutMs
+            });
+            const combinedOut = redactSecrets([execRes.stdout, execRes.stderr].filter(Boolean).join('\n').trim()).slice(0, 4000);
+            verifyResults.push({ command: cmd, exitCode: execRes.exitCode, output: combinedOut });
+            if (execRes.exitCode !== 0 || execRes.timedOut) {
+              allPassed = false;
+              break;
+            }
+          }
+
+          lastVerificationSummary = { passed: allPassed, attempts: verificationAttempts, results: verifyResults };
+          agent.emit('verification_result', { step: currentStep, ...lastVerificationSummary });
+          agent._recordActivity('verification_result', { step: currentStep, ...lastVerificationSummary });
+
+          if (!allPassed && verificationAttempts <= maxVerificationRetries) {
+            const failed = verifyResults[verifyResults.length - 1];
+            agent.history.push({
+              role: 'assistant',
+              content: cleanThought || '(Attempting to conclude after edits)',
+              provider: activeTurnProvider,
+              model: activeTurnModel,
+              timestamp: new Date().toISOString()
+            });
+            agent.history.push({
+              role: 'user',
+              content: `[OM Verification Gate Failed — Attempt ${verificationAttempts}/${maxVerificationRetries}]\nCommand \`${failed.command}\` exited with code ${failed.exitCode}.\nOutput:\n${failed.output || '(no output)'}\n\nFix the issue and re-verify before concluding.`
+            });
+            continue;
+          }
+        }
+
         finalAnswer = cleanThought || '(Agent completed task with no verbal output)';
         if (currentStep > 1 && cleanThought) {
           const synthPayload = { step: currentStep, content: 'Synthesizing final response.', provider: activeTurnProvider, model: activeTurnModel };
@@ -693,6 +771,14 @@ export async function executeAgentRun(
         if (tc.name === 'save_memory' || tc.name === 'index_knowledge') {
           promptNeedsRefresh = true;
         }
+        if (result?.success !== false) {
+          if ((tc.name === 'write_file' || tc.name === 'patch_file' || tc.name === 'delete_file') && typeof tc.args?.path === 'string') {
+            mutatedFiles.add(tc.args.path);
+          } else if (tc.name === 'move_file') {
+            if (typeof tc.args?.from === 'string') mutatedFiles.add(tc.args.from);
+            if (typeof tc.args?.to === 'string') mutatedFiles.add(tc.args.to);
+          }
+        }
 
         const toolEndPayload = {
           id: tc.id,
@@ -844,6 +930,8 @@ export async function executeAgentRun(
       selfHealed: healEvents.length > 0,
       healEvents,
       ...(worktreeResult ? { worktree: worktreeResult } : {}),
+      ...(lastVerificationSummary ? { verification: lastVerificationSummary } : {}),
+      ...(isPlanMode ? { planMode: true } : {}),
       answers: agent.answers,
       steps,
       totalSteps: currentStep,

@@ -89,5 +89,89 @@ export async function handlePluginRoutes(ctx: PluginRouteContext): Promise<boole
     return true;
   }
 
+  // GET /api/mcp/resources (List MCP resources across all connected MCP servers)
+  if (pathname === '/api/mcp/resources' && req.method === 'GET') {
+    const resources: Array<Record<string, unknown>> = [];
+    const clients: Map<string, any> = agent?.mcpManager?.clients instanceof Map ? agent.mcpManager.clients : new Map();
+    for (const [serverName, client] of clients.entries()) {
+      try {
+        const list = await client.listResources();
+        for (const r of list || []) {
+          resources.push({ server: serverName, uri: r.uri, name: r.name || r.uri, description: r.description || '', mimeType: r.mimeType });
+        }
+      } catch {
+        // Server may not implement resources/list
+      }
+    }
+    sendJson(res, 200, { success: true, count: resources.length, resources });
+    return true;
+  }
+
+  // POST /api/mcp/resources/read (Read a specific MCP resource URI for @-mention attachment)
+  if (pathname === '/api/mcp/resources/read' && req.method === 'POST') {
+    const body = await readJsonBody(req, res);
+    if (!body) return true;
+    const serverName = String(body.server || '').trim();
+    const uri = String(body.uri || '').trim();
+    if (!serverName || !uri) {
+      sendJson(res, 400, { success: false, error: 'server and uri are required' });
+      return true;
+    }
+    const client = agent?.mcpManager?.clients?.get?.(serverName);
+    if (!client) {
+      sendJson(res, 404, { success: false, error: `MCP server '${serverName}' is not connected` });
+      return true;
+    }
+    try {
+      const result = await client.readResource(uri);
+      sendJson(res, 200, { success: true, server: serverName, uri, result });
+    } catch (err: any) {
+      sendJson(res, 400, { success: false, error: err?.message || String(err) });
+    }
+    return true;
+  }
+
+  // GET /api/mcp/prompts (List MCP prompts across all connected MCP servers for / slash commands)
+  if (pathname === '/api/mcp/prompts' && req.method === 'GET') {
+    const prompts: Array<Record<string, unknown>> = [];
+    const clients: Map<string, any> = agent?.mcpManager?.clients instanceof Map ? agent.mcpManager.clients : new Map();
+    for (const [serverName, client] of clients.entries()) {
+      try {
+        const list = await client.listPrompts();
+        for (const p of list || []) {
+          prompts.push({ server: serverName, name: p.name, description: p.description || '', arguments: p.arguments || [] });
+        }
+      } catch {
+        // Server may not implement prompts/list
+      }
+    }
+    sendJson(res, 200, { success: true, count: prompts.length, prompts });
+    return true;
+  }
+
+  // POST /api/mcp/prompts/get (Expand an MCP prompt)
+  if (pathname === '/api/mcp/prompts/get' && req.method === 'POST') {
+    const body = await readJsonBody(req, res);
+    if (!body) return true;
+    const serverName = String(body.server || '').trim();
+    const name = String(body.name || '').trim();
+    if (!serverName || !name) {
+      sendJson(res, 400, { success: false, error: 'server and name are required' });
+      return true;
+    }
+    const client = agent?.mcpManager?.clients?.get?.(serverName);
+    if (!client) {
+      sendJson(res, 404, { success: false, error: `MCP server '${serverName}' is not connected` });
+      return true;
+    }
+    try {
+      const result = await client.getPrompt(name, body.args || {});
+      sendJson(res, 200, { success: true, server: serverName, name, result });
+    } catch (err: any) {
+      sendJson(res, 400, { success: false, error: err?.message || String(err) });
+    }
+    return true;
+  }
+
   return false;
 }

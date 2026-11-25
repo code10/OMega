@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import type http from 'node:http';
 import path from 'node:path';
 import { SessionReplay } from '../../replay.js';
@@ -61,6 +62,48 @@ export async function handleSessionRoutes(ctx: SessionRouteContext): Promise<boo
         overrideToolResult: data.overrideToolResult
       });
       sendJson(res, 200, { success: true, forkedSession: forked }, true);
+    } catch (err: any) {
+      sendJson(res, 400, { success: false, error: err.message });
+    }
+    return true;
+  }
+
+  // GET /api/sessions/:id/tape (Export portable SessionTape JSON)
+  const tapeMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/tape$/);
+  if (tapeMatch && req.method === 'GET') {
+    try {
+      const sourceId = decodeURIComponent(tapeMatch[1]);
+      const tape = SessionReplay.exportTape(agent.memory, sourceId);
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${sourceId}.tape.json"`);
+      res.writeHead(200);
+      res.end(JSON.stringify(tape, null, 2));
+    } catch (err: any) {
+      sendJson(res, 400, { success: false, error: err.message });
+    }
+    return true;
+  }
+
+  // POST /api/sessions/:id/save-eval (Pin session as deterministic regression test case)
+  const saveEvalMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/save-eval$/);
+  if (saveEvalMatch && req.method === 'POST') {
+    try {
+      const sourceId = decodeURIComponent(saveEvalMatch[1]);
+      const tape = SessionReplay.exportTape(agent.memory, sourceId);
+      const evalDir = path.join(path.resolve(agent.config.memoryDir || './memory'), 'evals');
+      fs.mkdirSync(evalDir, { recursive: true });
+      const tapePath = SessionReplay.saveTape(tape, path.join(evalDir, `${sourceId}.tape.json`));
+      const suitePath = path.join(evalDir, 'regression-suite.json');
+      const suite = fs.existsSync(suitePath)
+        ? JSON.parse(fs.readFileSync(suitePath, 'utf8'))
+        : { name: 'OMega Regression Suite', cases: [] };
+      const caseId = `regression_${sourceId}`;
+      const existingIdx = suite.cases.findIndex((c: any) => c.id === caseId);
+      const entry = { id: caseId, tapePath, maxStepsExpected: Math.max(1, (tape.turns?.length || 1) + 2) };
+      if (existingIdx >= 0) suite.cases[existingIdx] = entry;
+      else suite.cases.push(entry);
+      fs.writeFileSync(suitePath, JSON.stringify(suite, null, 2) + '\n', 'utf8');
+      sendJson(res, 200, { success: true, caseId, tapePath, suitePath, totalCases: suite.cases.length });
     } catch (err: any) {
       sendJson(res, 400, { success: false, error: err.message });
     }

@@ -35,6 +35,7 @@ export const CORE_CODING_TOOLS = [
   'list_dir',
   'exec_command',
   'get_diagnostics',
+  'repo_map',
   'git_status',
   'git_diff'
 ] as const;

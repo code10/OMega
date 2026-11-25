@@ -10,7 +10,7 @@
 [![Tests](https://img.shields.io/badge/tests-171%20passed-success.svg)](tests/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey.svg)](README.md)
 
-**OMega** is a lightweight, local-first agent harness you fully control | Running offline on your hardware or routed across cloud models, with human-in-the-loop approvals, isolated git worktrees, rollback snapshots, and Git-inspectable memory built in.
+**OMega** is a lightweight, local-first agent harness you fully control | Runs offline on your hardware or routed across cloud models, with human-in-the-loop approvals, isolated git worktrees, rollback snapshots, and Git-inspectable memory built in.
 
 ---
 

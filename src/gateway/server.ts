@@ -395,6 +395,7 @@ export async function startGateway(options: Record<string, any> = {}) {
             responseFormat,
             ...(parsedEffort ? { effort: parsedEffort } : {}),
             ...(useWorktree ? { worktree: true } : {}),
+            ...(data.planMode === true ? { planMode: true } : {}),
             signal: streamAbort.signal,
             stream: true
           });
@@ -459,6 +460,7 @@ export async function startGateway(options: Record<string, any> = {}) {
             responseFormat,
             ...(parsedEffort ? { effort: parsedEffort } : {}),
             ...(useWorktree ? { worktree: true } : {}),
+            ...(data.planMode === true ? { planMode: true } : {}),
             signal: chatAbort.signal
           });
         });

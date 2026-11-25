@@ -1,0 +1,153 @@
+{
+  "name": "OMega SWE-Style Real-Repo Coding Benchmark",
+  "executedAt": "2026-11-25T13:06:13.575Z",
+  "mode": "deterministic",
+  "targets": [
+    {
+      "provider": "gemini",
+      "model": "deterministic-harness",
+      "total": 6,
+      "passed": 6,
+      "passRate": 100,
+      "avgSteps": 2,
+      "avgLatencyMs": 1132,
+      "totalCostUsd": 0,
+      "cases": [
+        {
+          "id": "multi-file-auth-refactor",
+          "title": "Enforce token expiration and role checks across auth + middleware",
+          "category": "multi-file-refactor",
+          "mode": "deterministic",
+          "passed": true,
+          "publicPassed": true,
+          "hiddenPassed": true,
+          "failureCategory": "passed",
+          "latencyMs": 1327,
+          "steps": 2,
+          "usedTools": [
+            "write_file",
+            "write_file"
+          ],
+          "usage": {
+            "promptTokens": 350,
+            "completionTokens": 100,
+            "totalTokens": 450
+          },
+          "estimatedCostUsd": 0,
+          "error": null
+        },
+        {
+          "id": "lru-cache-eviction-bug",
+          "title": "Fix LRU recency update on get() and TTL expiration in cache",
+          "category": "data-structures",
+          "mode": "deterministic",
+          "passed": true,
+          "publicPassed": true,
+          "hiddenPassed": true,
+          "failureCategory": "passed",
+          "latencyMs": 1070,
+          "steps": 2,
+          "usedTools": [
+            "write_file"
+          ],
+          "usage": {
+            "promptTokens": 350,
+            "completionTokens": 100,
+            "totalTokens": 450
+          },
+          "estimatedCostUsd": 0,
+          "error": null
+        },
+        {
+          "id": "async-queue-concurrency",
+          "title": "Enforce maxConcurrency and preserve input order in async mapPool",
+          "category": "concurrency",
+          "mode": "deterministic",
+          "passed": true,
+          "publicPassed": true,
+          "hiddenPassed": true,
+          "failureCategory": "passed",
+          "latencyMs": 1162,
+          "steps": 2,
+          "usedTools": [
+            "write_file"
+          ],
+          "usage": {
+            "promptTokens": 350,
+            "completionTokens": 100,
+            "totalTokens": 450
+          },
+          "estimatedCostUsd": 0,
+          "error": null
+        },
+        {
+          "id": "csv-parser-quoted-fields",
+          "title": "Handle quoted commas, escaped quotes, and CRLF in CSV parser",
+          "category": "parsing",
+          "mode": "deterministic",
+          "passed": true,
+          "publicPassed": true,
+          "hiddenPassed": true,
+          "failureCategory": "passed",
+          "latencyMs": 990,
+          "steps": 2,
+          "usedTools": [
+            "write_file"
+          ],
+          "usage": {
+            "promptTokens": 350,
+            "completionTokens": 100,
+            "totalTokens": 450
+          },
+          "estimatedCostUsd": 0,
+          "error": null
+        },
+        {
+          "id": "deep-merge-prototype-pollution",
+          "title": "Prevent prototype pollution in deepMerge while preserving nested merge",
+          "category": "security",
+          "mode": "deterministic",
+          "passed": true,
+          "publicPassed": true,
+          "hiddenPassed": true,
+          "failureCategory": "passed",
+          "latencyMs": 1085,
+          "steps": 2,
+          "usedTools": [
+            "write_file"
+          ],
+          "usage": {
+            "promptTokens": 350,
+            "completionTokens": 100,
+            "totalTokens": 450
+          },
+          "estimatedCostUsd": 0,
+          "error": null
+        },
+        {
+          "id": "semver-comparator-prerelease",
+          "title": "Fix SemVer prerelease precedence across parse.js and compare.js",
+          "category": "multi-file-logic",
+          "mode": "deterministic",
+          "passed": true,
+          "publicPassed": true,
+          "hiddenPassed": true,
+          "failureCategory": "passed",
+          "latencyMs": 1157,
+          "steps": 2,
+          "usedTools": [
+            "write_file",
+            "write_file"
+          ],
+          "usage": {
+            "promptTokens": 350,
+            "completionTokens": 100,
+            "totalTokens": 450
+          },
+          "estimatedCostUsd": 0,
+          "error": null
+        }
+      ]
+    }
+  ]
+}

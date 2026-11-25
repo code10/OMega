@@ -118,6 +118,30 @@
               </div>
             </div>
 
+            <!-- Session Replay & Model Arena -->
+            <div class="specs-card" style="margin-top: 1.5rem;" id="replayArenaCard">
+              <div class="specs-card-header audit-card-header">
+                <h4>Session Replay &amp; Model Arena</h4>
+                <div class="audit-toolbar-controls">
+                  <select id="arenaSessionSelect" class="audit-filter-select" aria-label="Select session for replay">
+                    <option value="">Select a session...</option>
+                  </select>
+                  <button type="button" class="audit-refresh-btn" id="arenaExportTapeBtn">Export Tape</button>
+                  <button type="button" class="audit-refresh-btn" id="arenaReplayBtn">Replay Offline</button>
+                  <button type="button" class="audit-refresh-btn" id="arenaSaveEvalBtn">Save Regression Test</button>
+                </div>
+              </div>
+              <div class="arena-compare-bar" style="display:flex;gap:8px;flex-wrap:wrap;margin:0.85rem 0;">
+                <input type="text" id="arenaPromptInput" class="skills-search-input" style="max-width:none;flex:2;" placeholder="Enter a prompt to compare two models side-by-side..." />
+                <input type="text" id="arenaTargetA" class="skills-search-input" style="max-width:210px;" value="om/om-turbo" placeholder="provider/model A" />
+                <input type="text" id="arenaTargetB" class="skills-search-input" style="max-width:210px;" value="om/om-reasoning" placeholder="provider/model B" />
+                <button type="button" class="btn-sm primary-sm" id="arenaCompareBtn">Compare Models</button>
+              </div>
+              <div id="arenaResultsBox" class="sys-activity-timeline">
+                <div class="activity-empty">Export a session tape, replay deterministically offline, or compare two models side-by-side.</div>
+              </div>
+            </div>
+
             <div class="specs-card" style="margin-top: 1.5rem;">
               <div class="specs-card-header">
                 <h4>Visual Activity & Routing Telemetry</h4>

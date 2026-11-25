@@ -138,6 +138,14 @@ document.addEventListener('DOMContentLoaded', () => {
     ? Array.from(chatEffortToggle.querySelectorAll<HTMLButtonElement>('.chat-effort-btn'))
     : [];
   const worktreeToggleBtn = byId<HTMLButtonElement>('worktreeToggleBtn');
+  const planModeToggleBtn = byId<HTMLButtonElement>('planModeToggleBtn');
+  const openDiffDrawerBtn = byId<HTMLButtonElement>('openDiffDrawerBtn');
+  const diffFilesCountBadge = byId('diffFilesCountBadge');
+  const diffReviewDrawer = byId('diffReviewDrawer');
+  const closeDiffDrawerBtn = byId('closeDiffDrawerBtn');
+  const refreshDiffDrawerBtn = byId('refreshDiffDrawerBtn');
+  const diffDrawerFilesList = byId('diffDrawerFilesList');
+  const diffDrawerCodeView = byId('diffDrawerCodeView');
 
   // Model Usage Bar elements
   const modelUsageBar = byId('modelUsageBar');
@@ -333,7 +341,7 @@ document.addEventListener('DOMContentLoaded', () => {
       models: loadModels,
       skills: loadSkills,
       memory: loadMemory,
-      system: () => { loadStatus(); loadModels(); loadActivityHistory(); loadAuditLedger(); },
+      system: () => { loadStatus(); loadModels(); loadActivityHistory(); loadAuditLedger(); void loadArenaSessions(); },
       device: loadDeviceSpecs
     };
     tabLoaders[tab]?.();
@@ -791,6 +799,106 @@ document.addEventListener('DOMContentLoaded', () => {
       setWorktreeActive(!currentWorktree);
     });
   }
+
+  let currentPlanMode = localStorage.getItem('om_chat_plan_mode') === 'true';
+  function setPlanModeActive(active: boolean) {
+    currentPlanMode = active;
+    localStorage.setItem('om_chat_plan_mode', active ? 'true' : 'false');
+    if (planModeToggleBtn) {
+      planModeToggleBtn.classList.toggle('active', active);
+      planModeToggleBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
+  }
+  setPlanModeActive(currentPlanMode);
+  planModeToggleBtn?.addEventListener('click', () => setPlanModeActive(!currentPlanMode));
+
+  async function refreshDiffDrawer() {
+    if (!diffDrawerFilesList || !diffDrawerCodeView) return;
+    try {
+      const res = await fetch('/api/git/status');
+      const data = await res.json();
+      const files: Array<{ path: string; status: string }> = Array.isArray(data?.files)
+        ? data.files.map((f: any) => (typeof f === 'string' ? { path: f, status: 'M' } : { path: f.path || f.file || String(f), status: f.status || 'M' }))
+        : [
+            ...(Array.isArray(data?.modified) ? data.modified.map((p: string) => ({ path: p, status: 'M' })) : []),
+            ...(Array.isArray(data?.untracked) ? data.untracked.map((p: string) => ({ path: p, status: '?' })) : []),
+            ...(Array.isArray(data?.staged) ? data.staged.map((p: string) => ({ path: p, status: 'A' })) : [])
+          ];
+
+      if (diffFilesCountBadge) {
+        if (files.length > 0) {
+          diffFilesCountBadge.textContent = String(files.length);
+          diffFilesCountBadge.hidden = false;
+        } else {
+          diffFilesCountBadge.hidden = true;
+        }
+      }
+
+      if (!data?.isGitRepo) {
+        diffDrawerFilesList.innerHTML = `<div class="activity-empty">Workspace is not a Git repository.</div>`;
+        diffDrawerCodeView.textContent = '';
+        return;
+      }
+      if (files.length === 0) {
+        diffDrawerFilesList.innerHTML = `<div class="activity-empty">Working tree clean — no pending diffs.</div>`;
+        diffDrawerCodeView.textContent = '';
+        return;
+      }
+
+      diffDrawerFilesList.innerHTML = '';
+      for (const item of files) {
+        const row = document.createElement('div');
+        row.className = 'diff-file-item';
+        row.innerHTML = `
+          <button type="button" class="diff-file-select" title="${escapeHtml(item.path)}">
+            <span class="diff-file-status">${escapeHtml(item.status)}</span>
+            <span class="diff-file-path">${escapeHtml(item.path)}</span>
+          </button>
+          <button type="button" class="btn-xs danger-xs" data-revert-file="${escapeHtml(item.path)}">Revert</button>
+        `;
+        row.querySelector('.diff-file-select')?.addEventListener('click', async () => {
+          diffDrawerCodeView.textContent = 'Loading diff...';
+          try {
+            const dRes = await fetch(`/api/git/diff?file=${encodeURIComponent(item.path)}`);
+            const dData = await dRes.json();
+            const rawDiff = dData?.diff || '(No unstaged diff — file may be untracked or staged)';
+            diffDrawerCodeView.innerHTML = rawDiff
+              .split('\n')
+              .map((line: string) => {
+                const esc = escapeHtml(line);
+                if (line.startsWith('+') && !line.startsWith('+++')) return `<span class="diff-line-add">${esc}</span>`;
+                if (line.startsWith('-') && !line.startsWith('---')) return `<span class="diff-line-del">${esc}</span>`;
+                return esc;
+              })
+              .join('\n');
+          } catch (err) {
+            diffDrawerCodeView.textContent = `Error loading diff: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        });
+        row.querySelector('[data-revert-file]')?.addEventListener('click', async (ev) => {
+          ev.stopPropagation();
+          await fetch('/api/git/revert-file', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file: item.path })
+          });
+          await refreshDiffDrawer();
+        });
+        diffDrawerFilesList.appendChild(row);
+      }
+    } catch {
+      // ignore if offline
+    }
+  }
+
+  openDiffDrawerBtn?.addEventListener('click', () => {
+    if (!diffReviewDrawer) return;
+    const willOpen = diffReviewDrawer.classList.contains('hidden');
+    diffReviewDrawer.classList.toggle('hidden', !willOpen);
+    if (willOpen) void refreshDiffDrawer();
+  });
+  closeDiffDrawerBtn?.addEventListener('click', () => diffReviewDrawer?.classList.add('hidden'));
+  refreshDiffDrawerBtn?.addEventListener('click', () => void refreshDiffDrawer());
 
   const { loadParameters } = initParametersPanel({
     systemPromptInput,
@@ -1428,7 +1536,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const response = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: fullPrompt, effort: currentEffort, worktree: currentWorktree }),
+        body: JSON.stringify({ prompt: fullPrompt, effort: currentEffort, worktree: currentWorktree, planMode: currentPlanMode }),
         signal: activeStreamAbortController?.signal
       });
 
@@ -1714,10 +1822,10 @@ document.addEventListener('DOMContentLoaded', () => {
         skillsList.innerHTML = `
           <div class="skills-empty-box">
             <div>${q ? `No user skills matching "${escapeHtml(skillsSearchQuery)}".` : 'No custom JS or SKILL.md skills found in your skills directory yet.'}</div>
-            ${!q ? `<button class="btn-sm primary-sm" type="button" id="emptyCreateSkillBtn">Create Your First Skill</button>` : ''}
+            ${!q ? `<button class="btn-sm primary-sm" type="button" data-empty-create-skill="1">Create Your First Skill</button>` : ''}
           </div>
         `;
-        byId('emptyCreateSkillBtn')?.addEventListener('click', () => {
+        skillsList.querySelector('[data-empty-create-skill]')?.addEventListener('click', () => {
           byId('openCreateSkillModalBtn')?.click();
         });
         return;
@@ -1898,9 +2006,149 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  async function syncMcpResourcesAndPrompts() {
+    try {
+      const [resR, resP] = await Promise.all([fetch('/api/mcp/resources'), fetch('/api/mcp/prompts')]);
+      if (resP.ok) {
+        const pData = await resP.json();
+        for (const p of pData.prompts || []) {
+          const actionLabel = `/${p.server}:${p.name}`;
+          if (!ACTION_ITEMS.some((item) => item.label === actionLabel)) {
+            ACTION_ITEMS.push({
+              label: actionLabel,
+              desc: p.description || `Run MCP prompt ${p.name} from ${p.server}`
+            });
+          }
+        }
+      }
+      if (resR.ok) {
+        const rData = await resR.json();
+        for (const r of rData.resources || []) {
+          const mentionLabel = `@mcp:${r.server}/${r.name}`;
+          if (!MENTION_ITEMS.some((item) => item.label === mentionLabel)) {
+            MENTION_ITEMS.push({
+              label: mentionLabel,
+              desc: r.description || r.uri
+            });
+          }
+        }
+      }
+    } catch {
+      // MCP endpoints optional when offline
+    }
+  }
+
+  // Session Replay & Model Arena UI wiring
+  const arenaSessionSelect = byId<HTMLSelectElement>('arenaSessionSelect');
+  const arenaExportTapeBtn = byId('arenaExportTapeBtn');
+  const arenaReplayBtn = byId('arenaReplayBtn');
+  const arenaSaveEvalBtn = byId('arenaSaveEvalBtn');
+  const arenaPromptInput = byId<HTMLInputElement>('arenaPromptInput');
+  const arenaTargetA = byId<HTMLInputElement>('arenaTargetA');
+  const arenaTargetB = byId<HTMLInputElement>('arenaTargetB');
+  const arenaCompareBtn = byId<HTMLButtonElement>('arenaCompareBtn');
+  const arenaResultsBox = byId('arenaResultsBox');
+
+  async function loadArenaSessions() {
+    if (!arenaSessionSelect) return;
+    try {
+      const res = await fetch('/api/sessions');
+      const data = await res.json();
+      const prev = arenaSessionSelect.value;
+      arenaSessionSelect.innerHTML = `<option value="">Select a session...</option>`;
+      for (const s of data.sessions || []) {
+        const opt = document.createElement('option');
+        opt.value = s.sessionId;
+        opt.textContent = `${s.sessionId} — ${String(s.firstTask || '').slice(0, 48)}`;
+        arenaSessionSelect.appendChild(opt);
+      }
+      if (prev) arenaSessionSelect.value = prev;
+      else if (data.currentSessionId) arenaSessionSelect.value = data.currentSessionId;
+    } catch {
+      // ignore
+    }
+  }
+
+  arenaExportTapeBtn?.addEventListener('click', () => {
+    const sid = arenaSessionSelect?.value;
+    if (!sid) return;
+    window.open(`/api/sessions/${encodeURIComponent(sid)}/tape`, '_blank');
+  });
+
+  arenaReplayBtn?.addEventListener('click', async () => {
+    const sid = arenaSessionSelect?.value;
+    if (!sid || !arenaResultsBox) return;
+    arenaResultsBox.innerHTML = `<div class="activity-empty">Replaying ${escapeHtml(sid)} deterministically offline...</div>`;
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/replay`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mockTools: true })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Replay failed');
+      arenaResultsBox.innerHTML = `
+        <div class="arena-result-card">
+          <div><strong>Offline Replay (${escapeHtml(sid)})</strong> — ${data.replayedTurns || data.steps?.length || 0} steps</div>
+          <div class="skill-desc">${escapeHtml(String(data.content || data.answer || JSON.stringify(data)).slice(0, 800))}</div>
+        </div>
+      `;
+    } catch (err) {
+      arenaResultsBox.innerHTML = renderErrorMessage('Replay failed', err);
+    }
+  });
+
+  arenaSaveEvalBtn?.addEventListener('click', async () => {
+    const sid = arenaSessionSelect?.value;
+    if (!sid || !arenaResultsBox) return;
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/save-eval`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Save failed');
+      arenaResultsBox.innerHTML = `<div class="arena-result-card"><strong>Saved Regression Test:</strong> <code>${escapeHtml(data.caseId)}</code> (${data.totalCases} total cases in <code>${escapeHtml(data.suitePath)}</code>)</div>`;
+    } catch (err) {
+      arenaResultsBox.innerHTML = renderErrorMessage('Save regression test failed', err);
+    }
+  });
+
+  arenaCompareBtn?.addEventListener('click', async () => {
+    const promptVal = (arenaPromptInput?.value || '').trim();
+    if (!promptVal || !arenaResultsBox) return;
+    const parseTarget = (raw: string) => {
+      const [provider, ...rest] = raw.trim().split('/');
+      return { provider: provider || 'om', model: rest.join('/') || 'om-turbo' };
+    };
+    const targets = [parseTarget(arenaTargetA?.value || 'om/om-turbo'), parseTarget(arenaTargetB?.value || 'om/om-reasoning')];
+    arenaCompareBtn.disabled = true;
+    arenaResultsBox.innerHTML = `<div class="activity-empty">Running side-by-side model comparison...</div>`;
+    try {
+      const res = await fetch('/api/compare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: promptVal, targets })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Comparison failed');
+      const cards = (data.results || []).map((r: any) => `
+        <div class="arena-result-card">
+          <div class="mcp-server-card-top">
+            <strong>${escapeHtml(`${r.provider}/${r.model}`)}</strong>
+            <span class="skills-section-meta">${escapeHtml(`${r.durationMs || 0}ms · ${r.usage?.totalTokens || 0} tok`)}</span>
+          </div>
+          <div class="skill-desc">${escapeHtml(String(r.content || r.answer || r.error || '').slice(0, 700))}</div>
+        </div>
+      `).join('');
+      arenaResultsBox.innerHTML = `<div class="arena-results-grid">${cards}</div>`;
+    } catch (err) {
+      arenaResultsBox.innerHTML = renderErrorMessage('Model comparison failed', err);
+    } finally {
+      arenaCompareBtn.disabled = false;
+    }
+  });
+
   async function loadSkills() {
     if (!skillsList) return;
-    await Promise.all([fetchSkillsOnly(), loadPlugins()]);
+    await Promise.all([fetchSkillsOnly(), loadPlugins(), syncMcpResourcesAndPrompts()]);
   }
 
   // Global keybindings (Escape closes open modals)

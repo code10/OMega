@@ -321,10 +321,65 @@ export const filesystemSkills = [
         return count;
       };
 
+      const findNormalizedIndentMatches = (source: string, targetSnippet: string): Array<{ start: number; end: number; baseIndent: string }> => {
+        const srcLines = source.split('\n');
+        const tgtLines = targetSnippet.split('\n');
+        if (tgtLines.length === 0) return [];
+        const normTgt = tgtLines.map((l) => l.trim());
+        // Require at least one non-empty line to prevent vacuous matches
+        if (!normTgt.some((l) => l.length > 0)) return [];
+
+        const lineOffsets: number[] = [];
+        let offset = 0;
+        for (const l of srcLines) {
+          lineOffsets.push(offset);
+          offset += l.length + 1;
+        }
+
+        const matches: Array<{ start: number; end: number; baseIndent: string }> = [];
+        for (let i = 0; i <= srcLines.length - tgtLines.length; i++) {
+          let ok = true;
+          for (let j = 0; j < tgtLines.length; j++) {
+            if (srcLines[i + j].trim() !== normTgt[j]) {
+              ok = false;
+              break;
+            }
+          }
+          if (ok) {
+            const firstNonEmptyIdx = tgtLines.findIndex((l) => l.trim().length > 0);
+            const srcLine = srcLines[i + (firstNonEmptyIdx >= 0 ? firstNonEmptyIdx : 0)] || '';
+            const baseIndent = (srcLine.match(/^[\t ]*/) || [''])[0];
+            const start = lineOffsets[i];
+            const lastLineIdx = i + tgtLines.length - 1;
+            const end = lineOffsets[lastLineIdx] + srcLines[lastLineIdx].length;
+            matches.push({ start, end, baseIndent });
+          }
+        }
+        return matches;
+      };
+
+      const reindentReplacement = (replacement: string, targetSnippet: string, srcBaseIndent: string): string => {
+        const tgtLines = targetSnippet.split('\n');
+        const firstNonEmptyTgt = tgtLines.find((l) => l.trim().length > 0) || '';
+        const tgtBaseIndent = (firstNonEmptyTgt.match(/^[\t ]*/) || [''])[0];
+        if (tgtBaseIndent === srcBaseIndent) return replacement;
+        return replacement
+          .split('\n')
+          .map((line) => {
+            if (!line.trim()) return line;
+            if (tgtBaseIndent && line.startsWith(tgtBaseIndent)) {
+              return srcBaseIndent + line.slice(tgtBaseIndent.length);
+            }
+            return srcBaseIndent + line.trimStart();
+          })
+          .join('\n');
+      };
+
       const raw = await backend.readFile(target, 'utf8');
       const usesCRLF = raw.includes('\r\n');
       let working = raw;
       let totalReplacements = 0;
+      let usedWhitespaceFallback = false;
 
       for (let i = 0; i < hunks.length; i++) {
         const { targetText: tText, replacementText: rText, replaceAll: hunkReplaceAll } = hunks[i];
@@ -349,22 +404,42 @@ export const filesystemSkills = [
           // Retry with normalized line endings so LF snippets match CRLF files cleanly
           const normWorking = working.replace(/\r\n/g, '\n');
           const normTarget = tText.replace(/\r\n/g, '\n');
-          const normCount = countOccurrences(normWorking, normTarget);
-          if (normCount === 0) {
-            return { success: false, error: `targetText not found in ${filePath}${hunkLabel}` };
-          }
-          if (normCount > 1 && !allowMulti) {
-            return {
-              success: false,
-              error: `Ambiguous match in ${filePath}${hunkLabel}: targetText matched ${normCount} times. Provide more surrounding context to uniquely identify the target, or set replaceAll: true.`
-            };
-          }
           const normReplacement = rText.replace(/\r\n/g, '\n');
-          const replaced = allowMulti
-            ? normWorking.split(normTarget).join(normReplacement)
-            : normWorking.replace(normTarget, () => normReplacement);
-          working = usesCRLF ? replaced.replace(/\n/g, '\r\n') : replaced;
-          totalReplacements += allowMulti ? normCount : 1;
+          const normCount = countOccurrences(normWorking, normTarget);
+          if (normCount > 0) {
+            if (normCount > 1 && !allowMulti) {
+              return {
+                success: false,
+                error: `Ambiguous match in ${filePath}${hunkLabel}: targetText matched ${normCount} times. Provide more surrounding context to uniquely identify the target, or set replaceAll: true.`
+              };
+            }
+            const replaced = allowMulti
+              ? normWorking.split(normTarget).join(normReplacement)
+              : normWorking.replace(normTarget, () => normReplacement);
+            working = usesCRLF ? replaced.replace(/\n/g, '\r\n') : replaced;
+            totalReplacements += allowMulti ? normCount : 1;
+          } else {
+            // Fallback: whitespace/indentation-tolerant line-block match (still enforces uniqueness)
+            const wsMatches = findNormalizedIndentMatches(normWorking, normTarget);
+            if (wsMatches.length === 0) {
+              return { success: false, error: `targetText not found in ${filePath}${hunkLabel}` };
+            }
+            if (wsMatches.length > 1 && !allowMulti) {
+              return {
+                success: false,
+                error: `Ambiguous whitespace-tolerant match in ${filePath}${hunkLabel}: targetText matched ${wsMatches.length} times. Provide more surrounding context or set replaceAll: true.`
+              };
+            }
+            const toApply = allowMulti ? [...wsMatches].reverse() : [wsMatches[0]];
+            let updated = normWorking;
+            for (const m of toApply) {
+              const adjusted = reindentReplacement(normReplacement, normTarget, m.baseIndent);
+              updated = updated.slice(0, m.start) + adjusted + updated.slice(m.end);
+            }
+            working = usesCRLF ? updated.replace(/\n/g, '\r\n') : updated;
+            totalReplacements += toApply.length;
+            usedWhitespaceFallback = true;
+          }
         }
       }
 
@@ -375,6 +450,7 @@ export const filesystemSkills = [
         path: target,
         editsApplied: hunks.length,
         replacements: totalReplacements,
+        ...(usedWhitespaceFallback ? { matchMode: 'whitespace-tolerant' } : {}),
         message: 'File successfully patched.',
         ...(diagnostics.length > 0 ? { diagnostics } : {})
       };

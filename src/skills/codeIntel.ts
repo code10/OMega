@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -7,7 +7,91 @@ import type { ExecutionBackend, SkillContext } from '../types.js';
 import { defaultLocalExecutionBackend, getExecutionBackend } from '../execution/backend.js';
 import { resolveSafePath } from './filesystem.js';
 
-const CODE_EXT_RE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/i;
+const CODE_EXT_RE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|py|pyi|go|rs|c|h|cc|cpp|cxx|hpp|hh)$/i;
+
+export interface LspServerSpec {
+  language: string;
+  extensions: string[];
+  candidates: Array<{ cmd: string; args: string[] }>;
+}
+
+const BUILTIN_LSP_SERVERS: LspServerSpec[] = [
+  {
+    language: 'typescript',
+    extensions: ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'],
+    candidates: [] // resolved via resolveTscExecutable
+  },
+  {
+    language: 'python',
+    extensions: ['.py', '.pyi'],
+    candidates: [
+      { cmd: 'pyright-langserver', args: ['--stdio'] },
+      { cmd: 'pylsp', args: [] }
+    ]
+  },
+  {
+    language: 'go',
+    extensions: ['.go'],
+    candidates: [{ cmd: 'gopls', args: [] }]
+  },
+  {
+    language: 'rust',
+    extensions: ['.rs'],
+    candidates: [{ cmd: 'rust-analyzer', args: [] }]
+  },
+  {
+    language: 'cpp',
+    extensions: ['.c', '.h', '.cc', '.cpp', '.cxx', '.hpp', '.hh'],
+    candidates: [{ cmd: 'clangd', args: [] }]
+  }
+];
+
+const binaryProbeCache = new Map<string, boolean>();
+
+function isBinaryOnPath(cmd: string): boolean {
+  if (binaryProbeCache.has(cmd)) return binaryProbeCache.get(cmd)!;
+  if (path.isAbsolute(cmd)) {
+    const exists = fs.existsSync(cmd);
+    binaryProbeCache.set(cmd, exists);
+    return exists;
+  }
+  try {
+    const checker = process.platform === 'win32' ? 'where' : 'which';
+    const res = spawnSync(checker, [cmd], { stdio: 'ignore', timeout: 2000, windowsHide: true });
+    const ok = res.status === 0;
+    binaryProbeCache.set(cmd, ok);
+    return ok;
+  } catch {
+    binaryProbeCache.set(cmd, false);
+    return false;
+  }
+}
+
+export function detectLspLanguage(filePath: string, customServers?: Record<string, { extensions?: string[]; command: string; args?: string[] }>): string | null {
+  const ext = path.extname(filePath).toLowerCase();
+  if (!ext) return null;
+  if (customServers) {
+    for (const [lang, cfg] of Object.entries(customServers)) {
+      if (Array.isArray(cfg?.extensions) && cfg.extensions.some((e) => e.toLowerCase() === ext)) {
+        return lang;
+      }
+    }
+  }
+  for (const spec of BUILTIN_LSP_SERVERS) {
+    if (spec.extensions.includes(ext)) return spec.language;
+  }
+  return null;
+}
+
+function getLspLanguageId(filePath: string, language: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.tsx') return 'typescriptreact';
+  if (ext === '.jsx') return 'javascriptreact';
+  if (['.js', '.mjs', '.cjs'].includes(ext)) return 'javascript';
+  if (['.ts', '.mts', '.cts'].includes(ext)) return 'typescript';
+  if (ext === '.c' || ext === '.h') return 'c';
+  return language;
+}
 const LSP_SYMBOL_KINDS: Record<number, string> = {
   1: 'File',
   2: 'Module',
@@ -69,8 +153,10 @@ interface OpenFileState {
   content: string;
 }
 
-class TSLspClient {
+class GenericLspClient {
   rootDir: string;
+  language: string;
+  customServer?: { command: string; args?: string[] };
   execution: ExecutionBackend;
   proc: ChildProcessWithoutNullStreams | null = null;
   initPromise: Promise<void> | null = null;
@@ -81,9 +167,16 @@ class TSLspClient {
   diagnosticsByUri = new Map<string, any[]>();
   idleTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(rootDir: string, execution: ExecutionBackend = defaultLocalExecutionBackend) {
+  constructor(
+    rootDir: string,
+    language = 'typescript',
+    execution: ExecutionBackend = defaultLocalExecutionBackend,
+    customServer?: { command: string; args?: string[] }
+  ) {
     this.rootDir = path.resolve(rootDir);
+    this.language = language;
     this.execution = execution;
+    this.customServer = customServer;
   }
 
   private bumpIdleTimer() {
@@ -92,9 +185,25 @@ class TSLspClient {
     this.idleTimer.unref?.();
   }
 
-  private async resolveTscCommand(): Promise<{ cmd: string; args: string[] } | null> {
-    const exe = await resolveTscExecutable(this.rootDir);
-    return exe ? { cmd: exe, args: ['--lsp', '--stdio'] } : null;
+  private async resolveServerCommand(): Promise<{ cmd: string; args: string[] } | null> {
+    if (this.customServer?.command) {
+      if (isBinaryOnPath(this.customServer.command)) {
+        return { cmd: this.customServer.command, args: this.customServer.args || [] };
+      }
+      return null;
+    }
+    if (this.language === 'typescript') {
+      const exe = await resolveTscExecutable(this.rootDir);
+      return exe ? { cmd: exe, args: ['--lsp', '--stdio'] } : null;
+    }
+    const spec = BUILTIN_LSP_SERVERS.find((s) => s.language === this.language);
+    if (!spec) return null;
+    for (const cand of spec.candidates) {
+      if (isBinaryOnPath(cand.cmd)) {
+        return cand;
+      }
+    }
+    return null;
   }
 
   async ensureStarted(): Promise<void> {
@@ -102,10 +211,10 @@ class TSLspClient {
     if (this.initPromise) return this.initPromise;
 
     this.initPromise = (async () => {
-      const resolved = await this.resolveTscCommand();
+      const resolved = await this.resolveServerCommand();
       if (!resolved) {
         this.initPromise = null;
-        throw new Error('TypeScript LSP server is not available in this environment.');
+        throw new Error(`LSP server for '${this.language}' is not installed in this environment.`);
       }
 
       const proc = this.execution.spawnInteractive
@@ -235,8 +344,7 @@ class TSLspClient {
     }
 
     const content = await this.execution.readFile(filePath, 'utf8');
-    const ext = path.extname(filePath).toLowerCase();
-    const languageId = ext === '.tsx' ? 'typescriptreact' : ext === '.jsx' ? 'javascriptreact' : ext.includes('js') ? 'javascript' : 'typescript';
+    const languageId = getLspLanguageId(filePath, this.language);
 
     if (!cached) {
       const state: OpenFileState = { version: 1, mtimeMs: stat.mtimeMs, content };
@@ -275,7 +383,7 @@ class TSLspClient {
   }
 }
 
-const clientCache = new Map<string, TSLspClient>();
+const clientCache = new Map<string, GenericLspClient>();
 
 export function disposeAllLspClients() {
   for (const client of clientCache.values()) {
@@ -284,11 +392,16 @@ export function disposeAllLspClients() {
   clientCache.clear();
 }
 
-function getLspClient(workspaceDir: string, execution: ExecutionBackend = defaultLocalExecutionBackend): TSLspClient {
-  const key = `${execution.name}:${path.resolve(workspaceDir || process.cwd())}`;
+function getLspClient(
+  workspaceDir: string,
+  execution: ExecutionBackend = defaultLocalExecutionBackend,
+  language = 'typescript',
+  customServer?: { command: string; args?: string[] }
+): GenericLspClient {
+  const key = `${execution.name}:${language}:${path.resolve(workspaceDir || process.cwd())}`;
   let client = clientCache.get(key);
   if (!client) {
-    client = new TSLspClient(workspaceDir, execution);
+    client = new GenericLspClient(workspaceDir, language, execution, customServer);
     clientCache.set(key, client);
   }
   return client;
@@ -356,16 +469,21 @@ function getLinePreview(filePath: string, zeroBasedLine: number): string {
 }
 
 /**
- * Run fast TypeScript LSP diagnostics on a single file (used by auto-diagnostics after edits).
+ * Run fast multi-language LSP diagnostics on a single file (used by auto-diagnostics after edits).
+ * Supports TypeScript/JS, Python (pyright/pylsp), Go (gopls), Rust (rust-analyzer), C/C++ (clangd),
+ * and any custom servers configured in `config.lsp.servers`.
  */
 export async function getFileDiagnostics(
   filePath: string,
   workspaceDir: string,
   maxDiagnostics = 20,
-  execution: ExecutionBackend = defaultLocalExecutionBackend
+  execution: ExecutionBackend = defaultLocalExecutionBackend,
+  customServers?: Record<string, { extensions?: string[]; command: string; args?: string[] }>
 ) {
-  if (!CODE_EXT_RE.test(filePath)) return [];
-  const client = getLspClient(workspaceDir, execution);
+  const language = detectLspLanguage(filePath, customServers);
+  if (!language && !CODE_EXT_RE.test(filePath)) return [];
+  const resolvedLang = language || 'typescript';
+  const client = getLspClient(workspaceDir, execution, resolvedLang, customServers?.[resolvedLang]);
   try {
     await client.ensureStarted();
   } catch (_) {
@@ -418,7 +536,9 @@ export const codeIntelSkills = [
       }
       if (!fs.existsSync(target)) return { success: false, error: `File not found: ${filePath}` };
 
-      const client = getLspClient(workspaceDir, getExecutionBackend(context));
+      const customServers = (context.config as Record<string, any>)?.lsp?.servers;
+      const lang = detectLspLanguage(target, customServers) || 'typescript';
+      const client = getLspClient(workspaceDir, getExecutionBackend(context), lang, customServers?.[lang]);
       try {
         await client.ensureStarted();
       } catch (err: any) {
@@ -464,7 +584,9 @@ export const codeIntelSkills = [
       }
       if (!fs.existsSync(target)) return { success: false, error: `File not found: ${filePath}` };
 
-      const client = getLspClient(workspaceDir, getExecutionBackend(context));
+      const customServers = (context.config as Record<string, any>)?.lsp?.servers;
+      const lang = detectLspLanguage(target, customServers) || 'typescript';
+      const client = getLspClient(workspaceDir, getExecutionBackend(context), lang, customServers?.[lang]);
       try {
         await client.ensureStarted();
       } catch (err: any) {
@@ -527,7 +649,9 @@ export const codeIntelSkills = [
       }
       if (!fs.existsSync(target)) return { success: false, error: `File not found: ${filePath}` };
 
-      const client = getLspClient(workspaceDir, getExecutionBackend(context));
+      const customServers = (context.config as Record<string, any>)?.lsp?.servers;
+      const lang = detectLspLanguage(target, customServers) || 'typescript';
+      const client = getLspClient(workspaceDir, getExecutionBackend(context), lang, customServers?.[lang]);
       try {
         await client.ensureStarted();
       } catch (err: any) {
@@ -586,7 +710,8 @@ export const codeIntelSkills = [
       }
       if (!fs.existsSync(target)) return { success: false, error: `File not found: ${filePath}` };
 
-      const diagnostics = await getFileDiagnostics(target, workspaceDir, maxDiagnostics, getExecutionBackend(context));
+      const customServers = (context.config as Record<string, any>)?.lsp?.servers;
+      const diagnostics = await getFileDiagnostics(target, workspaceDir, maxDiagnostics, getExecutionBackend(context), customServers);
       return {
         success: true,
         file: path.relative(path.resolve(workspaceDir), target),
@@ -656,6 +781,201 @@ export const codeIntelSkills = [
         exitCode: res.exitCode,
         errorCount: diagnostics.filter((d) => d.category === 'error').length,
         diagnostics
+      };
+    }
+  },
+
+  {
+    name: 'repo_map',
+    description: 'Build a dependency-ranked structural map of the repository (key files, exported symbols, and inbound import rank) so you can understand the architecture in one turn.',
+    parameters: {
+      type: 'object',
+      properties: {
+        dir: { type: 'string', description: 'Optional subdirectory to map (defaults to workspace root)' },
+        maxFiles: { type: 'number', description: 'Maximum ranked files to include (default: 40)' },
+        maxSymbolsPerFile: { type: 'number', description: 'Maximum symbols to list per file (default: 12)' },
+        focusFiles: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional relative file paths to boost to the top of the map'
+        }
+      }
+    },
+    execute: async (
+      { dir = '.', maxFiles = 40, maxSymbolsPerFile = 12, focusFiles = [] }: {
+        dir?: string;
+        maxFiles?: number;
+        maxSymbolsPerFile?: number;
+        focusFiles?: string[];
+      },
+      context: SkillContext = {}
+    ) => {
+      const workspaceDir = context.config?.workspaceDir || process.cwd();
+      const backend = getExecutionBackend(context);
+      let targetDir: string;
+      try {
+        targetDir = resolveSafePath(dir, workspaceDir, context);
+      } catch (err: any) {
+        return { success: false, error: err.message };
+      }
+      if (!(await backend.exists(targetDir))) {
+        return { success: false, error: `Directory not found: ${dir}` };
+      }
+
+      const IGNORED = new Set([
+        'node_modules', '.git', 'dist', 'build', '.next', '.nuxt', '.cache',
+        '.om_snapshots', '.om-worktrees', '.om_worktrees', 'coverage', '__pycache__', '.venv', 'target'
+      ]);
+      const MAP_EXT_RE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|py|go|rs|c|h|cc|cpp|hpp)$/i;
+      const MAX_SCAN_FILES = 600;
+      const MAX_FILE_BYTES = 512 * 1024;
+
+      const scannedFiles: string[] = [];
+      async function walk(cur: string) {
+        if (scannedFiles.length >= MAX_SCAN_FILES) return;
+        let entries;
+        try {
+          entries = await backend.readdir(cur);
+        } catch {
+          return;
+        }
+        for (const entry of entries) {
+          if (scannedFiles.length >= MAX_SCAN_FILES) break;
+          if (IGNORED.has(entry.name) || entry.name.startsWith('.')) continue;
+          const full = path.join(cur, entry.name);
+          if (entry.isDirectory) {
+            await walk(full);
+          } else if (entry.isFile && MAP_EXT_RE.test(entry.name)) {
+            scannedFiles.push(full);
+          }
+        }
+      }
+
+      await walk(targetDir);
+
+      interface FileMapNode {
+        relPath: string;
+        symbols: string[];
+        imports: string[];
+        inboundRefs: number;
+      }
+
+      const nodes = new Map<string, FileMapNode>();
+      const stemIndex = new Map<string, string[]>();
+
+      const extractSymbolsAndImports = (text: string, ext: string): { symbols: string[]; imports: string[] } => {
+        const symbols: string[] = [];
+        const imports: string[] = [];
+        const addSym = (s: string) => {
+          if (s && !symbols.includes(s)) symbols.push(s);
+        };
+
+        if (ext === '.py') {
+          for (const m of text.matchAll(/^(?:async\s+)?(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)/gm)) {
+            if (!m[1].startsWith('_')) addSym(m[1]);
+          }
+          for (const m of text.matchAll(/^(?:from\s+([\w.]+)\s+import|import\s+([\w.]+))/gm)) {
+            imports.push((m[1] || m[2] || '').replace(/\./g, '/'));
+          }
+        } else if (ext === '.go') {
+          for (const m of text.matchAll(/^func\s+(?:\([^)]*\)\s*)?([A-Z][A-Za-z0-9_]*)|^type\s+([A-Z][A-Za-z0-9_]*)/gm)) {
+            addSym(m[1] || m[2]);
+          }
+          for (const m of text.matchAll(/"([^"]+)"/g)) {
+            if (m[1].includes('/')) imports.push(m[1]);
+          }
+        } else if (ext === '.rs') {
+          for (const m of text.matchAll(/^pub\s+(?:async\s+)?(?:fn|struct|enum|trait|type)\s+([A-Za-z_][A-Za-z0-9_]*)/gm)) {
+            addSym(m[1]);
+          }
+          for (const m of text.matchAll(/^(?:use|mod)\s+([\w:]+)/gm)) {
+            imports.push(m[1].replace(/::/g, '/'));
+          }
+        } else {
+          // TS / JS / C++
+          for (const m of text.matchAll(/export\s+(?:default\s+)?(?:async\s+)?(?:function|class|interface|type|enum|const|let)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g)) {
+            addSym(m[1]);
+          }
+          for (const m of text.matchAll(/(?:import\s+[\s\S]*?\s+from\s+|require\s*\(\s*)['"]([^'"]+)['"]/g)) {
+            imports.push(m[1]);
+          }
+        }
+        return { symbols, imports };
+      };
+
+      for (const full of scannedFiles) {
+        try {
+          const stat = await backend.stat(full);
+          if (stat.size > MAX_FILE_BYTES) continue;
+          const text = await backend.readFile(full, 'utf8');
+          const relPath = path.relative(targetDir, full).replace(/\\/g, '/');
+          const ext = path.extname(full).toLowerCase();
+          const { symbols, imports } = extractSymbolsAndImports(text, ext);
+          nodes.set(relPath, { relPath, symbols, imports, inboundRefs: 0 });
+
+          const noExt = relPath.replace(/\.[^.]+$/, '');
+          const base = path.basename(noExt);
+          for (const key of [noExt, base]) {
+            const arr = stemIndex.get(key) || [];
+            arr.push(relPath);
+            stemIndex.set(key, arr);
+          }
+        } catch {
+          // skip unreadable file
+        }
+      }
+
+      // Compute inbound dependency counts across local relative/module imports
+      for (const node of nodes.values()) {
+        const fromDir = path.posix.dirname(node.relPath);
+        for (const imp of node.imports) {
+          if (imp.startsWith('.')) {
+            const normalized = path.posix.normalize(path.posix.join(fromDir, imp)).replace(/\.(js|ts|mjs|cjs)$/, '');
+            const targets = stemIndex.get(normalized) || stemIndex.get(`${normalized}/index`) || [];
+            for (const t of targets) {
+              const targetNode = nodes.get(t);
+              if (targetNode && t !== node.relPath) targetNode.inboundRefs++;
+            }
+          } else {
+            const tail = imp.split('/').pop() || '';
+            const targets = stemIndex.get(tail) || [];
+            if (targets.length === 1 && targets[0] !== node.relPath) {
+              const targetNode = nodes.get(targets[0]);
+              if (targetNode) targetNode.inboundRefs++;
+            }
+          }
+        }
+      }
+
+      const focusSet = new Set(focusFiles.map((f) => String(f).replace(/\\/g, '/')));
+      const ranked = Array.from(nodes.values())
+        .sort((a, b) => {
+          const aFocus = focusSet.has(a.relPath) ? 1 : 0;
+          const bFocus = focusSet.has(b.relPath) ? 1 : 0;
+          if (aFocus !== bFocus) return bFocus - aFocus;
+          if (b.inboundRefs !== a.inboundRefs) return b.inboundRefs - a.inboundRefs;
+          return b.symbols.length - a.symbols.length;
+        })
+        .slice(0, Math.max(1, maxFiles));
+
+      const mapText = ranked
+        .map((n) => {
+          const syms = n.symbols.slice(0, maxSymbolsPerFile).join(', ');
+          const rankTag = n.inboundRefs > 0 ? ` [refs:${n.inboundRefs}]` : '';
+          return `${n.relPath}${rankTag}${syms ? `: ${syms}` : ''}`;
+        })
+        .join('\n');
+
+      return {
+        success: true,
+        totalScanned: nodes.size,
+        returnedFiles: ranked.length,
+        files: ranked.map((n) => ({
+          file: n.relPath,
+          inboundRefs: n.inboundRefs,
+          symbols: n.symbols.slice(0, maxSymbolsPerFile)
+        })),
+        map: mapText
       };
     }
   }

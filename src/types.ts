@@ -331,6 +331,17 @@ export interface ExecutionBackendConfig {
   sshBinary?: string;
 }
 
+export interface VerificationConfig {
+  enabled?: boolean;
+  onCodeEdit?: string[];
+  maxRetries?: number;
+  timeoutMs?: number;
+}
+
+export interface LspConfig {
+  servers?: Record<string, { extensions?: string[]; command: string; args?: string[] }>;
+}
+
 export interface OMConfig {
   rootDir: string;
   provider: string;
@@ -348,6 +359,9 @@ export interface OMConfig {
   maxHistoryMessages?: number;
   compactionThresholdChars?: number;
   compactionThresholdTokens?: number;
+  verification?: VerificationConfig;
+  lsp?: LspConfig;
+  planMode?: boolean;
   llmCompaction?: boolean;
   worktreeIsolation?: boolean;
   embedding?: EmbeddingConfig;

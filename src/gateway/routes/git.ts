@@ -1,6 +1,9 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type http from 'node:http';
 import type { OMAgent } from '../../agent.js';
 import { OMGitManager } from '../../git.js';
+import { resolveSafePath } from '../../skills/filesystem.js';
 import { readJsonBody, sendJson } from '../httpUtils.js';
 
 export interface GitRouteContext {
@@ -34,8 +37,44 @@ export async function handleGitRoutes(ctx: GitRouteContext): Promise<boolean> {
       return true;
     }
     const baseRef = url.searchParams.get('base') || undefined;
-    const diff = git.getDiff(baseRef);
-    sendJson(res, 200, { success: true, diff, empty: diff.length === 0 });
+    const file = url.searchParams.get('file') || undefined;
+    const diff = file
+      ? git._exec(['diff', ...(baseRef ? [baseRef] : []), '--', file])
+      : git.getDiff(baseRef);
+    sendJson(res, 200, { success: true, file: file || null, diff, empty: diff.length === 0 });
+    return true;
+  }
+
+  if (pathname === '/api/git/revert-file' && req.method === 'POST') {
+    if (!git.isGitRepo()) {
+      sendJson(res, 400, { success: false, error: 'Workspace is not a git repository' });
+      return true;
+    }
+    const data: Record<string, unknown> | null = await readJsonBody(req, res);
+    if (!data) return true;
+    const rawFile = String(data.file || '').trim();
+    if (!rawFile) {
+      sendJson(res, 400, { success: false, error: 'file is required' });
+      return true;
+    }
+    try {
+      const wsDir = agent.config.workspaceDir || process.cwd();
+      const safeAbs = resolveSafePath(rawFile, wsDir, { config: agent.config });
+      const rel = path.relative(path.resolve(wsDir), safeAbs).replace(/\\/g, '/');
+      try {
+        git._exec(['checkout', '--', rel]);
+      } catch {
+        // Untracked file: remove it safely if it exists
+        if (fs.existsSync(safeAbs) && fs.statSync(safeAbs).isFile()) {
+          fs.unlinkSync(safeAbs);
+        } else {
+          throw new Error(`Unable to revert '${rel}'`);
+        }
+      }
+      sendJson(res, 200, { success: true, file: rel, status: git.getStatus() });
+    } catch (err: unknown) {
+      sendJson(res, 400, { success: false, error: getErrMsg(err) });
+    }
     return true;
   }
 

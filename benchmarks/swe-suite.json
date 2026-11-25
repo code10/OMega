@@ -1,0 +1,105 @@
+{
+  "name": "OMega SWE-Style Real-Repo Coding Benchmark",
+  "version": "1.0.0",
+  "description": "Multi-file bugfix, refactor, concurrency, security, and feature tasks graded with hidden holdout tests.",
+  "tasks": [
+    {
+      "id": "multi-file-auth-refactor",
+      "category": "multi-file-refactor",
+      "title": "Enforce token expiration and role checks across auth + middleware",
+      "maxSteps": 12,
+      "prompt": "Fix the auth module so expired tokens are rejected in src/auth.js and role-based access in src/middleware.js checks requiredRole case-insensitively. Ensure `node test.mjs` passes without breaking existing callers.",
+      "files": {
+        "src/auth.js": "export function verifyToken(token, now = Date.now()) {\n  if (!token || typeof token !== 'object') return { valid: false, reason: 'missing' };\n  // BUG: does not check token.exp\n  return { valid: true, user: token.user, role: token.role || 'viewer' };\n}\n",
+        "src/middleware.js": "import { verifyToken } from './auth.js';\n\nexport function authorize(token, requiredRole, now = Date.now()) {\n  const res = verifyToken(token, now);\n  if (!res.valid) return { allowed: false, status: 401, reason: res.reason };\n  // BUG: strict case comparison fails when token role is 'ADMIN' vs 'admin'\n  if (requiredRole && res.role !== requiredRole) {\n    return { allowed: false, status: 403, reason: 'forbidden' };\n  }\n  return { allowed: true, status: 200, user: res.user };\n}\n",
+        "test.mjs": "import assert from 'node:assert/strict';\nimport { authorize } from './src/middleware.js';\n\nconst now = 10000;\nassert.equal(authorize({ user: 'alice', role: 'admin', exp: 20000 }, 'admin', now).allowed, true);\nassert.equal(authorize({ user: 'alice', role: 'ADMIN', exp: 20000 }, 'admin', now).allowed, true);\nassert.equal(authorize({ user: 'bob', role: 'admin', exp: 5000 }, 'admin', now).status, 401);\nconsole.log('public auth tests passed');\n"
+      },
+      "publicTestCommand": "node test.mjs",
+      "hiddenFiles": {
+        "holdout.test.mjs": "import assert from 'node:assert/strict';\nimport { verifyToken } from './src/auth.js';\nimport { authorize } from './src/middleware.js';\n\nconst now = 50000;\nassert.equal(verifyToken({ user: 'x', exp: 50000 }, now).valid, false, 'exp === now should be expired');\nassert.equal(verifyToken({ user: 'x', exp: 50001 }, now).valid, true);\nassert.equal(authorize({ user: 'carol', role: 'Operator', exp: 60000 }, 'operator', now).allowed, true);\nassert.equal(authorize({ user: 'carol', role: 'viewer', exp: 60000 }, 'admin', now).status, 403);\nassert.equal(authorize(null, 'viewer', now).status, 401);\nconsole.log('hidden auth tests passed');\n"
+      },
+      "hiddenTestCommand": "node holdout.test.mjs"
+    },
+    {
+      "id": "lru-cache-eviction-bug",
+      "category": "data-structures",
+      "title": "Fix LRU recency update on get() and TTL expiration in cache",
+      "maxSteps": 10,
+      "prompt": "Fix src/lru.js so get() refreshes recency (preventing recently-read keys from being evicted first) and expired TTL entries return undefined and do not count against capacity.",
+      "files": {
+        "src/lru.js": "export class LRUCache {\n  constructor(capacity = 2) {\n    this.capacity = capacity;\n    this.map = new Map();\n  }\n  get(key, now = Date.now()) {\n    const entry = this.map.get(key);\n    if (!entry) return undefined;\n    // BUG: ignores TTL and does not refresh key recency\n    return entry.value;\n  }\n  set(key, value, ttlMs = 0, now = Date.now()) {\n    if (this.map.has(key)) this.map.delete(key);\n    this.map.set(key, { value, expiresAt: ttlMs > 0 ? now + ttlMs : 0 });\n    if (this.map.size > this.capacity) {\n      const oldestKey = this.map.keys().next().value;\n      this.map.delete(oldestKey);\n    }\n  }\n}\n",
+        "test.mjs": "import assert from 'node:assert/strict';\nimport { LRUCache } from './src/lru.js';\n\nconst c = new LRUCache(2);\nc.set('a', 1, 0, 100);\nc.set('b', 2, 0, 100);\nassert.equal(c.get('a', 101), 1);\nc.set('c', 3, 0, 102);\nassert.equal(c.get('a', 103), 1);\nassert.equal(c.get('b', 103), undefined);\nconsole.log('public lru tests passed');\n"
+      },
+      "publicTestCommand": "node test.mjs",
+      "hiddenFiles": {
+        "holdout.test.mjs": "import assert from 'node:assert/strict';\nimport { LRUCache } from './src/lru.js';\n\nconst c = new LRUCache(2);\nc.set('k1', 'v1', 50, 1000);\nc.set('k2', 'v2', 0, 1000);\nassert.equal(c.get('k1', 1049), 'v1');\nassert.equal(c.get('k1', 1050), undefined);\nc.set('k3', 'v3', 0, 1060);\nassert.equal(c.get('k2', 1061), 'v2');\nassert.equal(c.get('k3', 1061), 'v3');\nconsole.log('hidden lru tests passed');\n"
+      },
+      "hiddenTestCommand": "node holdout.test.mjs"
+    },
+    {
+      "id": "async-queue-concurrency",
+      "category": "concurrency",
+      "title": "Enforce maxConcurrency and preserve input order in async mapPool",
+      "maxSteps": 10,
+      "prompt": "Fix mapPool(items, concurrency, worker) in src/pool.js so it never runs more than `concurrency` workers simultaneously, preserves output order matching `items`, and rejects cleanly if any worker throws.",
+      "files": {
+        "src/pool.js": "export async function mapPool(items, concurrency, worker) {\n  // BUG: runs all items in parallel ignoring concurrency limit\n  return Promise.all(items.map((item, idx) => worker(item, idx)));\n}\n",
+        "test.mjs": "import assert from 'node:assert/strict';\nimport { mapPool } from './src/pool.js';\n\nlet active = 0;\nlet maxActive = 0;\nconst out = await mapPool([1, 2, 3, 4, 5], 2, async (n) => {\n  active++;\n  maxActive = Math.max(maxActive, active);\n  await new Promise((r) => setTimeout(r, 15));\n  active--;\n  return n * 10;\n});\nassert.deepEqual(out, [10, 20, 30, 40, 50]);\nassert.ok(maxActive <= 2, `Expected maxActive <= 2, got ${maxActive}`);\nconsole.log('public pool tests passed');\n"
+      },
+      "publicTestCommand": "node test.mjs",
+      "hiddenFiles": {
+        "holdout.test.mjs": "import assert from 'node:assert/strict';\nimport { mapPool } from './src/pool.js';\n\nassert.deepEqual(await mapPool([], 3, async (x) => x), []);\nconst delays = [30, 5, 20, 1];\nconst res = await mapPool(delays, 2, async (ms, idx) => {\n  await new Promise((r) => setTimeout(r, ms));\n  return `${idx}:${ms}`;\n});\nassert.deepEqual(res, ['0:30', '1:5', '2:20', '3:1']);\nawait assert.rejects(() => mapPool([1, 2, 3], 2, async (n) => { if (n === 2) throw new Error('boom'); return n; }), /boom/);\nconsole.log('hidden pool tests passed');\n"
+      },
+      "hiddenTestCommand": "node holdout.test.mjs"
+    },
+    {
+      "id": "csv-parser-quoted-fields",
+      "category": "parsing",
+      "title": "Handle quoted commas, escaped quotes, and CRLF in CSV parser",
+      "maxSteps": 10,
+      "prompt": "Fix parseCsv(input) in src/csv.js to properly parse RFC-4180 quoted fields containing commas, escaped double quotes (\"\"), embedded newlines inside quotes, and CRLF line endings.",
+      "files": {
+        "src/csv.js": "export function parseCsv(input) {\n  if (!input) return [];\n  // BUG: naive split breaks on quoted commas, escaped quotes, and embedded newlines\n  return input.trim().split('\\n').map((line) => line.split(','));\n}\n",
+        "test.mjs": "import assert from 'node:assert/strict';\nimport { parseCsv } from './src/csv.js';\n\nconst rows = parseCsv('name,note\\n\"Doe, Jane\",\"She said \"\"hi\"\"\"');\nassert.deepEqual(rows, [['name', 'note'], ['Doe, Jane', 'She said \"hi\"']]);\nconsole.log('public csv tests passed');\n"
+      },
+      "publicTestCommand": "node test.mjs",
+      "hiddenFiles": {
+        "holdout.test.mjs": "import assert from 'node:assert/strict';\nimport { parseCsv } from './src/csv.js';\n\nconst rows = parseCsv('a,b,c\\r\\n1,\"line1\\nline2\",3\\r\\n\"x,y\",\"\",z\\r\\n');\nassert.deepEqual(rows, [\n  ['a', 'b', 'c'],\n  ['1', 'line1\\nline2', '3'],\n  ['x,y', '', 'z']\n]);\nconsole.log('hidden csv tests passed');\n"
+      },
+      "hiddenTestCommand": "node holdout.test.mjs"
+    },
+    {
+      "id": "deep-merge-prototype-pollution",
+      "category": "security",
+      "title": "Prevent prototype pollution in deepMerge while preserving nested merge",
+      "maxSteps": 10,
+      "prompt": "Fix deepMerge(target, source) in src/merge.js so it safely ignores __proto__, constructor, and prototype keys to prevent prototype pollution while still deep-merging plain objects without mutating inputs.",
+      "files": {
+        "src/merge.js": "export function deepMerge(target, source) {\n  const out = { ...target };\n  for (const key of Object.keys(source || {})) {\n    if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {\n      out[key] = deepMerge(out[key] || {}, source[key]);\n    } else {\n      out[key] = source[key];\n    }\n  }\n  return out;\n}\n",
+        "test.mjs": "import assert from 'node:assert/strict';\nimport { deepMerge } from './src/merge.js';\n\nconst payload = JSON.parse('{\"__proto__\":{\"polluted\":true},\"a\":{\"b\":2}}');\nconst merged = deepMerge({ a: { x: 1 } }, payload);\nassert.deepEqual(merged.a, { x: 1, b: 2 });\nassert.equal(({}).polluted, undefined);\nassert.equal(Object.prototype.hasOwnProperty.call(merged, '__proto__'), false);\nconsole.log('public merge tests passed');\n"
+      },
+      "publicTestCommand": "node test.mjs",
+      "hiddenFiles": {
+        "holdout.test.mjs": "import assert from 'node:assert/strict';\nimport { deepMerge } from './src/merge.js';\n\nconst nested = JSON.parse('{\"a\":{\"constructor\":{\"prototype\":{\"pwn\":1}},\"ok\":true}}');\nconst res = deepMerge({ a: { keep: 1 } }, nested);\nassert.equal(({}).pwn, undefined);\nassert.deepEqual(res.a, { keep: 1, ok: true });\nconsole.log('hidden merge tests passed');\n"
+      },
+      "hiddenTestCommand": "node holdout.test.mjs"
+    },
+    {
+      "id": "semver-comparator-prerelease",
+      "category": "multi-file-logic",
+      "title": "Fix SemVer prerelease precedence across parse.js and compare.js",
+      "maxSteps": 10,
+      "prompt": "Fix src/parse.js and src/compare.js so SemVer prerelease tags are compared per SemVer 2.0.0 (e.g. 1.0.0-alpha < 1.0.0-alpha.1 < 1.0.0-beta < 1.0.0, numeric identifiers compare numerically).",
+      "files": {
+        "src/parse.js": "export function parseSemver(v) {\n  const [core] = String(v).replace(/^v/, '').split('-');\n  const [major, minor, patch] = core.split('.').map(Number);\n  // BUG: drops prerelease identifiers\n  return { major, minor, patch, prerelease: [] };\n}\n",
+        "src/compare.js": "import { parseSemver } from './parse.js';\n\nexport function compareSemver(a, b) {\n  const pa = parseSemver(a);\n  const pb = parseSemver(b);\n  for (const k of ['major', 'minor', 'patch']) {\n    if (pa[k] !== pb[k]) return pa[k] > pb[k] ? 1 : -1;\n  }\n  return 0;\n}\n",
+        "test.mjs": "import assert from 'node:assert/strict';\nimport { compareSemver } from './src/compare.js';\n\nassert.equal(compareSemver('1.0.0-alpha', '1.0.0'), -1);\nassert.equal(compareSemver('1.0.0-alpha.2', '1.0.0-alpha.10'), -1);\nassert.equal(compareSemver('1.0.0', '1.0.0-rc.1'), 1);\nconsole.log('public semver tests passed');\n"
+      },
+      "publicTestCommand": "node test.mjs",
+      "hiddenFiles": {
+        "holdout.test.mjs": "import assert from 'node:assert/strict';\nimport { compareSemver } from './src/compare.js';\n\nassert.equal(compareSemver('1.0.0-alpha', '1.0.0-alpha.1'), -1);\nassert.equal(compareSemver('1.0.0-alpha.1', '1.0.0-alpha.beta'), -1);\nassert.equal(compareSemver('1.0.0-beta', '1.0.0-beta.2'), -1);\nassert.equal(compareSemver('1.0.0-beta.11', '1.0.0-rc.1'), -1);\nassert.equal(compareSemver('2.0.0-rc.1+build.99', '2.0.0-rc.1+build.1'), 0);\nconsole.log('hidden semver tests passed');\n"
+      },
+      "hiddenTestCommand": "node holdout.test.mjs"
+    }
+  ]
+}

@@ -143,6 +143,149 @@ export const subagentSkills: SkillDefinition[] = [
         }
       }
     }
+  },
+  {
+    name: 'run_pipeline',
+    description: 'Run a 3-stage role-based subagent pipeline: Researcher (read-only codebase exploration) -> Coder (isolated implementation) -> Reviewer (independent diff & test critique).',
+    parameters: {
+      type: 'object',
+      properties: {
+        task: { type: 'string', description: 'The engineering task to research, implement, and review' },
+        researcherModel: { type: 'string', description: 'Optional fast/cheap model override for the Researcher stage' },
+        coderModel: { type: 'string', description: 'Optional strong model override for the Coder stage' },
+        reviewerModel: { type: 'string', description: 'Optional independent model override for the Reviewer stage' },
+        gitWorktree: { type: 'boolean', description: 'Run Coder + Reviewer in an isolated git worktree (default: false)' },
+        keepWorktree: { type: 'boolean', description: 'Keep the worktree on disk after pipeline finishes for manual diff/merge review (default: false)' },
+        maxStepsPerStage: { type: 'number', description: 'Max ReAct steps per stage (default: 6, max: 12)' }
+      },
+      required: ['task']
+    },
+    execute: async (
+      {
+        task,
+        researcherModel,
+        coderModel,
+        reviewerModel,
+        gitWorktree = false,
+        keepWorktree = false,
+        maxStepsPerStage = 6
+      }: Record<string, any>,
+      context: SkillContext = {}
+    ) => {
+      const parentAgent = context.agent;
+      if (!parentAgent) {
+        return { success: false, error: 'run_pipeline requires an active parent OMAgent in context' };
+      }
+      const depth = (context.subagentDepth || 0) + 1;
+      if (depth > 2) {
+        return { success: false, error: 'Maximum sub-agent nesting depth (2) reached' };
+      }
+
+      const AgentClass = parentAgent.constructor as new (options?: Record<string, any>) => any;
+      const safeSteps = Math.min(Math.max(1, Number(maxStepsPerStage) || 6), 12);
+      const pipelineId = `${parentAgent.sessionId}_pipe_${Date.now().toString(36)}`;
+
+      const RESEARCHER_TOOLS = new Set([
+        'repo_map', 'read_file', 'search_files', 'list_dir', 'file_outline',
+        'go_to_definition', 'find_references', 'get_diagnostics', 'git_status', 'git_diff'
+      ]);
+      const REVIEWER_TOOLS = new Set([
+        'read_file', 'search_files', 'list_dir', 'get_diagnostics', 'get_workspace_diagnostics',
+        'git_status', 'git_diff', 'exec_command'
+      ]);
+
+      let targetWorkspace = parentAgent.config.workspaceDir;
+      let worktreeInfo: { worktreePath: string; branch: string } | null = null;
+      if (gitWorktree && parentAgent.git?.isGitRepo?.()) {
+        const wtDir = path.join(os.tmpdir(), `omega-pipe-${Date.now().toString(36)}`);
+        worktreeInfo = parentAgent.git.createWorktree(wtDir, `om-pipe-${Date.now().toString(36)}`);
+        targetWorkspace = worktreeInfo.worktreePath;
+      }
+
+      const runStage = async (
+        role: 'researcher' | 'coder' | 'reviewer',
+        stagePrompt: string,
+        allowSet: Set<string> | null,
+        modelOverride?: string
+      ) => {
+        const useModel = modelOverride || parentAgent.config.model;
+        const reuseProvider = !modelOverride || modelOverride === parentAgent.config.model;
+        const child = new AgentClass({
+          ...parentAgent.options,
+          provider: parentAgent.config.provider,
+          model: useModel,
+          ...(reuseProvider ? { providerInstance: parentAgent.provider } : {}),
+          maxSteps: safeSteps,
+          memoryDir: parentAgent.config.memoryDir,
+          workspaceDir: targetWorkspace,
+          skillsDir: parentAgent.config.skillsDir,
+          sessionId: `${pipelineId}_${role}`,
+          selfHeal: { enabled: false }
+        });
+
+        child.skills.skills.clear();
+        for (const skill of parentAgent.skills.list()) {
+          if (skill.name === 'spawn_subagent' || skill.name === 'run_pipeline') continue;
+          if (allowSet && !allowSet.has(skill.name)) continue;
+          child.skills.register(skill, skill.source);
+        }
+
+        parentAgent.emit?.('subagent_activity', { subagentId: `${pipelineId}_${role}`, role, eventType: 'stage_start', model: useModel });
+        try {
+          const res = await child.run(stagePrompt, { maxSteps: safeSteps, subagentDepth: depth, signal: context.signal });
+          return {
+            role,
+            model: useModel,
+            success: Boolean(res.success),
+            answer: res.content,
+            stepsTaken: res.steps?.length || 0,
+            usage: res.usage
+          };
+        } finally {
+          await child.close?.();
+        }
+      };
+
+      try {
+        const research = await runStage(
+          'researcher',
+          `[Role: Researcher (Read-Only)]\nExplore the codebase for the task below. Identify exact files, symbols, dependencies, and edge cases. Do NOT edit files.\n\nTask: ${task}`,
+          RESEARCHER_TOOLS,
+          researcherModel
+        );
+
+        const coder = await runStage(
+          'coder',
+          `[Role: Coder]\nImplement the task below using the Researcher's brief. Apply minimal, surgical edits and verify with diagnostics/tests.\n\nTask: ${task}\n\nResearcher Brief:\n${research.answer}`,
+          null,
+          coderModel
+        );
+
+        const reviewer = await runStage(
+          'reviewer',
+          `[Role: Independent Reviewer]\nInspect git_diff, diagnostics, and tests for the changes made by the Coder. Start your response with either "VERDICT: APPROVED" or "VERDICT: CHANGES_REQUESTED" followed by concise findings.\n\nTask: ${task}\n\nCoder Summary:\n${coder.answer}`,
+          REVIEWER_TOOLS,
+          reviewerModel
+        );
+
+        const approved = /VERDICT:\s*APPROVED/i.test(String(reviewer.answer || ''));
+        return {
+          success: research.success && coder.success && reviewer.success,
+          pipelineId,
+          approved,
+          worktree: worktreeInfo && keepWorktree ? worktreeInfo : undefined,
+          stages: { researcher: research, coder, reviewer }
+        };
+      } finally {
+        if (worktreeInfo && !keepWorktree) {
+          try {
+            parentAgent.git?.removeWorktree?.(worktreeInfo.worktreePath, true);
+          } catch {
+            // ignore cleanup errors
+          }
+        }
+      }
+    }
   }
 ];
 
