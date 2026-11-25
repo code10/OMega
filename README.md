@@ -30,7 +30,7 @@ npx omega-agent init my-agent
 cd my-agent
 ```
 
-Run in any mode (works out of the box with the built-in `om` offline provider—no API keys required):
+Run in any mode (works out of the box with the built-in `om` offline provider, no API keys required):
 
 ```bash
 npm start                                    # Interactive CLI REPL
