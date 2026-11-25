@@ -4,6 +4,7 @@ import { OMSelfHealer, type SelfHealResult } from '../selfHeal.js';
 import {
   captureWorkspaceState,
   detectWorkspaceDrift,
+  markPendingStep,
   saveCheckpoint,
   type CheckpointBudgets,
   type CheckpointStatus
@@ -102,9 +103,11 @@ export async function executeAgentRun(
   const seenToolSignatures = new Map();
   let activeTools = agent.getFormattedTools();
   if (agent.systemOne?.isConfigured() && effectivePrompt) {
-    activeTools = await agent.systemOne.shortlistTools(effectivePrompt, activeTools);
+    activeTools = await agent.systemOne.shortlistTools(effectivePrompt, activeTools, undefined, { maxWaitMs: 150 });
   }
-  let systemPrompt = agent.buildSystemPrompt({ query: effectivePrompt });
+  const initialPromptParts = agent.buildPromptParts({ query: effectivePrompt });
+  let systemPrompt = initialPromptParts.staticSystemPrompt;
+  let dynamicContext = initialPromptParts.dynamicContext;
   let promptNeedsRefresh = false;
   const runUsage: { promptTokens: number; completionTokens: number; totalTokens: number } = resumeCp?.usage
     ? {
@@ -311,7 +314,8 @@ export async function executeAgentRun(
       agent._recordActivity('step_start', stepStartPayload);
 
       if (promptNeedsRefresh) {
-        systemPrompt = agent.buildSystemPrompt({ query: effectivePrompt });
+        const refreshed = agent.buildPromptParts({ query: effectivePrompt });
+        dynamicContext = refreshed.dynamicContext;
         promptNeedsRefresh = false;
       }
 
@@ -331,7 +335,8 @@ export async function executeAgentRun(
           step: currentStep,
           messages: agent.history,
           tools: activeTools,
-          systemPrompt
+          systemPrompt,
+          dynamicContext
         });
 
         response = await agent.router.chat(
@@ -340,6 +345,7 @@ export async function executeAgentRun(
             messages: modelHookCtx.messages,
             tools: modelHookCtx.tools,
             systemPrompt: modelHookCtx.systemPrompt,
+            dynamicContext: modelHookCtx.dynamicContext,
             temperature: options.temperature ?? agent.config.temperature,
             effort: options.effort ?? agent.config.effort,
             maxTokens: options.maxTokens,
@@ -651,7 +657,9 @@ export async function executeAgentRun(
         return { tc, result, durationMs: Date.now() - startTime, repeated: prevCount >= 1 };
       };
 
-      persistCheckpoint('running', { pendingStep: currentStep });
+      if (options.checkpoint !== false && agent.config?.memoryDir) {
+        markPendingStep(agent.config.memoryDir, agent.sessionId, currentStep);
+      }
 
       const useParallel = options.parallelToolExecution ?? agent.config.parallelToolExecution ?? true;
       let executionResults;

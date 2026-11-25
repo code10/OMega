@@ -26,12 +26,13 @@ export function buildRecallContext(agent: any, query: string, topK = 4): string 
 }
 
 /**
- * Build the complete dynamic system prompt with memory, semantic recall, and environment context.
- * @param {any} agent
- * @param {Record<string, any>} [options]
- * @returns {string}
+ * Build cache-friendly prompt parts: a stable static system prompt prefix
+ * (eligible for provider prompt caching) and a separate dynamic memory/recall block.
  */
-export function buildSystemPrompt(agent: any, options: Record<string, any> = {}): string {
+export function buildPromptParts(
+  agent: any,
+  options: Record<string, any> = {}
+): { staticSystemPrompt: string; dynamicContext: string } {
   const memoryContext = agent.memory.getPromptContext({
     maxDailyLines: options.maxDailyLines || agent.config.maxDailyLogLines || 30
   });
@@ -55,7 +56,7 @@ export function buildSystemPrompt(agent: any, options: Record<string, any> = {})
       workflows.map((s) => `- ${s.name}: ${s.description}${s.triggers?.length ? ` [Triggers: ${s.triggers.join(', ')}]` : ''}`).join('\n')
     : '';
 
-  return `${agent.config.systemPrompt}
+  const staticSystemPrompt = `${agent.config.systemPrompt}
 
 Current System Environment:
 ${systemInfo}
@@ -63,11 +64,24 @@ ${systemInfo}
 Registered Capabilities & Tools:
 ${availableSkills}${availableWorkflows}
 
-${memoryContext}${recallContext}
 Operating Directives (Intelligence, Speed, Concision):
 1. High-Precision Execution: Select the minimum set of tools needed, batch independent tool calls in a single turn when possible, and verify outcomes before concluding.
 2. Concise Communication: Lead with the answer or result. Omit conversational filler, preambles, and repetition. Keep intermediate tool intent notes to one short sentence.
 3. Adaptive Recovery: Never repeat an identical failing tool call; inspect the error, pivot strategy immediately, or report the root cause.
 4. Persistent Knowledge: Use 'save_memory' to store high-value user preferences, architecture decisions, and key facts.
 5. Runtime Identity: Active provider '${agent.config.provider}', model '${agent.config.model}'. Never claim to switch providers/models via 'save_memory' (handled exclusively by '/provider', '/model', '/cloud', '/local').`;
+
+  const dynamicContext = `${memoryContext}${recallContext}`.trim();
+  return { staticSystemPrompt, dynamicContext };
+}
+
+/**
+ * Build the complete dynamic system prompt with memory, semantic recall, and environment context.
+ * @param {any} agent
+ * @param {Record<string, any>} [options]
+ * @returns {string}
+ */
+export function buildSystemPrompt(agent: any, options: Record<string, any> = {}): string {
+  const { staticSystemPrompt, dynamicContext } = buildPromptParts(agent, options);
+  return dynamicContext ? `${staticSystemPrompt}\n\n${dynamicContext}` : staticSystemPrompt;
 }

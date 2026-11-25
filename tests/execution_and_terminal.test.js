@@ -90,7 +90,7 @@ test('Unified ExecutionBackend seam routes filesystem and process skills through
 
     const readRes = await agent.skills.execute('read_file', { path: 'hello.txt' }, ctx);
     assert.equal(readRes.success, true);
-    assert.equal(readRes.content, 'hello world');
+    assert.equal(readRes.content, '1: hello world');
 
     const patchRes = await agent.skills.execute('patch_file', {
       path: 'hello.txt',

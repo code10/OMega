@@ -21,7 +21,7 @@ export class AnthropicProvider extends BaseProvider {
     }
   }
 
-  async chat({ messages, tools, systemPrompt, temperature = 0.2, effort, maxTokens, onToken, signal }: Record<string, any>) {
+  async chat({ messages, tools, systemPrompt, dynamicContext, promptCache = true, temperature = 0.2, effort, maxTokens, onToken, signal }: Record<string, any>) {
     if (!this.apiKey) {
       throw new Error('ANTHROPIC_API_KEY environment variable is required for Anthropic provider');
     }
@@ -79,6 +79,40 @@ export class AnthropicProvider extends BaseProvider {
       }
     }
 
+    // Prompt caching: mark static system prompt, last tool definition, and penultimate turn with ephemeral cache_control
+    let systemPayload: any = undefined;
+    if (systemPrompt || dynamicContext) {
+      if (promptCache) {
+        const blocks: Array<Record<string, any>> = [];
+        if (systemPrompt) {
+          blocks.push({ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } });
+        }
+        if (dynamicContext) {
+          blocks.push({ type: 'text', text: dynamicContext });
+        }
+        systemPayload = blocks;
+      } else {
+        systemPayload = [systemPrompt, dynamicContext].filter(Boolean).join('\n\n');
+      }
+    }
+
+    let cachedTools = tools;
+    if (promptCache && Array.isArray(tools) && tools.length > 0) {
+      cachedTools = tools.map((t: any, idx: number) =>
+        idx === tools.length - 1 ? { ...t, cache_control: { type: 'ephemeral' } } : t
+      );
+    }
+
+    if (promptCache && formattedMessages.length >= 2) {
+      const targetMsg = formattedMessages[formattedMessages.length - 2];
+      if (typeof targetMsg.content === 'string' && targetMsg.content.length > 0) {
+        targetMsg.content = [{ type: 'text', text: targetMsg.content, cache_control: { type: 'ephemeral' } }];
+      } else if (Array.isArray(targetMsg.content) && targetMsg.content.length > 0) {
+        const lastIdx = targetMsg.content.length - 1;
+        targetMsg.content[lastIdx] = { ...targetMsg.content[lastIdx], cache_control: { type: 'ephemeral' } };
+      }
+    }
+
     const useStream = typeof onToken === 'function';
     const supportsThinking = /claude-(3-7|sonnet-4|opus-4|haiku-4|4)/i.test(this.model);
     const thinkingBudget = effort === 'low' ? 1024 : effort === 'high' ? 10240 : 4096;
@@ -90,8 +124,8 @@ export class AnthropicProvider extends BaseProvider {
       messages: formattedMessages,
       ...(enableThinking ? { thinking: { type: 'enabled', budget_tokens: thinkingBudget } } : { temperature }),
       ...(useStream ? { stream: true } : {}),
-      ...(systemPrompt ? { system: systemPrompt } : {}),
-      ...(tools && tools.length > 0 ? { tools } : {})
+      ...(systemPayload ? { system: systemPayload } : {}),
+      ...(cachedTools && cachedTools.length > 0 ? { tools: cachedTools } : {})
     };
 
     const res = await fetchWithTimeout(

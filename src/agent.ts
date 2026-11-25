@@ -13,7 +13,7 @@ import { createHttpEmbedder } from './vectorStore.js';
 import { createLogger } from './utils/logger.js';
 import { handleSlashControl } from './agent/slashCommands.js';
 import { compactHistoryIfNeeded } from './agent/compaction.js';
-import { buildRecallContext, buildSystemPrompt as buildAgentSystemPrompt } from './agent/promptBuilder.js';
+import { buildPromptParts as buildAgentPromptParts, buildRecallContext, buildSystemPrompt as buildAgentSystemPrompt } from './agent/promptBuilder.js';
 import { executeAgentRun } from './agent/runner.js';
 import { OMSystemOne } from './systemOne.js';
 import { createExecutionBackend } from './execution/remote.js';
@@ -52,7 +52,7 @@ const PROVIDER_ALIASES: Record<string, string> = {
   omega: 'om'
 };
 const SUPPORTED_PROVIDERS = new Set(['gemini', 'openai', 'anthropic', 'deepseek', 'kimi', 'qwen', 'glm', 'lmstudio', 'vllm', 'om']);
-const MAX_TOOL_OUTPUT_CHARS = 12000;
+const MAX_TOOL_OUTPUT_CHARS = 48000;
 
 export class OMAgent extends EventEmitter {
   static ModelService = ModelService;
@@ -353,6 +353,10 @@ export class OMAgent extends EventEmitter {
    * Initialize agent environment, dynamic skill plugins, and configured MCP servers
    */
   async init() {
+    // Warm up SystemOne ONNX pipeline in the background so turn 1 doesn't stall on cold start
+    if (this.systemOne?.isConfigured() && !this.systemOne.isReady()) {
+      this.systemOne.warmup();
+    }
     if (this.config.skillsDir) {
       await this.skills.loadFromDirectory(this.config.skillsDir);
       this._invalidateToolsCache();
@@ -459,6 +463,13 @@ export class OMAgent extends EventEmitter {
   }
 
   /**
+   * Build cache-friendly static system prompt + separate dynamic context block
+   */
+  buildPromptParts(options = {}) {
+    return buildAgentPromptParts(this, options);
+  }
+
+  /**
    * Format registered skills for the active or specified provider (cached per provider type)
    */
   getFormattedTools(providerOverride?: string): any[] {
@@ -476,9 +487,52 @@ export class OMAgent extends EventEmitter {
   }
 
   _compactToolOutput(rawOutput: any) {
-    const str = typeof rawOutput === 'string' ? rawOutput : JSON.stringify(rawOutput);
-    if (str.length <= MAX_TOOL_OUTPUT_CHARS) return str;
-    return `${str.slice(0, MAX_TOOL_OUTPUT_CHARS)}\n...[truncated ${str.length - MAX_TOOL_OUTPUT_CHARS} chars for token efficiency]`;
+    const limit = Number((this.config as Record<string, any>).maxToolOutputChars) || MAX_TOOL_OUTPUT_CHARS;
+    if (typeof rawOutput === 'string') {
+      if (rawOutput.length <= limit) return rawOutput;
+      return `${rawOutput.slice(0, limit)}\n...[truncated ${rawOutput.length - limit} chars for token efficiency]`;
+    }
+
+    const str = JSON.stringify(rawOutput);
+    if (str.length <= limit) return str;
+
+    // Preserve valid JSON by truncating large string fields inside object results
+    if (rawOutput && typeof rawOutput === 'object' && !Array.isArray(rawOutput)) {
+      const cloned: Record<string, any> = { ...rawOutput, outputTruncated: true };
+      const largeStringFields = ['content', 'stdout', 'stderr', 'output', 'text', 'body', 'diff'];
+      let excess = str.length - limit + 256; // leave room for truncation notice + outputTruncated flag
+
+      for (const field of largeStringFields) {
+        if (excess <= 0) break;
+        if (typeof cloned[field] === 'string' && cloned[field].length > 512) {
+          const curLen = cloned[field].length;
+          const keepLen = Math.max(256, curLen - excess);
+          const removed = curLen - keepLen;
+          if (removed > 0) {
+            cloned[field] = `${cloned[field].slice(0, keepLen)}\n...[truncated ${removed} chars for token efficiency]`;
+            excess -= removed;
+          }
+        }
+      }
+
+      const compacted = JSON.stringify(cloned);
+      if (compacted.length <= limit) return compacted;
+
+      // Secondary pass: truncate any remaining oversized string properties
+      for (const [k, v] of Object.entries(cloned)) {
+        if (typeof v === 'string' && v.length > 2000) {
+          cloned[k] = `${v.slice(0, 1500)}...[truncated ${v.length - 1500} chars]`;
+        }
+      }
+      const secondPass = JSON.stringify(cloned);
+      if (secondPass.length <= limit) return secondPass;
+    }
+
+    return JSON.stringify({
+      success: rawOutput?.success !== false,
+      outputTruncated: true,
+      preview: `${str.slice(0, Math.max(512, limit - 200))}...[truncated ${str.length - Math.max(512, limit - 200)} chars for token efficiency]`
+    });
   }
 
   _conciseOutput(text: any) {

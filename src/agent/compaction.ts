@@ -7,9 +7,10 @@ const log = createLogger('OMAgent:Compaction');
  * Compute the split point for history compaction, preserving assistant/tool pairs.
  */
 function findCompactionSplit(agent: any): { older: any[]; recent: any[]; totalTokens: number } | null {
-  const maxMsgs = agent.config.maxHistoryMessages || 48;
+  const maxMsgs = agent.config.maxHistoryMessages || 80;
   const modelLimit = getModelContextLimit(agent.config.provider, agent.config.model);
-  const defaultTokenThreshold = Math.min(Math.floor(modelLimit * 0.75), 32000);
+  // Scale compaction threshold with the active model's real context window instead of capping at 32K
+  const defaultTokenThreshold = Math.min(Math.max(Math.floor(modelLimit * 0.72), 16000), 180000);
   const thresholdTokens = agent.config.compactionThresholdTokens
     || (agent.config.compactionThresholdChars ? Math.ceil(agent.config.compactionThresholdChars / 4) : defaultTokenThreshold);
 
@@ -43,21 +44,46 @@ export function compactHistoryIfNeeded(agent: any) {
   if (!split) return;
   const { older, recent, totalTokens } = split;
 
-  /** @type {string[]} */
-  const summaryLines = [];
+  const summaryLines: string[] = [];
+  const touchedFiles = new Set<string>();
+  const recentErrors: string[] = [];
+
   for (const msg of older) {
     if (msg.role === 'user') {
-      summaryLines.push(`User: ${String(msg.content || '').slice(0, 160)}`);
-    } else if (msg.role === 'assistant' && msg.content) {
-      summaryLines.push(`Assistant: ${String(msg.content).slice(0, 160)}`);
+      summaryLines.push(`User: ${String(msg.content || '').slice(0, 300)}`);
+    } else if (msg.role === 'assistant') {
+      if (msg.content) {
+        summaryLines.push(`Assistant: ${String(msg.content).slice(0, 300)}`);
+      }
+      if (Array.isArray(msg.toolCalls)) {
+        for (const tc of msg.toolCalls) {
+          const p = tc?.args?.path || tc?.args?.from || tc?.args?.to;
+          if (typeof p === 'string' && p.trim()) touchedFiles.add(p.trim());
+        }
+      }
     } else if (msg.role === 'tool') {
-      summaryLines.push(`Tool(${msg.name}): ${String(msg.content || '').slice(0, 100)}`);
+      const contentStr = String(msg.content || '');
+      summaryLines.push(`Tool(${msg.name}): ${contentStr.slice(0, 250)}`);
+      if (contentStr.includes('"success":false') || contentStr.includes('Error:')) {
+        recentErrors.push(`${msg.name}: ${contentStr.slice(0, 180)}`);
+      }
     }
   }
 
+  const sections: string[] = [
+    `[Compacted Earlier Context (${older.length} turns)]`
+  ];
+  if (touchedFiles.size > 0) {
+    sections.push(`Touched files: ${Array.from(touchedFiles).slice(-25).join(', ')}`);
+  }
+  if (recentErrors.length > 0) {
+    sections.push(`Key errors encountered:\n${recentErrors.slice(-5).map((e) => `- ${e}`).join('\n')}`);
+  }
+  sections.push(summaryLines.slice(-40).join('\n'));
+
   const compactedMsg = {
     role: 'user',
-    content: `[Compacted Earlier Context (${older.length} turns)]\n${summaryLines.slice(-16).join('\n')}`
+    content: sections.join('\n')
   };
 
   agent.history = [compactedMsg, ...recent];

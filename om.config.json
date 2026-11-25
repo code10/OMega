@@ -125,7 +125,7 @@
     "maxHealAttempts": 1,
     "maxSubagentSteps": 6
   },
-  "effort": "low",
+  "effort": "medium",
   "daemon": {
     "triggers": []
   }

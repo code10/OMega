@@ -23,8 +23,21 @@ export interface SystemOneConfig {
   riskThreshold?: number;
   toolShortlisting?: boolean;
   toolShortlistK?: number;
+  pinnedTools?: string[];
   selfHealTriage?: boolean;
 }
+
+export const CORE_CODING_TOOLS = [
+  'read_file',
+  'write_file',
+  'patch_file',
+  'search_files',
+  'list_dir',
+  'exec_command',
+  'get_diagnostics',
+  'git_status',
+  'git_diff'
+] as const;
 
 export type TextEmbedder = (text: string) => Promise<number[]>;
 
@@ -116,6 +129,7 @@ export class OMSystemOne {
       riskThreshold: typeof config.riskThreshold === 'number' ? config.riskThreshold : 0.45,
       toolShortlisting: config.toolShortlisting ?? true,
       toolShortlistK: typeof config.toolShortlistK === 'number' ? config.toolShortlistK : 20,
+      pinnedTools: Array.isArray(config.pinnedTools) ? config.pinnedTools : [...CORE_CODING_TOOLS],
       selfHealTriage: config.selfHealTriage ?? true,
     };
     this._embedder = options.embedder || null;
@@ -128,6 +142,18 @@ export class OMSystemOne {
 
   isConfigured(): boolean {
     return Boolean(this._embedder || this.config.enabled);
+  }
+
+  isReady(): boolean {
+    return Boolean(this._embedder);
+  }
+
+  /**
+   * Kick off hardware detection and ONNX pipeline loading in the background so turn 1 doesn't stall.
+   */
+  warmup(): void {
+    if (!this.isConfigured() || this._embedder || this._initPromise || this._initFailed) return;
+    void this.getEmbedder().catch(() => {});
   }
 
   /**
@@ -280,30 +306,54 @@ export class OMSystemOne {
   }
 
   /**
-   * C. Shortlist the most relevant tools for a prompt in a single prompt forward pass.
+   * C. Shortlist the most relevant tools for a prompt while always pinning core coding tools.
+   * When `maxWaitMs` is provided and the ONNX pipeline is still cold-starting, returns all tools
+   * rather than stalling turn 1.
    */
   async shortlistTools<T extends { name: string; description?: string }>(
     prompt: string,
     tools: T[],
-    k = this.config.toolShortlistK
+    k = this.config.toolShortlistK,
+    options: { maxWaitMs?: number } = {}
   ): Promise<T[]> {
     if (!this.config.toolShortlisting || !this.isConfigured() || !Array.isArray(tools) || tools.length <= k || k <= 0) {
       return tools;
     }
-    const embed = await this.getEmbedder();
+
+    let embed = this._embedder;
+    if (!embed) {
+      if (typeof options.maxWaitMs === 'number' && options.maxWaitMs > 0) {
+        this.warmup();
+        let timer: ReturnType<typeof setTimeout> | null = null;
+        try {
+          embed = await Promise.race([
+            this.getEmbedder(),
+            new Promise<null>((resolve) => {
+              timer = setTimeout(() => resolve(null), options.maxWaitMs);
+            })
+          ]);
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+      } else {
+        embed = await this.getEmbedder();
+      }
+    }
     if (!embed) return tools;
 
     try {
       const promptVec = await embed(String(prompt || '').slice(0, 500));
+      const pinnedSet = new Set(this.config.pinnedTools || CORE_CODING_TOOLS);
       const scored = await Promise.all(
         tools.map(async (tool) => {
           const toolVec = await this._embedCached(`${tool.name}: ${tool.description || ''}`);
           const score = toolVec ? cosineSimilarity(promptVec, toolVec) : 0;
-          return { tool, score };
+          return { tool, score, pinned: pinnedSet.has(tool.name) };
         })
       );
-      scored.sort((a, b) => b.score - a.score);
-      return scored.slice(0, k).map((item) => item.tool);
+      const pinned = scored.filter((item) => item.pinned).sort((a, b) => b.score - a.score);
+      const others = scored.filter((item) => !item.pinned).sort((a, b) => b.score - a.score);
+      return [...pinned, ...others].slice(0, k).map((item) => item.tool);
     } catch {
       return tools;
     }

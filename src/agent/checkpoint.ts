@@ -122,6 +122,43 @@ export function getCheckpointPath(memoryDir: string, sessionId: string): string 
   return path.join(getCheckpointsDir(memoryDir), `${sanitizeSessionId(sessionId)}.json`);
 }
 
+function getPendingStepPath(memoryDir: string, sessionId: string): string {
+  return path.join(getCheckpointsDir(memoryDir), `${sanitizeSessionId(sessionId)}.pending`);
+}
+
+/**
+ * Lightweight pre-tool crash marker (~24 bytes) to avoid serializing full history twice per step.
+ */
+export function markPendingStep(memoryDir: string, sessionId: string, pendingStep: number): void {
+  try {
+    const dir = getCheckpointsDir(memoryDir);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(getPendingStepPath(memoryDir, sessionId), JSON.stringify({ pendingStep }), 'utf8');
+  } catch {
+    // Non-fatal
+  }
+}
+
+export function clearPendingStep(memoryDir: string, sessionId: string): void {
+  try {
+    const p = getPendingStepPath(memoryDir, sessionId);
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+  } catch {
+    // Non-fatal
+  }
+}
+
+function readPendingStepSidecar(memoryDir: string, sessionId: string): number | null {
+  try {
+    const p = getPendingStepPath(memoryDir, sessionId);
+    if (!fs.existsSync(p)) return null;
+    const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
+    return typeof parsed?.pendingStep === 'number' ? parsed.pendingStep : null;
+  } catch {
+    return null;
+  }
+}
+
 export function isPidAlive(pid: number | null | undefined): boolean {
   if (!pid || typeof pid !== 'number' || pid <= 0) return false;
   try {
@@ -142,7 +179,7 @@ export function saveCheckpoint(memoryDir: string, record: CheckpointRecord): str
     ...record,
     updatedAt: new Date().toISOString()
   };
-  const serialized = JSON.stringify(payload, null, 2);
+  const serialized = JSON.stringify(payload);
   fs.writeFileSync(tmpPath, serialized, 'utf8');
   let renamed = false;
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -164,6 +201,9 @@ export function saveCheckpoint(memoryDir: string, record: CheckpointRecord): str
     fs.writeFileSync(filePath, serialized, 'utf8');
     try { fs.unlinkSync(tmpPath); } catch (_) {}
   }
+  if (payload.pendingStep === null || payload.pendingStep === undefined) {
+    clearPendingStep(memoryDir, record.sessionId);
+  }
   return filePath;
 }
 
@@ -172,9 +212,12 @@ export function loadCheckpoint(memoryDir: string, sessionId: string): Checkpoint
   if (!fs.existsSync(filePath)) return null;
   try {
     const raw = JSON.parse(fs.readFileSync(filePath, 'utf8')) as CheckpointRecord;
+    const sidecarPending = readPendingStepSidecar(memoryDir, sessionId);
+    const pendingStep = typeof sidecarPending === 'number' ? sidecarPending : raw.pendingStep;
     const alive = raw.status === 'running' ? isPidAlive(raw.pid) : false;
     return {
       ...raw,
+      ...(pendingStep !== undefined ? { pendingStep } : {}),
       pidAlive: alive,
       recoverable: raw.status !== 'completed' && !alive
     };
@@ -192,11 +235,14 @@ export function listCheckpoints(memoryDir: string): CheckpointRecord[] {
   for (const f of files) {
     try {
       const raw = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) as CheckpointRecord;
+      const sidecarPending = readPendingStepSidecar(memoryDir, raw.sessionId);
+      const pendingStep = typeof sidecarPending === 'number' ? sidecarPending : raw.pendingStep;
       const alive = raw.status === 'running' ? isPidAlive(raw.pid) : false;
       const effectiveStatus: CheckpointStatus =
         raw.status === 'running' && !alive ? 'paused' : raw.status;
       records.push({
         ...raw,
+        ...(pendingStep !== undefined ? { pendingStep } : {}),
         status: effectiveStatus,
         pidAlive: alive,
         recoverable: effectiveStatus !== 'completed' && !alive
@@ -210,6 +256,7 @@ export function listCheckpoints(memoryDir: string): CheckpointRecord[] {
 
 export function deleteCheckpoint(memoryDir: string, sessionId: string): boolean {
   const filePath = getCheckpointPath(memoryDir, sessionId);
+  clearPendingStep(memoryDir, sessionId);
   if (!fs.existsSync(filePath)) return false;
   fs.unlinkSync(filePath);
   return true;

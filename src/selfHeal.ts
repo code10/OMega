@@ -66,8 +66,9 @@ const DIAGNOSTIC_TOOLS = [
   'read_file',
   'patch_file',
   'write_file',
-  'list_files',
+  'list_dir',
   'search_files',
+  'get_diagnostics',
   'git_status',
   'git_diff'
 ];

@@ -23,7 +23,7 @@ export class OpenAIProvider extends BaseProvider {
     }
   }
 
-  async chat({ messages, tools, systemPrompt, temperature = 0.2, effort, maxTokens, responseFormat, onToken, signal }: Record<string, any>) {
+  async chat({ messages, tools, systemPrompt, dynamicContext, temperature = 0.2, effort, maxTokens, responseFormat, onToken, signal }: Record<string, any>) {
     if (!this.apiKey) {
       throw new Error(`${this.apiKeyEnv} environment variable is required for ${this.name} provider`);
     }
@@ -62,6 +62,27 @@ export class OpenAIProvider extends BaseProvider {
         formattedMessages.push({ role: msg.role, content: parts });
       } else {
         formattedMessages.push({ role: msg.role, content: msg.content });
+      }
+    }
+
+    if (dynamicContext) {
+      // Keep the leading system message + earlier turns static for automatic prefix caching;
+      // attach dynamic memory/recall context to the latest user message.
+      let attached = false;
+      for (let i = formattedMessages.length - 1; i >= 0; i--) {
+        if (formattedMessages[i].role === 'user') {
+          const cur = formattedMessages[i].content;
+          if (typeof cur === 'string') {
+            formattedMessages[i].content = `[Dynamic Context]\n${dynamicContext}\n\n${cur}`;
+          } else if (Array.isArray(cur)) {
+            formattedMessages[i].content = [{ type: 'text', text: `[Dynamic Context]\n${dynamicContext}` }, ...cur];
+          }
+          attached = true;
+          break;
+        }
+      }
+      if (!attached) {
+        formattedMessages.push({ role: 'system', content: dynamicContext });
       }
     }
 

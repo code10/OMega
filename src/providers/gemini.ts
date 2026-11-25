@@ -19,7 +19,7 @@ export class GeminiProvider extends BaseProvider {
     }
   }
 
-  async chat({ messages, tools, systemPrompt, temperature = 0.2, effort, maxTokens, responseFormat, onToken, signal }: Record<string, any>): Promise<any> {
+  async chat({ messages, tools, systemPrompt, dynamicContext, cachedContent, temperature = 0.2, effort, maxTokens, responseFormat, onToken, signal }: Record<string, any>): Promise<any> {
     if (!this.apiKey) {
       throw new Error('GEMINI_API_KEY environment variable is required for Gemini provider');
     }
@@ -83,10 +83,27 @@ export class GeminiProvider extends BaseProvider {
       }
     }
 
+    // Keep systemInstruction strictly static for Gemini prefix/context caching;
+    // attach dynamic memory/recall context to the latest user turn so earlier turns stay cache-hot.
+    if (dynamicContext) {
+      let attached = false;
+      for (let i = contents.length - 1; i >= 0; i--) {
+        if (contents[i].role === 'user' && !contents[i].parts?.[0]?.functionResponse) {
+          contents[i].parts = [{ text: `[Dynamic Context]\n${dynamicContext}` }, ...contents[i].parts];
+          attached = true;
+          break;
+        }
+      }
+      if (!attached) {
+        contents.push({ role: 'user', parts: [{ text: `[Dynamic Context]\n${dynamicContext}` }] });
+      }
+    }
+
     const supportsThinking = /gemini-(2\.5|3|4)/i.test(this.model);
     const thinkingBudget = effort === 'low' ? 1024 : effort === 'high' ? 8192 : 4096;
     const payload: Record<string, any> = {
       contents,
+      ...(cachedContent ? { cachedContent } : {}),
       generationConfig: {
         temperature,
         ...(supportsThinking && effort ? { thinkingConfig: { thinkingBudget } } : {}),
@@ -98,13 +115,13 @@ export class GeminiProvider extends BaseProvider {
       }
     };
 
-    if (systemPrompt) {
+    if (systemPrompt && !cachedContent) {
       payload.systemInstruction = {
         parts: [{ text: systemPrompt }]
       };
     }
 
-    if (tools && tools.length > 0) {
+    if (tools && tools.length > 0 && !cachedContent) {
       payload.tools = tools;
     }
 

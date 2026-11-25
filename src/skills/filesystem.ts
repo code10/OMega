@@ -137,16 +137,34 @@ export const filesystemSkills = [
         };
       }
 
-      // Truncate if gigantic (over 50KB)
+      // Always include 1-based line numbers so agents can cite and patch lines accurately
       const MAX_BYTES = 50 * 1024;
-      if (Buffer.byteLength(content, 'utf8') > MAX_BYTES) {
-        const truncated = content.slice(0, MAX_BYTES);
+      const numberedLines: string[] = [];
+      let totalBytes = 0;
+      let truncated = false;
+      let lastLine = 0;
+
+      for (let i = 0; i < lines.length; i++) {
+        const formatted = `${i + 1}: ${lines[i]}`;
+        const lineBytes = Buffer.byteLength(formatted, 'utf8') + (i > 0 ? 1 : 0);
+        if (totalBytes + lineBytes > MAX_BYTES && numberedLines.length > 0) {
+          truncated = true;
+          break;
+        }
+        numberedLines.push(formatted);
+        totalBytes += lineBytes;
+        lastLine = i + 1;
+      }
+
+      const numberedContent = numberedLines.join('\n');
+      if (truncated) {
         return {
           success: true,
           path: target,
           totalLines: lines.length,
+          displayedLines: `1-${lastLine}`,
           truncated: true,
-          content: truncated + `\n\n... [Content truncated at ${MAX_BYTES} bytes. Use startLine/endLine to view more]`
+          content: numberedContent + `\n\n... [Content truncated at ${MAX_BYTES} bytes (line ${lastLine}/${lines.length}). Use startLine/endLine to view more]`
         };
       }
 
@@ -154,7 +172,8 @@ export const filesystemSkills = [
         success: true,
         path: target,
         totalLines: lines.length,
-        content
+        displayedLines: `1-${lines.length}`,
+        content: numberedContent
       };
     }
   },
@@ -235,21 +254,23 @@ export const filesystemSkills = [
 
   {
     name: 'patch_file',
-    description: 'Replace one or more exact target snippets in a file without overwriting the whole file.',
+    description: 'Replace one or more exact target snippets in a file without overwriting the whole file. Rejects ambiguous multi-occurrence matches unless replaceAll is true.',
     parameters: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Path of the file to modify' },
         targetText: { type: 'string', description: 'Exact string in the file to replace (for single edit)' },
         replacementText: { type: 'string', description: 'New string to insert in place of targetText' },
+        replaceAll: { type: 'boolean', description: 'Replace all occurrences when targetText appears multiple times (default: false)' },
         edits: {
           type: 'array',
-          description: 'Optional list of { targetText, replacementText } hunks to apply atomically',
+          description: 'Optional list of { targetText, replacementText, replaceAll? } hunks to apply atomically',
           items: {
             type: 'object',
             properties: {
               targetText: { type: 'string' },
-              replacementText: { type: 'string' }
+              replacementText: { type: 'string' },
+              replaceAll: { type: 'boolean' }
             },
             required: ['targetText', 'replacementText']
           }
@@ -258,11 +279,12 @@ export const filesystemSkills = [
       required: ['path']
     },
     execute: async (
-      { path: filePath, targetText, replacementText, edits }: {
+      { path: filePath, targetText, replacementText, replaceAll = false, edits }: {
         path: string;
         targetText?: string;
         replacementText?: string;
-        edits?: Array<{ targetText: string; replacementText: string }>;
+        replaceAll?: boolean;
+        edits?: Array<{ targetText: string; replacementText: string; replaceAll?: boolean }>;
       },
       context: SkillContext = {}
     ) => {
@@ -278,34 +300,71 @@ export const filesystemSkills = [
         return { success: false, error: `File not found: ${filePath}` };
       }
 
-      const hunks: Array<{ targetText: string; replacementText: string }> = Array.isArray(edits) && edits.length > 0
+      const hunks: Array<{ targetText: string; replacementText: string; replaceAll?: boolean }> = Array.isArray(edits) && edits.length > 0
         ? edits
         : typeof targetText === 'string' && typeof replacementText === 'string'
-          ? [{ targetText, replacementText }]
+          ? [{ targetText, replacementText, replaceAll }]
           : [];
 
       if (hunks.length === 0) {
         return { success: false, error: 'Either targetText/replacementText or a non-empty edits array is required.' };
       }
 
+      const countOccurrences = (haystack: string, needle: string): number => {
+        if (!needle) return 0;
+        let count = 0;
+        let idx = 0;
+        while ((idx = haystack.indexOf(needle, idx)) !== -1) {
+          count++;
+          idx += needle.length;
+        }
+        return count;
+      };
+
       const raw = await backend.readFile(target, 'utf8');
       const usesCRLF = raw.includes('\r\n');
       let working = raw;
+      let totalReplacements = 0;
 
       for (let i = 0; i < hunks.length; i++) {
-        const { targetText: tText, replacementText: rText } = hunks[i];
-        if (working.includes(tText)) {
-          working = working.replace(tText, () => rText);
+        const { targetText: tText, replacementText: rText, replaceAll: hunkReplaceAll } = hunks[i];
+        const allowMulti = Boolean(hunkReplaceAll ?? replaceAll);
+        const hunkLabel = hunks.length > 1 ? ` (edit #${i + 1})` : '';
+
+        if (!tText) {
+          return { success: false, error: `targetText cannot be empty${hunkLabel}` };
+        }
+
+        const exactCount = countOccurrences(working, tText);
+        if (exactCount > 0) {
+          if (exactCount > 1 && !allowMulti) {
+            return {
+              success: false,
+              error: `Ambiguous match in ${filePath}${hunkLabel}: targetText matched ${exactCount} times. Provide more surrounding context to uniquely identify the target, or set replaceAll: true.`
+            };
+          }
+          working = allowMulti ? working.split(tText).join(rText) : working.replace(tText, () => rText);
+          totalReplacements += allowMulti ? exactCount : 1;
         } else {
           // Retry with normalized line endings so LF snippets match CRLF files cleanly
           const normWorking = working.replace(/\r\n/g, '\n');
           const normTarget = tText.replace(/\r\n/g, '\n');
-          if (!normWorking.includes(normTarget)) {
-            return { success: false, error: `targetText not found in ${filePath}${hunks.length > 1 ? ` (edit #${i + 1})` : ''}` };
+          const normCount = countOccurrences(normWorking, normTarget);
+          if (normCount === 0) {
+            return { success: false, error: `targetText not found in ${filePath}${hunkLabel}` };
+          }
+          if (normCount > 1 && !allowMulti) {
+            return {
+              success: false,
+              error: `Ambiguous match in ${filePath}${hunkLabel}: targetText matched ${normCount} times. Provide more surrounding context to uniquely identify the target, or set replaceAll: true.`
+            };
           }
           const normReplacement = rText.replace(/\r\n/g, '\n');
-          const replaced = normWorking.replace(normTarget, () => normReplacement);
+          const replaced = allowMulti
+            ? normWorking.split(normTarget).join(normReplacement)
+            : normWorking.replace(normTarget, () => normReplacement);
           working = usesCRLF ? replaced.replace(/\n/g, '\r\n') : replaced;
+          totalReplacements += allowMulti ? normCount : 1;
         }
       }
 
@@ -315,6 +374,7 @@ export const filesystemSkills = [
         success: true,
         path: target,
         editsApplied: hunks.length,
+        replacements: totalReplacements,
         message: 'File successfully patched.',
         ...(diagnostics.length > 0 ? { diagnostics } : {})
       };
@@ -374,6 +434,89 @@ export const filesystemSkills = [
       const BINARY_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.ico', '.webp', '.pdf', '.zip', '.tar', '.gz', '.bin', '.exe', '.dll', '.dylib', '.so']);
       const MAX_SEARCH_FILE_SIZE = 2 * 1024 * 1024; // 2MB
 
+      // Fast path: try native `rg` (ripgrep), then `git grep`, before falling back to JS walker
+      const parseGrepLines = (stdout: string) => {
+        const parsed: Array<{ file: string; line: number; content: string }> = [];
+        for (const rawLine of stdout.split(/\r?\n/)) {
+          if (!rawLine) continue;
+          const m = /^(.+?):(\d+):(.*)$/.exec(rawLine);
+          if (!m) continue;
+          const relFile = m[1].replace(/^\.[/\\]/, '');
+          if (fileFilter && !fileFilter(path.basename(relFile))) continue;
+          parsed.push({
+            file: relFile,
+            line: Number(m[2]),
+            content: m[3].trim()
+          });
+          if (parsed.length >= maxResults) break;
+        }
+        return parsed;
+      };
+
+      if (typeof backend.spawn === 'function') {
+        // 1. Try ripgrep (`rg`)
+        try {
+          const rgArgs = [
+            '--no-heading',
+            '--line-number',
+            '--color=never',
+            '--ignore-case',
+            '--no-ignore',
+            '--max-filesize=2M',
+            `--max-count=${maxResults}`
+          ];
+          for (const d of IGNORED_DIRS) {
+            rgArgs.push('--glob', `!${d}/**`, '--glob', `!${d}`);
+          }
+          if (!regex) rgArgs.push('-F');
+          if (typeof filePattern === 'string' && filePattern.trim()) {
+            const pat = filePattern.trim();
+            rgArgs.push('-g', pat.includes('*') ? pat : `*${pat}*`);
+          }
+          rgArgs.push('--', query, '.');
+
+          const rgRes = await backend.spawn('rg', rgArgs, {
+            cwd: targetDir,
+            env: process.env,
+            timeoutMs: 10000
+          });
+          if (!rgRes.errorMessage && (rgRes.exitCode === 0 || rgRes.exitCode === 1)) {
+            const rgResults = rgRes.exitCode === 0 ? parseGrepLines(rgRes.stdout || '') : [];
+            return {
+              success: true,
+              query,
+              engine: 'rg',
+              matchCount: rgResults.length,
+              results: rgResults
+            };
+          }
+        } catch {
+          // rg not available; try git grep
+        }
+
+        // 2. Try `git grep` (works inside git repos; fast C implementation)
+        try {
+          const gitArgs = ['grep', '-n', '-I', '-i', '--untracked', regex ? '-E' : '-F', '--max-count', String(maxResults), '-e', query, '--', '.'];
+          const gitRes = await backend.spawn('git', gitArgs, {
+            cwd: targetDir,
+            env: process.env,
+            timeoutMs: 10000
+          });
+          if (!gitRes.errorMessage && gitRes.exitCode === 0) {
+            const gitResults = parseGrepLines(gitRes.stdout || '');
+            return {
+              success: true,
+              query,
+              engine: 'git-grep',
+              matchCount: gitResults.length,
+              results: gitResults
+            };
+          }
+        } catch {
+          // git grep not available or not a git repo; fall back to JS walker
+        }
+      }
+
       async function walk(currentDir: string) {
         if (results.length >= maxResults) return;
         let entries;
@@ -426,6 +569,7 @@ export const filesystemSkills = [
       return {
         success: true,
         query,
+        engine: 'js',
         matchCount: results.length,
         results
       };
