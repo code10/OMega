@@ -1,5 +1,5 @@
 {
-  "name": "omega-agent",
+  "name": "omega-harness",
   "version": "1.0.0",
   "description": "A local-first framework for building and running AI agents.",
   "type": "module",
@@ -35,8 +35,9 @@
   "keywords": [
     "ai",
     "agent",
+    "agent-harness",
     "autonomous",
-    "omega-agent",
+    "omega-harness",
     "tools",
     "skills",
     "llm",

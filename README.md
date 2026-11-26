@@ -5,7 +5,7 @@
 # OMega
 
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.19.0-brightgreen.svg)](https://nodejs.org/)
-[![Downloads](https://img.shields.io/npm/dt/omega-agent.svg?label=downloads&color=brightgreen)](https://www.npmjs.com/package/omega-agent)
+[![Downloads](https://img.shields.io/npm/dt/omega-harness.svg?label=downloads&color=brightgreen)](https://www.npmjs.com/package/omega-harness)
 [![Dependencies](https://img.shields.io/badge/dependencies-1-blue.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-194%20passed-success.svg)](tests/)
@@ -39,7 +39,7 @@ npm run build
 Or scaffold a new project:
 
 ```bash
-npx omega-agent init my-agent
+npx omega-harness init my-agent
 cd my-agent
 ```
 

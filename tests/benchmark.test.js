@@ -395,9 +395,9 @@ test('OMega Autonomous Evaluation & Benchmark Suite', async (t) => {
   });
 
   // ==========================================================================
-  // 4. COMMUNITY-READY PACKAGING & CLI QUICKSTART (`npx omega-agent init`)
+  // 4. COMMUNITY-READY PACKAGING & CLI QUICKSTART (`npx omega-harness init`)
   // ==========================================================================
-  await t.test('4. Community CLI Quickstart Scaffolder (`npx omega-agent init`)', async () => {
+  await t.test('4. Community CLI Quickstart Scaffolder (`npx omega-harness init`)', async () => {
     const initTargetDir = path.join(BENCH_DIR, 'quickstart_project');
     const result = await runInitCommand({
       targetDir: initTargetDir,

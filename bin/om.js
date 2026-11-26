@@ -172,7 +172,7 @@ async function handleListModels(agent, providerName) {
 async function main() {
   const args = process.argv.slice(2);
 
-  // Subcommand: init (npx omega-agent init [dir] [--force])
+  // Subcommand: init (npx omega-harness init [dir] [--force])
   if (args[0] === 'init' || args.includes('--init')) {
     const dirArg = args[1] && !args[1].startsWith('-') ? args[1] : process.cwd();
     const force = args.includes('--force') || args.includes('-f');
@@ -197,9 +197,9 @@ async function main() {
   // Help flag
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`
-OM (omega-agent) — AI Agent Framework CLI
+OMEGA (omega-harness) — Local-First Agent Harness CLI
 Usage:
-  npx omega-agent init [dir]   Scaffold a new OMega project, template skills, and secure .env
+  npx omega-harness init [dir] Scaffold a new OMega project, template skills, and secure .env
   om                           Start interactive agent REPL
   om "<instruction>"           Run single task and exit
   om models [provider]         List available models (e.g. Gemini, Gpt)

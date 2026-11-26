@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /**
- * Community Quickstart Scaffolder (`npx omega-agent init [dir]`)
+ * Community Quickstart Scaffolder (`npx omega-harness init [dir]`)
  *
  * Scaffolds a ready-to-run OMega Agent workspace with:
  * - Secure `.env.example` and `.env` (with 0o600 permissions where supported)
@@ -46,7 +46,7 @@ export async function runInitCommand(options: Record<string, any> = {}) {
 
   // 1. .env.example
   const envExampleContent = `# ============================================================================
-# OMega (omega-agent) — Secure Environment Configuration
+# OMega (omega-harness) — Secure Environment Configuration
 # Never commit your .env file to version control!
 # ============================================================================
 
@@ -171,7 +171,7 @@ When invoked via \`/code-review\`, follow these steps systematically:
 This file stores persistent facts, user preferences, and important context across sessions.
 
 ## User & Environment
-- Agent: OMega (omega-agent)
+- Agent: OMega (omega-harness)
 - Workspace initialized: ${new Date().toISOString()}
 
 ## Learned Facts & Notes
@@ -200,9 +200,9 @@ This file stores persistent facts, user preferences, and important context acros
      Edit \x1b[1m.env\x1b[0m to add GEMINI_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY.
      \x1b[2m(Note: .env is automatically added to .gitignore so your keys stay private.)\x1b[0m
   2. \x1b[36mLaunch Interactive CLI:\x1b[0m
-     \x1b[1mnpx omega-agent\x1b[0m  (or \x1b[1mom\x1b[0m)
+     \x1b[1mnpx omega-harness\x1b[0m  (or \x1b[1mom\x1b[0m)
   3. \x1b[36mLaunch Live Web Dashboard:\x1b[0m
-     \x1b[1mnpx omega-agent gateway\x1b[0m
+     \x1b[1mnpx omega-harness gateway\x1b[0m
 `);
   }
 

@@ -60,7 +60,7 @@ jobs:
               "",
               "### Platform & Verification",
               "- Verified on **Linux, macOS, and Windows** via GitHub Actions CI (`npm run build`, `npm run check:types`, `npm run lint`, `npm test`).",
-              `- Pre-packed npm tarball attached below (\`omega-agent-${version}.tgz\`).`
+              `- Pre-packed npm tarball attached below (\`omega-harness-${version}.tgz\`).`
             ].filter((line, idx, arr) => !(line === "" && arr[idx - 1] === "")).join("\n") + "\n";
 
             fs.writeFileSync("RELEASE_NOTES.md", notes, "utf8");
@@ -72,7 +72,7 @@ jobs:
         run: |
           TAG="${GITHUB_REF_NAME}"
           VERSION="${TAG#v}"
-          TARBALL="$(ls omega-agent-*.tgz | head -n 1)"
+          TARBALL="$(ls omega-harness-*.tgz | head -n 1)"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "OMega ${VERSION}" --notes-file RELEASE_NOTES.md --latest
             if [ -n "$TARBALL" ]; then
