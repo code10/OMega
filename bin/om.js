@@ -70,12 +70,12 @@ function printBanner(config, skillsCount, clearFirst = false) {
     linesSinceBanner = 0;
   }
   origConsoleLog(`
-${C.bold}${C.cyan}  ██████╗ ███╗   ███╗${C.reset}    ${C.bold}${C.skyBlue}OM — Agent Harness${C.reset}
-${C.bold}${C.cyan} ██╔═══██╗████╗ ████║${C.reset}    ${C.gray}Local-first operator runtime${C.reset}
-${C.bold}${C.cyan} ██║   ██║██╔████╔██║${C.reset}
-${C.bold}${C.cyan} ██║   ██║██║╚██╔╝██║${C.reset}    ${C.gray}Provider:${C.reset}  ${C.skyBlue}${config.provider}${C.reset} [${config.model}]
-${C.bold}${C.cyan} ╚██████╔╝██║ ╚═╝ ██║${C.reset}    ${C.gray}Skills:${C.reset}    ${C.skyBlue}${skillsCount} loaded${C.reset}
-${C.bold}${C.cyan}  ╚═════╝ ╚═╝     ╚═╝${C.reset}    ${C.gray}Memory:${C.reset}    ${C.dim}${config.memoryDir}${C.reset}
+${C.bold}${C.cyan}  ██████╗ ███╗   ███╗███████╗ ██████╗  █████╗ ${C.reset}   ${C.bold}${C.skyBlue}OMEGA — Agent Harness${C.reset}
+${C.bold}${C.cyan} ██╔═══██╗████╗ ████║██╔════╝██╔════╝ ██╔══██╗${C.reset}   ${C.gray}Local-first operator runtime${C.reset}
+${C.bold}${C.cyan} ██║   ██║██╔████╔██║█████╗  ██║  ███╗███████║${C.reset}
+${C.bold}${C.cyan} ██║   ██║██║╚██╔╝██║██╔══╝  ██║   ██║██╔══██║${C.reset}   ${C.gray}Provider:${C.reset}  ${C.skyBlue}${config.provider}${C.reset} [${config.model}]
+${C.bold}${C.cyan} ╚██████╔╝██║ ╚═╝ ██║███████╗╚██████╔╝██║  ██║${C.reset}   ${C.gray}Skills:${C.reset}    ${C.skyBlue}${skillsCount} loaded${C.reset}
+${C.bold}${C.cyan}  ╚═════╝ ╚═╝     ╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝${C.reset}   ${C.gray}Memory:${C.reset}    ${C.dim}${config.memoryDir}${C.reset}
 `);
 }
 
@@ -88,8 +88,8 @@ function updateBannerInPlace(config, skillsCount) {
   // Only update in place if the terminal hasn't scrolled the top banner off-screen
   if ((linesSinceBanner || 0) + 10 >= rows) return;
 
-  const providerLine = `${C.bold}${C.cyan} ██║   ██║██║╚██╔╝██║${C.reset}    ${C.gray}Provider:${C.reset}  ${C.skyBlue}${config.provider}${C.reset} [${config.model}]`;
-  const skillsLine = `${C.bold}${C.cyan} ╚██████╔╝██║ ╚═╝ ██║${C.reset}    ${C.gray}Skills:${C.reset}    ${C.skyBlue}${skillsCount} loaded${C.reset}`;
+  const providerLine = `${C.bold}${C.cyan} ██║   ██║██║╚██╔╝██║██╔══╝  ██║   ██║██╔══██║${C.reset}   ${C.gray}Provider:${C.reset}  ${C.skyBlue}${config.provider}${C.reset} [${config.model}]`;
+  const skillsLine = `${C.bold}${C.cyan} ╚██████╔╝██║ ╚═╝ ██║███████╗╚██████╔╝██║  ██║${C.reset}   ${C.gray}Skills:${C.reset}    ${C.skyBlue}${skillsCount} loaded${C.reset}`;
   // Row 5 is Provider, Row 6 is Skills when banner is at the top of the screen
   output.write(
     `\x1b[s` +
