@@ -2,16 +2,34 @@ import { createProvider } from './index.js';
 import { estimateMessagesTokens, getModelContextLimit } from '../tokenizer.js';
 import { collectDeviceSpecs, type DeviceSpecsSnapshot } from '../deviceSpecs.js';
 
+export interface ProviderHealthMetrics {
+  calls: number;
+  successes: number;
+  failures: number;
+  inFlight: number;
+  rpm60s: number;
+  ewmaTtftMs: number | null;
+  ewmaLatencyMs: number | null;
+  lastTtftMs: number | null;
+  lastLatencyMs: number | null;
+  lastSuccessAt: number | null;
+  lastFailureAt: number | null;
+  halfOpen: boolean;
+  openCount: number;
+}
+
 /**
  * Multi-Model Router & Automatic Failover Engine for OMega.
  *
  * Provides:
  * - Graceful failover between local models (LM Studio, vLLM, OM)
  *   and cloud providers (Gemini, OpenAI, Anthropic).
- * - Automatic retry with exponential backoff on transient failures.
+ * - Automatic retry with exponential backoff + jitter on transient failures.
+ * - EWMA TTFT & latency tracking, load balancing ('priority' | 'latency' | 'round_robin'),
+ *   half-open circuit breaker with exponential cooldown backoff, and optional hedged requests.
  * - Context window overflow / token limit detection with seamless handoff
  *   to larger-context cloud models.
- * - Full telemetry and event emission ('retry', 'fallback') for UI & CLI visibility.
+ * - Full telemetry and event emission ('retry', 'fallback', 'hedge_won', 'stream_reset') for UI & CLI visibility.
  */
 export class ModelRouter {
   config: Record<string, any>;
@@ -24,30 +42,52 @@ export class ModelRouter {
   _providerCache: Map<string, any>;
   cooldowns: Map<string, number>;
   consecutiveFailures: Map<string, number>;
+  providerMetrics: Map<string, ProviderHealthMetrics>;
+  _inFlight: Map<string, number>;
+  _requestTimestamps: Map<string, number[]>;
+  _rrCursor: number;
   stats: Record<string, any>;
 
   constructor(options: Record<string, any> = {}) {
     this.config = options.config || {};
+    const defaultHedging = { enabled: false, delayMs: 3500 };
+    const defaultRpmGuard = { enabled: false, softRpmPerModel: 25, maxInFlightPerModel: 4 };
     this.routingConfig = {
       enabled: true,
+      strategy: 'priority',
+      balancePrimary: false,
+      adaptiveEffort: false,
       maxRetries: 1,
       retryDelayMs: 75,
       rateLimitCooldownMs: 15000,
+      overloadCooldownMs: 8000,
       maxRateLimitWaitMs: 65000,
       circuitBreakerThreshold: 3,
       circuitBreakerCooldownMs: 30000,
+      maxCircuitBreakerCooldownMs: 120000,
+      ewmaAlpha: 0.3,
       autoHandoffOnContextLimit: true,
       fallbackChain: [
-        { provider: 'gemini', model: 'gemini-3-flash-preview' },
-        { provider: 'gemini', model: 'gemini-3.1-flash-lite' },
-        { provider: 'openai', model: 'gpt-4o' },
-        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'gemini', model: 'gemini-3.5-flash' },
+        { provider: 'gemini', model: 'gemini-3.8-flash' },
+        { provider: 'openai', model: 'gpt-5-mini-2025-08-07' },
+        { provider: 'anthropic', model: 'claude-fable-5-2' },
         { provider: 'om', model: 'om-reasoning' }
       ],
       ...this.config.routing,
-      ...options.routing
+      ...options.routing,
+      hedging: {
+        ...defaultHedging,
+        ...this.config.routing?.hedging,
+        ...options.routing?.hedging
+      },
+      rpmGuard: {
+        ...defaultRpmGuard,
+        ...this.config.routing?.rpmGuard,
+        ...options.routing?.rpmGuard
+      }
     };
-    this.onEvent = options.onEvent || (() => {});
+    this.onEvent = options.onEvent || (() => { });
     this.providerFactory = options.providerFactory || createProvider;
     this.systemOne = options.systemOne || null;
     this.hardwareSampler = typeof options.hardwareSampler === 'function' ? options.hardwareSampler : null;
@@ -55,10 +95,16 @@ export class ModelRouter {
     this._providerCache = new Map();
     this.cooldowns = new Map();
     this.consecutiveFailures = new Map();
+    this.providerMetrics = new Map();
+    this._inFlight = new Map();
+    this._requestTimestamps = new Map();
+    this._rrCursor = 0;
     this.stats = {
       totalCalls: 0,
       retries: 0,
       fallbacks: 0,
+      hedgesWon: 0,
+      rpmSpillovers: 0,
       contextHandoffs: 0,
       rateLimitFallbacks: 0,
       complexityRoutes: 0,
@@ -103,9 +149,11 @@ export class ModelRouter {
     let inPerM = 0.5;
     let outPerM = 1.5;
     if (m.includes('opus')) { inPerM = 15; outPerM = 75; }
-    else if (m.includes('sonnet') || m.includes('gpt-4o') && !m.includes('mini')) { inPerM = 3; outPerM = 15; }
+    else if (m.includes('sonnet') || m.includes('fable') || (m.includes('gpt-4o') && !m.includes('mini'))) { inPerM = 3; outPerM = 15; }
     else if (m.includes('pro')) { inPerM = 1.25; outPerM = 5; }
-    else if (m.includes('flash-lite') || m.includes('mini')) { inPerM = 0.1; outPerM = 0.4; }
+    else if (m.includes('deepseek-reasoner') || m.includes('deepseek-r1')) { inPerM = 0.55; outPerM = 2.19; }
+    else if (m.includes('deepseek')) { inPerM = 0.27; outPerM = 1.1; }
+    else if (m.includes('flash-lite') || m.includes('mini') || m.includes('glm-4.5-flash')) { inPerM = 0.1; outPerM = 0.4; }
     else if (m.includes('flash')) { inPerM = 0.15; outPerM = 0.6; }
     return (prompt * inPerM + completion * outPerM) / 1_000_000;
   }
@@ -167,12 +215,147 @@ export class ModelRouter {
     return `${(provider || '').toLowerCase()}/${model || 'default'}`;
   }
 
+  _getOrInitMetrics(provider: string, model?: string): ProviderHealthMetrics {
+    const key = this._cooldownKey(provider, model);
+    let m = this.providerMetrics.get(key);
+    if (!m) {
+      m = {
+        calls: 0,
+        successes: 0,
+        failures: 0,
+        inFlight: 0,
+        rpm60s: 0,
+        ewmaTtftMs: null,
+        ewmaLatencyMs: null,
+        lastTtftMs: null,
+        lastLatencyMs: null,
+        lastSuccessAt: null,
+        lastFailureAt: null,
+        halfOpen: false,
+        openCount: 0
+      };
+      this.providerMetrics.set(key, m);
+    }
+    return m;
+  }
+
+  _getRecentRpm(provider: string, model?: string): number {
+    const key = this._cooldownKey(provider, model);
+    const list = this._requestTimestamps.get(key);
+    if (!list || list.length === 0) return 0;
+    const cutoff = Date.now() - 60_000;
+    let pruneIdx = 0;
+    while (pruneIdx < list.length && list[pruneIdx] < cutoff) pruneIdx++;
+    if (pruneIdx > 0) list.splice(0, pruneIdx);
+    if (list.length === 0) {
+      this._requestTimestamps.delete(key);
+      return 0;
+    }
+    return list.length;
+  }
+
+  _getInFlight(provider: string, model?: string): number {
+    return this._inFlight.get(this._cooldownKey(provider, model)) || 0;
+  }
+
+  _beginRequestLoad(provider: string, model?: string) {
+    const key = this._cooldownKey(provider, model);
+    const now = Date.now();
+    const list = this._requestTimestamps.get(key) || [];
+    list.push(now);
+    this._requestTimestamps.set(key, list);
+    const nextInFlight = (this._inFlight.get(key) || 0) + 1;
+    this._inFlight.set(key, nextInFlight);
+    const m = this._getOrInitMetrics(provider, model);
+    m.inFlight = nextInFlight;
+    m.rpm60s = this._getRecentRpm(provider, model);
+  }
+
+  _endRequestLoad(provider: string, model?: string) {
+    const key = this._cooldownKey(provider, model);
+    const nextInFlight = Math.max(0, (this._inFlight.get(key) || 1) - 1);
+    if (nextInFlight === 0) this._inFlight.delete(key);
+    else this._inFlight.set(key, nextInFlight);
+    const m = this._getOrInitMetrics(provider, model);
+    m.inFlight = nextInFlight;
+    m.rpm60s = this._getRecentRpm(provider, model);
+  }
+
+  _isAtSoftCap(provider: string, model?: string): boolean {
+    const guard = this.routingConfig.rpmGuard;
+    if (!guard?.enabled) return false;
+    const maxInFlight = Number(guard.maxInFlightPerModel ?? 4);
+    if (maxInFlight > 0 && this._getInFlight(provider, model) >= maxInFlight) {
+      return true;
+    }
+    const pName = (provider || '').toLowerCase();
+    const key = this._cooldownKey(provider, model);
+    const softRpm = Number(
+      guard.providerRpmLimits?.[key] ??
+      guard.providerRpmLimits?.[pName] ??
+      guard.softRpmPerModel ??
+      25
+    );
+    if (softRpm > 0 && this._getRecentRpm(provider, model) >= softRpm) {
+      return true;
+    }
+    return false;
+  }
+
+  _recordTelemetry(provider: string, model: string | undefined, latencyMs: number, ttftMs: number | null) {
+    const alpha = Math.min(0.9, Math.max(0.05, Number(this.routingConfig.ewmaAlpha ?? 0.3)));
+    const m = this._getOrInitMetrics(provider, model);
+    m.calls++;
+    m.successes++;
+    m.lastLatencyMs = latencyMs;
+    m.ewmaLatencyMs = m.ewmaLatencyMs === null ? latencyMs : Math.round(alpha * latencyMs + (1 - alpha) * m.ewmaLatencyMs);
+    if (ttftMs !== null) {
+      m.lastTtftMs = ttftMs;
+      m.ewmaTtftMs = m.ewmaTtftMs === null ? ttftMs : Math.round(alpha * ttftMs + (1 - alpha) * m.ewmaTtftMs);
+    }
+    m.lastSuccessAt = Date.now();
+  }
+
+  async _invokeWithTelemetry(providerInstance: any, providerName: string, modelName: string, chatParams: Record<string, any>) {
+    const startMs = Date.now();
+    let ttftMs: number | null = null;
+    let emittedTokens = 0;
+    const origOnToken = typeof chatParams.onToken === 'function' ? chatParams.onToken : undefined;
+    const wrappedParams = origOnToken
+      ? {
+        ...chatParams,
+        onToken: (token: string) => {
+          if (ttftMs === null) ttftMs = Date.now() - startMs;
+          emittedTokens++;
+          origOnToken(token);
+        }
+      }
+      : chatParams;
+    this._beginRequestLoad(providerName, modelName);
+    try {
+      const response = await providerInstance.chat(wrappedParams);
+      const latencyMs = Date.now() - startMs;
+      this._recordTelemetry(providerName, modelName, latencyMs, ttftMs);
+      return { response, ttftMs, latencyMs, emittedTokens };
+    } catch (err: any) {
+      if (err && typeof err === 'object') {
+        err._emittedTokens = emittedTokens;
+      }
+      throw err;
+    } finally {
+      this._endRequestLoad(providerName, modelName);
+    }
+  }
+
   isInCooldown(provider: string, model?: string) {
     const key = this._cooldownKey(provider, model);
     const until = this.cooldowns.get(key);
     if (!until) return false;
     if (Date.now() >= until) {
       this.cooldowns.delete(key);
+      // Enter half-open probe state so a failed probe re-opens immediately with backoff
+      const m = this._getOrInitMetrics(provider, model);
+      m.halfOpen = true;
       return false;
     }
     return true;
@@ -185,29 +368,70 @@ export class ModelRouter {
   }
 
   /**
-   * Reset consecutive failure count and any active cooldown after a successful call.
+   * Reset consecutive failure count, half-open state, and any active cooldown after a successful call.
    */
   recordSuccess(provider: string, model?: string) {
     const key = this._cooldownKey(provider, model);
     this.consecutiveFailures.delete(key);
     this.cooldowns.delete(key);
+    const m = this._getOrInitMetrics(provider, model);
+    m.halfOpen = false;
+    m.openCount = 0;
   }
 
   /**
    * Track consecutive non-429 failures and open a circuit-breaker cooldown once the threshold is reached.
+   * Uses half-open probe detection and exponential cooldown backoff to avoid hammering recovering backends.
    */
   recordFailure(provider: string, model?: string) {
+    const m = this._getOrInitMetrics(provider, model);
+    m.calls++;
+    m.failures++;
+    m.lastFailureAt = Date.now();
+
     const threshold = Number(this.routingConfig.circuitBreakerThreshold ?? 3);
     if (threshold <= 0) return;
     const key = this._cooldownKey(provider, model);
+    const baseCooldownMs = Number(this.routingConfig.circuitBreakerCooldownMs ?? 30000);
+    const maxCooldownMs = Number(this.routingConfig.maxCircuitBreakerCooldownMs ?? 120000);
+
+    // If a half-open probe fails, re-open immediately with exponential backoff
+    if (m.halfOpen) {
+      m.halfOpen = false;
+      m.openCount = Math.min(m.openCount + 1, 5);
+      this.consecutiveFailures.delete(key);
+      const backoffMs = Math.min(baseCooldownMs * Math.pow(2, m.openCount - 1), maxCooldownMs);
+      this.markCooldown(provider, model, backoffMs);
+      return;
+    }
+
     const nextCount = (this.consecutiveFailures.get(key) || 0) + 1;
     if (nextCount >= threshold) {
       this.consecutiveFailures.delete(key);
-      const cooldownMs = Number(this.routingConfig.circuitBreakerCooldownMs ?? 30000);
-      this.markCooldown(provider, model, cooldownMs);
+      m.openCount = Math.min(m.openCount + 1, 5);
+      const backoffMs = Math.min(baseCooldownMs * Math.pow(2, m.openCount - 1), maxCooldownMs);
+      this.markCooldown(provider, model, backoffMs);
     } else {
       this.consecutiveFailures.set(key, nextCount);
     }
+  }
+
+  /**
+   * Determine if an error indicates transient upstream overload (HTTP 502/503/504/529)
+   */
+  static isOverloadError(err: any) {
+    if (!err) return false;
+    const status = Number(err.status ?? err.statusCode ?? 0);
+    const msg = (err.message || String(err)).toLowerCase();
+    return (
+      status === 502 ||
+      status === 503 ||
+      status === 504 ||
+      status === 529 ||
+      msg.includes('overloaded') ||
+      msg.includes('high demand') ||
+      msg.includes('service unavailable')
+    );
   }
 
   /**
@@ -219,7 +443,7 @@ export class ModelRouter {
     return (
       err.status === 429 ||
       err.code === 'RATE_LIMIT_EXCEEDED' ||
-      msg.includes('429') ||
+      /\b429\b/.test(msg) ||
       msg.includes('rate limit') ||
       msg.includes('quota') ||
       msg.includes('resource_exhausted') ||
@@ -316,10 +540,11 @@ export class ModelRouter {
   /**
    * Build the ordered list of fallback candidates for a given primary provider
    */
-  getFallbackCandidates(primaryProviderName: string, primaryModel: string) {
+  getFallbackCandidates(primaryProviderName: string, primaryModel: string, opts: { advanceCursor?: boolean } = {}) {
     const primaryIsLocal = ModelRouter.isLocalProvider(primaryProviderName);
     const chain = this.routingConfig.fallbackChain || [];
     const usable = [];
+    const seen = new Set<string>();
 
     for (const item of chain) {
       const cand = typeof item === 'string' ? { provider: item } : { ...item };
@@ -339,7 +564,13 @@ export class ModelRouter {
         continue;
       }
 
+      const dedupKey = this._cooldownKey(candProv, candModel);
+      if (!cand.providerInstance && seen.has(dedupKey)) {
+        continue;
+      }
+
       if (this.canUseCandidate(cand)) {
+        seen.add(dedupKey);
         usable.push({
           provider: candProv,
           model: candModel,
@@ -349,15 +580,370 @@ export class ModelRouter {
       }
     }
 
+    const strategy = String(this.routingConfig.strategy || 'priority').toLowerCase();
+    if (strategy === 'latency' && usable.length > 1) {
+      const scoreOf = (c: { provider: string; model: string }) => {
+        const m = this.providerMetrics.get(this._cooldownKey(c.provider, c.model));
+        if (!m || (m.ewmaTtftMs === null && m.ewmaLatencyMs === null)) return Number.POSITIVE_INFINITY;
+        const base = m.ewmaTtftMs ?? m.ewmaLatencyMs ?? Number.POSITIVE_INFINITY;
+        const errRate = m.calls > 0 ? m.failures / m.calls : 0;
+        // Penalize error-prone candidates while keeping latency primary
+        return base * (1 + errRate * 2);
+      };
+      // Stable sort: measured candidates sorted by lowest effective latency, unmeasured keep configured order
+      usable.sort((a, b) => {
+        const sa = scoreOf(a);
+        const sb = scoreOf(b);
+        if (sa === sb) return 0;
+        return sa - sb;
+      });
+    } else if (strategy === 'round_robin' && usable.length > 1 && opts.advanceCursor !== false) {
+      const offset = this._rrCursor % usable.length;
+      this._rrCursor = (this._rrCursor + 1) % 1_000_000;
+      if (offset > 0) {
+        return [...usable.slice(offset), ...usable.slice(0, offset)];
+      }
+    }
+
     return usable;
+  }
+
+  /**
+   * Select the best starting target from [primary, ...healthyFallbacks] when load balancing or RPM spillover is enabled.
+   */
+  _selectBalancedTarget(primaryProvider: any, primaryName: string, primaryModel: string) {
+    const strategy = String(this.routingConfig.strategy || 'priority').toLowerCase();
+    const rpmGuardEnabled = Boolean(this.routingConfig.rpmGuard?.enabled);
+    const shouldBalance =
+      strategy === 'round_robin' ||
+      rpmGuardEnabled ||
+      (strategy === 'latency' && this.routingConfig.balancePrimary === true);
+    if (!shouldBalance || !this.routingConfig.enabled) return null;
+
+    const fallbacks = this.getFallbackCandidates(primaryName, primaryModel, { advanceCursor: false });
+    if (fallbacks.length === 0) return null;
+
+    const pool: Array<{ provider: string; model: string; providerInstance: any; isPrimary: boolean }> = [];
+    if (!this.isInCooldown(primaryName, primaryModel)) {
+      pool.push({ provider: primaryName, model: primaryModel, providerInstance: primaryProvider, isPrimary: true });
+    }
+    for (const fb of fallbacks) {
+      pool.push({ ...fb, isPrimary: false });
+    }
+    if (pool.length <= 1) return null;
+
+    // 1. Proactive RPM / concurrency spillover: if primary is at soft capacity, spill onto an under-capacity target
+    if (rpmGuardEnabled && this._isAtSoftCap(primaryName, primaryModel)) {
+      const underCap = pool.filter((t) => !this._isAtSoftCap(t.provider, t.model));
+      const candidates = underCap.length > 0 ? underCap : pool;
+      // Pick the least-loaded candidate (lowest inFlight, then lowest rpm60s, then lowest EWMA latency)
+      candidates.sort((a, b) => {
+        const infDiff = this._getInFlight(a.provider, a.model) - this._getInFlight(b.provider, b.model);
+        if (infDiff !== 0) return infDiff;
+        const rpmDiff = this._getRecentRpm(a.provider, a.model) - this._getRecentRpm(b.provider, b.model);
+        if (rpmDiff !== 0) return rpmDiff;
+        const ma = this.providerMetrics.get(this._cooldownKey(a.provider, a.model));
+        const mb = this.providerMetrics.get(this._cooldownKey(b.provider, b.model));
+        const la = ma ? (ma.ewmaTtftMs ?? ma.ewmaLatencyMs ?? Number.POSITIVE_INFINITY) : Number.POSITIVE_INFINITY;
+        const lb = mb ? (mb.ewmaTtftMs ?? mb.ewmaLatencyMs ?? Number.POSITIVE_INFINITY) : Number.POSITIVE_INFINITY;
+        return la - lb;
+      });
+      const chosen = candidates[0];
+      if (!chosen.isPrimary) {
+        this.stats.rpmSpillovers++;
+        return { ...chosen, reason: 'rpm_spillover' };
+      }
+    }
+
+    if (strategy === 'round_robin') {
+      const underCap = rpmGuardEnabled ? pool.filter((t) => !this._isAtSoftCap(t.provider, t.model)) : pool;
+      const activePool = underCap.length > 0 ? underCap : pool;
+      const idx = this._rrCursor % activePool.length;
+      this._rrCursor = (this._rrCursor + 1) % 1_000_000;
+      return activePool[idx];
+    }
+
+    if (strategy === 'latency' && this.routingConfig.balancePrimary === true) {
+      // Only switch away from primary if we have latency data for both primary and at least one fallback
+      const primaryMetric = this.providerMetrics.get(this._cooldownKey(primaryName, primaryModel));
+      const primaryScore = primaryMetric ? (primaryMetric.ewmaTtftMs ?? primaryMetric.ewmaLatencyMs) : null;
+      if (primaryScore === null) return null;
+
+      let best = pool[0];
+      let bestScore = primaryScore;
+      for (let i = 1; i < pool.length; i++) {
+        if (rpmGuardEnabled && this._isAtSoftCap(pool[i].provider, pool[i].model)) continue;
+        const m = this.providerMetrics.get(this._cooldownKey(pool[i].provider, pool[i].model));
+        const s = m ? (m.ewmaTtftMs ?? m.ewmaLatencyMs) : null;
+        if (s !== null && s < bestScore * 0.85) {
+          // Require 15% faster EWMA to prevent flapping
+          best = pool[i];
+          bestScore = s;
+        }
+      }
+      return best.isPrimary ? null : best;
+    }
+
+    return null;
+  }
+
+  /**
+   * Speculative hedged request: if primary doesn't emit a first token or resolve within `delayMs`,
+   * launch the top healthy fallback in parallel and cancel the loser as soon as a winner emerges.
+   */
+  async _executeHedgedChat(
+    primaryProvider: any,
+    primaryName: string,
+    primaryModel: string,
+    hedgeCandidate: Record<string, any>,
+    chatParams: Record<string, any>,
+    delayMs: number,
+    options: Record<string, any> = {}
+  ): Promise<Record<string, any>> {
+    const externalSignal: AbortSignal | undefined = chatParams.signal;
+    const origOnToken = typeof chatParams.onToken === 'function' ? chatParams.onToken : undefined;
+
+    const makeLinkedController = () => {
+      const ctrl = new AbortController();
+      const onExt = () => ctrl.abort(externalSignal?.reason);
+      if (externalSignal) {
+        if (externalSignal.aborted) ctrl.abort(externalSignal.reason);
+        else externalSignal.addEventListener('abort', onExt, { once: true });
+      }
+      return {
+        controller: ctrl,
+        cleanup: () => {
+          if (externalSignal) externalSignal.removeEventListener('abort', onExt);
+        }
+      };
+    };
+
+    const primaryLink = makeLinkedController();
+    let hedgeController: AbortController | null = null;
+    const cleanups: Array<() => void> = [primaryLink.cleanup];
+    let hedgeTimer: ReturnType<typeof setTimeout> | null = null;
+    let winner: 'primary' | 'hedge' | null = null;
+    let primaryFirstTokenAt: number | null = null;
+    let hedgeFirstTokenAt: number | null = null;
+    const primaryStart = Date.now();
+    let hedgeStart = 0;
+
+    const primaryBuf: string[] = [];
+    const hedgeBuf: string[] = [];
+
+    const claimWinner = (who: 'primary' | 'hedge') => {
+      if (winner) return winner === who;
+      winner = who;
+      if (hedgeTimer) {
+        clearTimeout(hedgeTimer);
+        hedgeTimer = null;
+      }
+      if (who === 'primary') {
+        hedgeController?.abort(new Error('Hedge cancelled: primary won'));
+        if (origOnToken) {
+          for (const tok of primaryBuf) origOnToken(tok);
+          primaryBuf.length = 0;
+        }
+      } else {
+        primaryLink.controller.abort(new Error('Primary cancelled: hedge won'));
+        if (origOnToken) {
+          for (const tok of hedgeBuf) origOnToken(tok);
+          hedgeBuf.length = 0;
+        }
+      }
+      return true;
+    };
+
+    const runPrimary = async () => {
+      const params = {
+        ...chatParams,
+        signal: primaryLink.controller.signal,
+        ...(origOnToken
+          ? {
+            onToken: (tok: string) => {
+              if (primaryFirstTokenAt === null) primaryFirstTokenAt = Date.now() - primaryStart;
+              if (winner === 'primary') {
+                origOnToken(tok);
+              } else if (!winner) {
+                primaryBuf.push(tok);
+                claimWinner('primary');
+              }
+            }
+          }
+          : {})
+      };
+      this._beginRequestLoad(primaryName, primaryModel);
+      try {
+        const res = await primaryProvider.chat(params);
+        const latencyMs = Date.now() - primaryStart;
+        this._recordTelemetry(primaryName, primaryModel, latencyMs, primaryFirstTokenAt);
+        this.recordSuccess(primaryName, primaryModel);
+        claimWinner('primary');
+        return { who: 'primary' as const, response: res, latencyMs, ttftMs: primaryFirstTokenAt };
+      } finally {
+        this._endRequestLoad(primaryName, primaryModel);
+      }
+    };
+
+    const runHedge = async () => {
+      const hLink = makeLinkedController();
+      hedgeController = hLink.controller;
+      cleanups.push(hLink.cleanup);
+      hedgeStart = Date.now();
+      const targetProvider = this._getOrCreateProvider(hedgeCandidate);
+      const hedgeModel = targetProvider.model || hedgeCandidate.model;
+      let adaptedTools = chatParams.tools;
+      if (options.getToolsForProvider && typeof options.getToolsForProvider === 'function') {
+        adaptedTools = options.getToolsForProvider(hedgeCandidate.provider);
+      }
+      const params = {
+        ...chatParams,
+        tools: adaptedTools,
+        signal: hLink.controller.signal,
+        ...(origOnToken
+          ? {
+            onToken: (tok: string) => {
+              if (hedgeFirstTokenAt === null) hedgeFirstTokenAt = Date.now() - hedgeStart;
+              if (winner === 'hedge') {
+                origOnToken(tok);
+              } else if (!winner) {
+                hedgeBuf.push(tok);
+                claimWinner('hedge');
+              }
+            }
+          }
+          : {})
+      };
+      this._beginRequestLoad(hedgeCandidate.provider, hedgeModel);
+      try {
+        const res = await targetProvider.chat(params);
+        const latencyMs = Date.now() - hedgeStart;
+        this._recordTelemetry(hedgeCandidate.provider, hedgeModel, latencyMs, hedgeFirstTokenAt);
+        this.recordSuccess(hedgeCandidate.provider, hedgeModel);
+        claimWinner('hedge');
+        return { who: 'hedge' as const, response: res, latencyMs, ttftMs: hedgeFirstTokenAt, modelName: hedgeModel };
+      } finally {
+        this._endRequestLoad(hedgeCandidate.provider, hedgeModel);
+      }
+    };
+
+    try {
+      const result = await new Promise<any>((resolve, reject) => {
+        let settled = false;
+        let primaryErr: any = null;
+        let hedgeStarted = false;
+        let hedgeErr: any = null;
+        let pendingCount = 1;
+
+        const finishReject = () => {
+          if (settled) return;
+          settled = true;
+          reject(primaryErr || hedgeErr || new Error('Hedged request failed'));
+        };
+
+        const launchHedge = () => {
+          if (settled || winner || hedgeStarted || externalSignal?.aborted) return;
+          hedgeStarted = true;
+          pendingCount++;
+          runHedge().then(
+            (r) => {
+              if (!settled && winner === 'hedge') {
+                settled = true;
+                resolve(r);
+              }
+            },
+            (err) => {
+              hedgeErr = err;
+              pendingCount--;
+              if (pendingCount === 0) finishReject();
+            }
+          );
+        };
+
+        hedgeTimer = setTimeout(launchHedge, Math.max(50, delayMs));
+
+        runPrimary().then(
+          (r) => {
+            if (!settled && winner === 'primary') {
+              settled = true;
+              resolve(r);
+            }
+          },
+          (err) => {
+            primaryErr = err;
+            pendingCount--;
+            if (externalSignal?.aborted || err?.name === 'AbortError') {
+              if (!winner) finishReject();
+              return;
+            }
+            if (!hedgeStarted && !winner) {
+              // Primary failed before hedge timer fired: cancel timer and let standard retry/failover loop handle it
+              if (hedgeTimer) {
+                clearTimeout(hedgeTimer);
+                hedgeTimer = null;
+              }
+              finishReject();
+            } else if (pendingCount === 0) {
+              finishReject();
+            }
+          }
+        );
+      });
+
+      const tok = Number(result.response.usage?.total_tokens ?? result.response.usage?.totalTokenCount ?? 0) || 0;
+      this.stats.totalTokens += tok;
+
+      if (result.who === 'hedge') {
+        this.stats.hedgesWon++;
+        this.stats.fallbacks++;
+        this.stats.estimatedCostUsd += ModelRouter.estimateCost(hedgeCandidate.provider, result.modelName, result.response.usage);
+        const hedgeEvent = {
+          fromProvider: primaryName,
+          fromModel: primaryModel,
+          toProvider: hedgeCandidate.provider,
+          toModel: result.modelName,
+          reasonType: 'hedged_failover',
+          reason: `Hedged fallback won (delay ${delayMs}ms)`,
+          hedgeDelayMs: delayMs,
+          ttftMs: result.ttftMs,
+          latencyMs: result.latencyMs,
+          timestamp: new Date().toISOString()
+        };
+        this.onEvent('hedge_won', hedgeEvent);
+        return {
+          ...result.response,
+          routedProvider: hedgeCandidate.provider,
+          routedModel: result.modelName,
+          fallbackUsed: true,
+          fallbackInfo: hedgeEvent,
+          hedged: true,
+          ttftMs: result.ttftMs,
+          latencyMs: result.latencyMs
+        };
+      }
+
+      this.stats.estimatedCostUsd += ModelRouter.estimateCost(primaryName, primaryModel, result.response.usage);
+      return {
+        ...result.response,
+        routedProvider: primaryProvider.name || primaryName,
+        routedModel: primaryProvider.model || primaryModel,
+        fallbackUsed: false,
+        hedged: false,
+        ttftMs: result.ttftMs,
+        latencyMs: result.latencyMs
+      };
+    } finally {
+      if (hedgeTimer) clearTimeout(hedgeTimer);
+      for (const fn of cleanups) fn();
+    }
   }
 
   getDefaultModelForProvider(providerName: string) {
     const p = (providerName || 'om').toLowerCase();
     const defaults: Record<string, string> = {
-      gemini: this.config.providers?.gemini?.model || 'gemini-3-flash-preview',
-      openai: this.config.providers?.openai?.model || 'gpt-4o',
-      anthropic: this.config.providers?.anthropic?.model || 'claude-3-5-sonnet-20241022',
+      gemini: this.config.providers?.gemini?.model || 'gemini-3.5-flash',
+      openai: this.config.providers?.openai?.model || 'gpt-5-mini-2025-08-07',
+      anthropic: this.config.providers?.anthropic?.model || 'claude-fable-5-2',
       deepseek: this.config.providers?.deepseek?.model || 'deepseek-chat',
       kimi: this.config.providers?.kimi?.model || 'kimi-k2-0711-preview',
       moonshot: this.config.providers?.kimi?.model || 'kimi-k2-0711-preview',
@@ -550,19 +1136,98 @@ export class ModelRouter {
       return this._executeFailover(primaryProvider, chatParams, cooldownErr, 'rate_limit_cooldown', options);
     }
 
+    // 1c. Adaptive effort tuning for simple turns (cuts thinking-token TTFT)
+    let effectiveChatParams = chatParams;
+    if (this.routingConfig.adaptiveEffort && (!chatParams.effort || chatParams.effort === 'medium')) {
+      const turnComplexity = ModelRouter.classifyComplexity(chatParams);
+      if (turnComplexity === 'simple') {
+        effectiveChatParams = { ...chatParams, effort: 'low' };
+      }
+    }
+
+    // 1d. Optional load-balanced primary selection (round_robin or latency-based)
+    let activePrimary = primaryProvider;
+    let activePrimaryName = primaryName;
+    let activePrimaryModel = primaryModel;
+    if (!options.disableFailover) {
+      const balanced = this._selectBalancedTarget(primaryProvider, primaryName, primaryModel);
+      if (balanced) {
+        activePrimary = this._getOrCreateProvider(balanced);
+        activePrimaryName = balanced.provider;
+        activePrimaryModel = activePrimary.model || balanced.model;
+        if (options.getToolsForProvider && typeof options.getToolsForProvider === 'function') {
+          effectiveChatParams = { ...effectiveChatParams, tools: options.getToolsForProvider(activePrimaryName) };
+        }
+        this.onEvent('route_decision', {
+          reason: (balanced as any).reason || `load_balance_${this.routingConfig.strategy}`,
+          fromProvider: primaryName,
+          fromModel: primaryModel,
+          toProvider: activePrimaryName,
+          toModel: activePrimaryModel
+        });
+      }
+    }
+
+    // 1e. Optional speculative hedging for cloud tail-latency / TTFT protection
+    // (Disabled for local providers unless hedging.allowLocal is true to avoid GPU/CPU contention)
+    let initialHedgeError: any = null;
+    const hedgeCfg = options.hedging || this.routingConfig.hedging;
+    const activeIsLocal = ModelRouter.isLocalProvider(activePrimaryName);
+    if (hedgeCfg?.enabled && this.routingConfig.enabled && !options.disableFailover && (!activeIsLocal || hedgeCfg.allowLocal)) {
+      const hedgeCandidates = this.getFallbackCandidates(activePrimaryName, activePrimaryModel, { advanceCursor: false });
+      if (hedgeCandidates.length > 0) {
+        try {
+          return await this._executeHedgedChat(
+            activePrimary,
+            activePrimaryName,
+            activePrimaryModel,
+            hedgeCandidates[0],
+            effectiveChatParams,
+            Number(hedgeCfg.delayMs ?? 3500),
+            options
+          );
+        } catch (hedgeErr: any) {
+          if (hedgeErr?.name === 'AbortError' || effectiveChatParams.signal?.aborted) {
+            throw hedgeErr;
+          }
+          // Immediate non-retryable errors skip retry loop and fail over directly
+          if (ModelRouter.isContextLimitError(hedgeErr)) {
+            return this._executeFailover(activePrimary, effectiveChatParams, hedgeErr, 'context_limit', options);
+          }
+          if (ModelRouter.isRateLimitError(hedgeErr)) {
+            this.markCooldown(activePrimaryName, activePrimaryModel, hedgeErr.retryAfterMs);
+            return this._executeFailover(activePrimary, effectiveChatParams, hedgeErr, 'rate_limit', options);
+          }
+          if (hedgeErr.status === 408 || hedgeErr.status === 529 || /overloaded_error/i.test(String(hedgeErr.message || ''))) {
+            this.markCooldown(activePrimaryName, activePrimaryModel, hedgeErr.retryAfterMs || this.routingConfig.overloadCooldownMs || 8000);
+            return this._executeFailover(activePrimary, effectiveChatParams, hedgeErr, 'provider_overload', options);
+          }
+          if (this._isNonTransientHttpError(hedgeErr)) {
+            if (hedgeErr.status === 401 || hedgeErr.status === 403 || hedgeErr.status === 404) {
+              this.markCooldown(activePrimaryName, activePrimaryModel);
+            }
+            return this._executeFailover(activePrimary, effectiveChatParams, hedgeErr, 'provider_error', options);
+          }
+          // Transient error already consumed attempt 0 — resume at retry attempt 1 so we don't double-attempt primary
+          initialHedgeError = hedgeErr;
+        }
+      }
+    }
+
     // 2. Attempt primary provider with automatic retries for transient errors
     const maxRetries = options.maxRetries ?? this.routingConfig.maxRetries ?? 1;
-    let lastError = null;
+    let lastError = initialHedgeError;
+    const startAttempt = initialHedgeError ? 1 : 0;
 
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    for (let attempt = startAttempt; attempt <= maxRetries; attempt++) {
       try {
         if (attempt > 0) {
           this.stats.retries++;
           const retryEvent = {
             attempt,
             maxRetries,
-            provider: primaryName,
-            model: primaryModel,
+            provider: activePrimaryName,
+            model: activePrimaryModel,
             reason: lastError?.message || 'Transient error',
             timestamp: new Date().toISOString()
           };
@@ -571,51 +1236,72 @@ export class ModelRouter {
           if (baseDelay > 0) {
             const expDelay = baseDelay * Math.pow(2, attempt - 1);
             const jitter = Math.floor(Math.random() * Math.max(10, Math.round(expDelay * 0.35)));
-            await this._sleepWithSignal(expDelay + jitter, chatParams.signal);
+            await this._sleepWithSignal(expDelay + jitter, effectiveChatParams.signal);
           }
         }
 
-        const response = await primaryProvider.chat(chatParams);
-        this.recordSuccess(primaryName, primaryModel);
+        const { response, ttftMs, latencyMs } = await this._invokeWithTelemetry(
+          activePrimary,
+          activePrimaryName,
+          activePrimaryModel,
+          effectiveChatParams
+        );
+        this.recordSuccess(activePrimaryName, activePrimaryModel);
         const tok = Number(response.usage?.total_tokens ?? response.usage?.totalTokenCount ?? 0) || 0;
         this.stats.totalTokens += tok;
-        this.stats.estimatedCostUsd += ModelRouter.estimateCost(primaryName, primaryModel, response.usage);
+        this.stats.estimatedCostUsd += ModelRouter.estimateCost(activePrimaryName, activePrimaryModel, response.usage);
         return {
           ...response,
-          routedProvider: primaryProvider.name || primaryName,
-          routedModel: primaryProvider.model || primaryModel,
+          routedProvider: activePrimary.name || activePrimaryName,
+          routedModel: activePrimary.model || activePrimaryModel,
           fallbackUsed: false,
-          attempts: attempt + 1
+          attempts: attempt + 1,
+          ttftMs,
+          latencyMs
         };
       } catch (err: any) {
         lastError = err;
-        if (err.name === 'AbortError' || chatParams.signal?.aborted) {
+        if (err.name === 'AbortError' || effectiveChatParams.signal?.aborted) {
           throw err;
         }
-        // Never waste retries on context limit, 429 rate-limit, or non-transient 400/401/403/404 errors — fail over immediately
+        if (err._emittedTokens > 0) {
+          this.onEvent('stream_reset', {
+            provider: activePrimaryName,
+            model: activePrimaryModel,
+            emittedTokens: err._emittedTokens,
+            reason: err.message
+          });
+        }
+        // Never waste retries on context limit, 429 rate-limit, 529 overloaded, or non-transient 400/401/403/404 errors — fail over immediately
         if (ModelRouter.isContextLimitError(err)) {
           break;
         }
         if (ModelRouter.isRateLimitError(err)) {
-          this.markCooldown(primaryName, primaryModel, err.retryAfterMs);
+          this.markCooldown(activePrimaryName, activePrimaryModel, err.retryAfterMs);
+          break;
+        }
+        if (err.status === 529 || /overloaded_error/i.test(String(err.message || ''))) {
+          this.markCooldown(activePrimaryName, activePrimaryModel, err.retryAfterMs || this.routingConfig.overloadCooldownMs || 8000);
           break;
         }
         if (this._isNonTransientHttpError(err)) {
           if (err.status === 401 || err.status === 403 || err.status === 404) {
-            this.markCooldown(primaryName, primaryModel);
+            this.markCooldown(activePrimaryName, activePrimaryModel);
           }
           break;
         }
         // fetchWithTimeout / consumeSSEStream timeout — cool down and fail over immediately
         if (err.status === 408) {
-          this.markCooldown(primaryName, primaryModel);
+          this.markCooldown(activePrimaryName, activePrimaryModel);
           break;
         }
       }
     }
 
-    if (lastError && !ModelRouter.isContextLimitError(lastError) && !ModelRouter.isRateLimitError(lastError)) {
-      this.recordFailure(primaryName, primaryModel);
+    if (lastError && ModelRouter.isOverloadError(lastError)) {
+      this.markCooldown(activePrimaryName, activePrimaryModel, lastError.retryAfterMs || this.routingConfig.overloadCooldownMs || 8000);
+    } else if (lastError && !ModelRouter.isContextLimitError(lastError) && !ModelRouter.isRateLimitError(lastError)) {
+      this.recordFailure(activePrimaryName, activePrimaryModel);
     }
 
     // 3. If routing/failover is disabled, rethrow primary error
@@ -631,8 +1317,10 @@ export class ModelRouter {
         ? 'quota_unavailable'
         : ModelRouter.isRateLimitError(lastError)
           ? 'rate_limit'
-          : 'provider_error';
-    return this._executeFailover(primaryProvider, chatParams, lastError, reasonType, options);
+          : ModelRouter.isOverloadError(lastError)
+            ? 'provider_overload'
+            : 'provider_error';
+    return this._executeFailover(activePrimary, effectiveChatParams, lastError, reasonType, options);
   }
 
   async _sleepWithSignal(ms: number, signal?: AbortSignal) {
@@ -684,7 +1372,12 @@ export class ModelRouter {
     await this._sleepWithSignal(waitMs, chatParams.signal);
     this.cooldowns.delete(key);
 
-    const response = await primaryProvider.chat(chatParams);
+    const { response, ttftMs, latencyMs } = await this._invokeWithTelemetry(
+      primaryProvider,
+      primaryName,
+      primaryModel,
+      chatParams
+    );
     this.recordSuccess(primaryName, primaryModel);
     const tok = Number(response.usage?.total_tokens ?? response.usage?.totalTokenCount ?? 0) || 0;
     this.stats.totalTokens += tok;
@@ -694,7 +1387,9 @@ export class ModelRouter {
       routedProvider: primaryProvider.name || primaryName,
       routedModel: primaryProvider.model || primaryModel,
       fallbackUsed: false,
-      rateLimitWaitedMs: waitMs
+      rateLimitWaitedMs: waitMs,
+      ttftMs,
+      latencyMs
     };
   }
 
@@ -743,10 +1438,15 @@ export class ModelRouter {
         if (this.stats.history.length > 200) this.stats.history.shift();
         this.onEvent('fallback', fallbackEvent);
 
-        const response = await targetProvider.chat({
-          ...chatParams,
-          tools: adaptedTools
-        });
+        const { response, ttftMs, latencyMs } = await this._invokeWithTelemetry(
+          targetProvider,
+          candidate.provider,
+          targetProvider.model || candidate.model,
+          {
+            ...chatParams,
+            tools: adaptedTools
+          }
+        );
         this.recordSuccess(candidate.provider, candidate.model);
 
         const tok = Number(response.usage?.total_tokens ?? response.usage?.totalTokenCount ?? 0) || 0;
@@ -758,14 +1458,26 @@ export class ModelRouter {
           routedProvider: candidate.provider,
           routedModel: targetProvider.model || candidate.model,
           fallbackUsed: true,
-          fallbackInfo: fallbackEvent
+          fallbackInfo: fallbackEvent,
+          ttftMs,
+          latencyMs
         };
       } catch (fallbackErr: any) {
         if (fallbackErr.name === 'AbortError' || chatParams.signal?.aborted) {
           throw fallbackErr;
         }
+        if (fallbackErr._emittedTokens > 0) {
+          this.onEvent('stream_reset', {
+            provider: candidate.provider,
+            model: candidate.model,
+            emittedTokens: fallbackErr._emittedTokens,
+            reason: fallbackErr.message
+          });
+        }
         if (ModelRouter.isRateLimitError(fallbackErr)) {
           this.markCooldown(candidate.provider, candidate.model, fallbackErr.retryAfterMs);
+        } else if (ModelRouter.isOverloadError(fallbackErr)) {
+          this.markCooldown(candidate.provider, candidate.model, fallbackErr.retryAfterMs || this.routingConfig.overloadCooldownMs || 8000);
         } else if (
           fallbackErr.status === 408 ||
           fallbackErr.status === 401 ||
@@ -797,10 +1509,23 @@ export class ModelRouter {
   }
 
   getStats() {
+    const providerMetrics: Record<string, ProviderHealthMetrics> = {};
+    for (const [k, v] of this.providerMetrics.entries()) {
+      const slashIdx = k.indexOf('/');
+      const prov = slashIdx >= 0 ? k.slice(0, slashIdx) : k;
+      const mod = slashIdx >= 0 ? k.slice(slashIdx + 1) : 'default';
+      providerMetrics[k] = {
+        ...v,
+        inFlight: this._getInFlight(prov, mod),
+        rpm60s: this._getRecentRpm(prov, mod)
+      };
+    }
     return {
       ...this.stats,
       enabled: this.routingConfig.enabled,
-      fallbackChain: this.routingConfig.fallbackChain
+      strategy: this.routingConfig.strategy,
+      fallbackChain: this.routingConfig.fallbackChain,
+      providerMetrics
     };
   }
 }

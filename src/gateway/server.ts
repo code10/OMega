@@ -339,17 +339,27 @@ export async function startGateway(options: Record<string, any> = {}) {
         return;
       }
 
+      req.socket?.setNoDelay?.(true);
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        Connection: 'keep-alive'
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no'
       });
+      res.flushHeaders?.();
 
       const sendEvent = (event: string, eventData: any) => {
         if (!res.writableEnded) {
           res.write(`event: ${event}\ndata: ${JSON.stringify(eventData)}\n\n`);
         }
       };
+
+      const heartbeatTimer = setInterval(() => {
+        if (!res.writableEnded) {
+          res.write(': keep-alive\n\n');
+        }
+      }, 15000);
+      heartbeatTimer.unref?.();
 
       await reqSessionManager.runExclusive(targetSessionId, async (sessionAgent: any) => {
         const onStepStart = (d: any) => sendEvent('step_start', d);
@@ -372,6 +382,7 @@ export async function startGateway(options: Record<string, any> = {}) {
         const streamAbort = new AbortController();
 
         const cleanup = () => {
+          clearInterval(heartbeatTimer);
           sessionAgent.off('step_start', onStepStart);
           sessionAgent.off('thought', onThought);
           sessionAgent.off('token', onToken);

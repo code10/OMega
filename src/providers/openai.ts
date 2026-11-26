@@ -1,11 +1,12 @@
 import { BaseProvider } from './base.js';
 import { ModelService } from '../modelService.js';
-import { fetchWithTimeout, consumeSSEStream } from '../utils/http.js';
+import { fetchWithTimeout, consumeSSEStream, parseRetryAfterMs } from '../utils/http.js';
 
 export class OpenAIProvider extends BaseProvider {
   apiKey?: string;
   apiKeyEnv: string;
   timeoutMs: number;
+  idleTimeoutMs: number;
 
   constructor(options: Record<string, any> = {}) {
     const providerName = options.name || 'openai';
@@ -17,7 +18,8 @@ export class OpenAIProvider extends BaseProvider {
     });
     this.apiKeyEnv = apiKeyEnv;
     this.apiKey = options.apiKey || process.env[apiKeyEnv] || (apiKeyEnv === 'OPENAI_API_KEY' ? process.env.OPENAI_API_KEY : undefined);
-    this.timeoutMs = options.timeoutMs || 60000;
+    this.timeoutMs = options.timeoutMs || 30000;
+    this.idleTimeoutMs = options.idleTimeoutMs || 25000;
     if (!this.apiKey) {
       console.warn(`[${providerName}] Warning: ${apiKeyEnv} not set.`);
     }
@@ -118,8 +120,8 @@ export class OpenAIProvider extends BaseProvider {
       const errText = await res.text();
       const err: Error & { status?: number; retryAfterMs?: number } = new Error(`${this.name} API error [${res.status}]: ${errText}`);
       err.status = res.status;
-      const retrySec = Number(res.headers?.get?.('retry-after'));
-      if (Number.isFinite(retrySec) && retrySec > 0) err.retryAfterMs = retrySec * 1000;
+      const retryAfterMs = parseRetryAfterMs(res.headers);
+      if (retryAfterMs) err.retryAfterMs = retryAfterMs;
       throw err;
     }
 
@@ -155,7 +157,7 @@ export class OpenAIProvider extends BaseProvider {
             if (tc.function?.arguments) entry.argStr += tc.function.arguments;
           }
         }
-      });
+      }, { idleTimeoutMs: this.idleTimeoutMs, signal });
 
       const toolCalls = [];
       for (const [, tc] of Array.from(toolCallMap.entries()).sort((a, b) => a[0] - b[0])) {

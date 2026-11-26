@@ -1,10 +1,11 @@
 import { BaseProvider } from './base.js';
 import { ModelService } from '../modelService.js';
-import { fetchWithTimeout, consumeSSEStream } from '../utils/http.js';
+import { fetchWithTimeout, consumeSSEStream, parseRetryAfterMs } from '../utils/http.js';
 
 export class AnthropicProvider extends BaseProvider {
   apiKey?: string;
   timeoutMs: number;
+  idleTimeoutMs: number;
   maxTokens: number;
 
   constructor(options: Record<string, any> = {}) {
@@ -14,7 +15,8 @@ export class AnthropicProvider extends BaseProvider {
       baseUrl: options.baseUrl || 'https://api.anthropic.com/v1'
     });
     this.apiKey = options.apiKey || process.env.ANTHROPIC_API_KEY;
-    this.timeoutMs = options.timeoutMs || 60000;
+    this.timeoutMs = options.timeoutMs || 30000;
+    this.idleTimeoutMs = options.idleTimeoutMs || 25000;
     this.maxTokens = options.maxTokens || 4096;
     if (!this.apiKey) {
       console.warn('[AnthropicProvider] Warning: ANTHROPIC_API_KEY not set.');
@@ -147,8 +149,8 @@ export class AnthropicProvider extends BaseProvider {
       const errText = await res.text();
       const err: Error & { status?: number; retryAfterMs?: number } = new Error(`Anthropic API error [${res.status}]: ${errText}`);
       err.status = res.status;
-      const retrySec = Number(res.headers?.get?.('retry-after'));
-      if (Number.isFinite(retrySec) && retrySec > 0) err.retryAfterMs = retrySec * 1000;
+      const retryAfterMs = parseRetryAfterMs(res.headers);
+      if (retryAfterMs) err.retryAfterMs = retryAfterMs;
       throw err;
     }
 
@@ -193,7 +195,7 @@ export class AnthropicProvider extends BaseProvider {
           toolCalls.push({ id: tool.id, name: tool.name, args: parsedInput });
           activeTools.delete(evt.index);
         }
-      });
+      }, { idleTimeoutMs: this.idleTimeoutMs, signal });
 
       return { content: textContent, toolCalls, usage };
     }

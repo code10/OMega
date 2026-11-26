@@ -1,10 +1,11 @@
 import { BaseProvider } from './base.js';
 import { ModelService } from '../modelService.js';
-import { fetchWithTimeout, consumeSSEStream } from '../utils/http.js';
+import { fetchWithTimeout, consumeSSEStream, parseRetryAfterMs } from '../utils/http.js';
 
 export class GeminiProvider extends BaseProvider {
   apiKey?: string;
   timeoutMs: number;
+  idleTimeoutMs: number;
 
   constructor(options: Record<string, any> = {}) {
     super({
@@ -13,7 +14,8 @@ export class GeminiProvider extends BaseProvider {
       baseUrl: options.baseUrl || 'https://generativelanguage.googleapis.com/v1beta'
     });
     this.apiKey = options.apiKey || process.env.GEMINI_API_KEY;
-    this.timeoutMs = options.timeoutMs || 60000;
+    this.timeoutMs = options.timeoutMs || 30000;
+    this.idleTimeoutMs = options.idleTimeoutMs || 25000;
     if (!this.apiKey) {
       console.warn('[GeminiProvider] Warning: GEMINI_API_KEY not set.');
     }
@@ -100,7 +102,15 @@ export class GeminiProvider extends BaseProvider {
     }
 
     const supportsThinking = /gemini-(2\.5|3|4)/i.test(this.model);
-    const thinkingBudget = effort === 'low' ? 1024 : effort === 'high' ? 8192 : 4096;
+    const isFlashLite = /flash-lite/i.test(this.model);
+    const thinkingBudget =
+      effort === 'none' || effort === 'minimal'
+        ? 0
+        : effort === 'low'
+          ? (isFlashLite ? 512 : 1024)
+          : effort === 'high'
+            ? 8192
+            : (isFlashLite ? 1024 : 4096);
     const payload: Record<string, any> = {
       contents,
       ...(cachedContent ? { cachedContent } : {}),
@@ -153,8 +163,14 @@ export class GeminiProvider extends BaseProvider {
     }
 
     if (!res) {
+      if (signal?.aborted || initialError?.name === 'AbortError') {
+        const abortErr = initialError instanceof Error ? initialError : new Error('The operation was aborted');
+        abortErr.name = 'AbortError';
+        throw abortErr;
+      }
       const err: Error & { status?: number } = new Error(`Gemini error on '${activeModel}': ${initialError?.message || 'request timed out'}`);
-      if (initialError?.name === 'TimeoutError' || initialError?.name === 'AbortError') {
+      if (initialError?.name === 'TimeoutError' || initialError?.status === 408) {
+        err.name = 'TimeoutError';
         err.status = 408;
       }
       throw err;
@@ -169,9 +185,7 @@ export class GeminiProvider extends BaseProvider {
         if (parsed.error?.message) cleanMsg = parsed.error.message;
       } catch (_) {}
 
-      const retryAfterHeader = okRes.headers?.get?.('retry-after');
-      const retryAfterSec = retryAfterHeader ? Number(retryAfterHeader) : NaN;
-      const retryAfterMs = Number.isFinite(retryAfterSec) && retryAfterSec > 0 ? retryAfterSec * 1000 : undefined;
+      const retryAfterMs = parseRetryAfterMs(okRes.headers);
 
       const makeHttpError = (msg: string) => {
         const err: Error & { status?: number; retryAfterMs?: number } = new Error(msg);
@@ -225,7 +239,7 @@ export class GeminiProvider extends BaseProvider {
             });
           }
         }
-      });
+      }, { idleTimeoutMs: this.idleTimeoutMs, signal });
 
       return { content: textContent, toolCalls, rawParts, usage };
     }

@@ -3,11 +3,74 @@
  * for providers and http_request.
  */
 
+/**
+ * Parse Retry-After and provider-specific rate-limit reset headers into milliseconds.
+ * Supports numeric seconds, RFC 9110 HTTP-date, and Go/OpenAI duration strings (e.g. "1m30s", "450ms").
+ */
+export function parseRetryAfterMs(headers?: Headers | { get?: (name: string) => string | null } | null): number | undefined {
+  if (!headers || typeof headers.get !== 'function') return undefined;
+
+  const parseDurationStr = (raw: string): number | undefined => {
+    const trimmed = raw.trim();
+    if (!trimmed) return undefined;
+    // Pure numeric seconds (e.g. "12" or "1.5")
+    if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+      const sec = Number(trimmed);
+      return Number.isFinite(sec) && sec > 0 ? Math.round(sec * 1000) : undefined;
+    }
+    // Duration tokens like "1h2m3s", "15s", "450ms"
+    let totalMs = 0;
+    let matched = false;
+    const re = /(\d+(?:\.\d+)?)(ms|s|m|h)/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(trimmed)) !== null) {
+      matched = true;
+      const val = Number(m[1]);
+      const unit = m[2].toLowerCase();
+      if (unit === 'ms') totalMs += val;
+      else if (unit === 's') totalMs += val * 1000;
+      else if (unit === 'm') totalMs += val * 60_000;
+      else if (unit === 'h') totalMs += val * 3_600_000;
+    }
+    if (matched && totalMs > 0) return Math.round(totalMs);
+    // RFC 9110 HTTP-date / ISO-8601 timestamp
+    const parsedDate = Date.parse(trimmed);
+    if (Number.isFinite(parsedDate)) {
+      const delta = parsedDate - Date.now();
+      return delta > 0 ? delta : undefined;
+    }
+    return undefined;
+  };
+
+  const candidates = [
+    headers.get('retry-after-ms'),
+    headers.get('retry-after'),
+    headers.get('x-ratelimit-reset-requests'),
+    headers.get('x-ratelimit-reset-tokens'),
+    headers.get('anthropic-ratelimit-requests-reset')
+  ];
+
+  // retry-after-ms is explicitly milliseconds when numeric
+  const rawMs = candidates[0];
+  if (rawMs && /^\d+(?:\.\d+)?$/.test(rawMs.trim())) {
+    const ms = Number(rawMs.trim());
+    if (Number.isFinite(ms) && ms > 0) return Math.round(ms);
+  }
+
+  for (let i = 1; i < candidates.length; i++) {
+    const val = candidates[i];
+    if (!val) continue;
+    const ms = parseDurationStr(val);
+    if (ms && ms > 0) return ms;
+  }
+  return undefined;
+}
+
 export async function fetchWithTimeout(
   url: string,
   options: RequestInit = {},
-  timeoutMs = 60000,
-  totalMaxTimeoutMs = 180000
+  timeoutMs = 30000,
+  totalMaxTimeoutMs = 90000
 ): Promise<Response> {
   const { signal: externalSignal, ...rest } = options;
   const runFetch = async (ms: number) => {
@@ -45,9 +108,10 @@ export async function fetchWithTimeout(
     const isTimeout = (err?.name === 'TimeoutError' || err?.name === 'AbortError') && !externalSignal?.aborted;
     const bodyBytes = typeof rest.body === 'string' ? Buffer.byteLength(rest.body, 'utf8') : 0;
     const remainingBudgetMs = totalMaxTimeoutMs - timeoutMs;
-    if (isTimeout && bodyBytes >= 8192 && timeoutMs > 0 && remainingBudgetMs > 0) {
+    // Only extend once for very large prompts (>= 32KB) and cap the retry window so failover stays responsive
+    if (isTimeout && bodyBytes >= 32768 && timeoutMs > 0 && remainingBudgetMs > 0) {
       try {
-        return await runFetch(remainingBudgetMs);
+        return await runFetch(Math.min(remainingBudgetMs, timeoutMs));
       } catch (retryErr: any) {
         throw attachTimeoutStatus(retryErr);
       }
@@ -81,13 +145,15 @@ export function extractSSEToken(dataStr: string): { token?: string; json?: any }
 export interface ConsumeSSEOptions {
   maxBufferBytes?: number;
   idleTimeoutMs?: number;
+  signal?: AbortSignal;
   onRetry?: (retryMs: number) => void;
 }
 
 /**
  * Iterate over Server-Sent Events (SSE) data payloads from a Fetch Response body.
  * Implements WHATWG SSE field rules (`event:`, `data:`, `id:`, `retry:`, comments)
- * with single-space stripping on `data:` and bounded buffer protection.
+ * with single-space stripping on `data:`, bounded buffer protection, AbortSignal cancellation,
+ * and clean reader cancellation on idle timeout to prevent TCP socket leaks.
  */
 export async function consumeSSEStream(
   res: Response,
@@ -96,29 +162,68 @@ export async function consumeSSEStream(
 ): Promise<void> {
   if (!res.body) return;
   const maxBufferBytes = options.maxBufferBytes ?? 10 * 1024 * 1024;
-  const idleTimeoutMs = options.idleTimeoutMs ?? 30000;
+  const idleTimeoutMs = options.idleTimeoutMs ?? 25000;
+  const signal = options.signal;
   const reader = res.body.getReader();
   const decoder = new TextDecoder('utf-8');
   let buffer = '';
   let lastEventId: string | undefined;
+  let cancelled = false;
+
+  const cancelReaderSafely = async (reason?: unknown) => {
+    if (cancelled) return;
+    cancelled = true;
+    try {
+      await reader.cancel(reason);
+    } catch (_) {}
+  };
+
+  const makeAbortError = () => {
+    const err = new Error('The operation was aborted');
+    err.name = 'AbortError';
+    return err;
+  };
 
   const readWithIdleTimeout = async () => {
-    if (idleTimeoutMs <= 0) return reader.read();
+    if (signal?.aborted) {
+      await cancelReaderSafely(signal.reason);
+      throw makeAbortError();
+    }
+    if (idleTimeoutMs <= 0 && !signal) return reader.read();
+
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let onAbort: (() => void) | null = null;
     try {
-      return await Promise.race([
-        reader.read(),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => {
-            const err: Error & { status?: number } = new Error(`SSE stream idle timeout after ${idleTimeoutMs}ms`);
-            err.name = 'TimeoutError';
-            err.status = 408;
-            reject(err);
-          }, idleTimeoutMs);
-        }),
-      ]);
+      const racers: Array<Promise<ReadableStreamReadResult<Uint8Array>>> = [reader.read()];
+      if (idleTimeoutMs > 0) {
+        racers.push(
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              const err: Error & { status?: number } = new Error(`SSE stream idle timeout after ${idleTimeoutMs}ms`);
+              err.name = 'TimeoutError';
+              err.status = 408;
+              reject(err);
+              void cancelReaderSafely(err);
+            }, idleTimeoutMs);
+          })
+        );
+      }
+      if (signal) {
+        racers.push(
+          new Promise<never>((_, reject) => {
+            onAbort = () => {
+              const err = makeAbortError();
+              reject(err);
+              void cancelReaderSafely(err);
+            };
+            signal.addEventListener('abort', onAbort, { once: true });
+          })
+        );
+      }
+      return await Promise.race(racers);
     } finally {
       if (timer) clearTimeout(timer);
+      if (signal && onAbort) signal.removeEventListener('abort', onAbort);
     }
   };
 

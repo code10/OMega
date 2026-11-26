@@ -241,7 +241,27 @@ export interface RoutingFallbackTarget {
 
 export interface RoutingConfig {
   enabled?: boolean;
+  strategy?: 'priority' | 'latency' | 'round_robin';
+  balancePrimary?: boolean;
+  adaptiveEffort?: boolean;
   maxRetries?: number;
+  retryDelayMs?: number;
+  rateLimitCooldownMs?: number;
+  overloadCooldownMs?: number;
+  maxRateLimitWaitMs?: number;
+  circuitBreakerThreshold?: number;
+  circuitBreakerCooldownMs?: number;
+  maxCircuitBreakerCooldownMs?: number;
+  hedging?: {
+    enabled?: boolean;
+    delayMs?: number;
+  };
+  rpmGuard?: {
+    enabled?: boolean;
+    softRpmPerModel?: number;
+    maxInFlightPerModel?: number;
+    providerRpmLimits?: Record<string, number>;
+  };
   autoHandoffOnContextLimit?: boolean;
   cooldownMs?: number;
   fallbackChain?: RoutingFallbackTarget[];
