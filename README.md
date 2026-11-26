@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="src/gateway/public/om.png" alt="OM Logo" width="72" height="72" />
+  <img src="src/gateway/public/omega-wordmark.svg" alt="OMEGA" width="420" />
 </p>
 
 # OMega
