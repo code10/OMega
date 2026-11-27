@@ -7,7 +7,7 @@ over an OpenAI-compatible REST endpoint (http://127.0.0.1:8000/v1/chat/completio
 with automatic CPU/GPU/Disk offloading (`device_map="auto"`) for 16GB RAM systems.
 
 Run server:
-  python scripts/serve_safetensors.py --model-dir "C:\\Users\\E20141007\\Desktop\\Qwen 3.8-27b" --port 8000
+  python scripts/serve_safetensors.py --model-dir "/path/to/model" --port 8000
 """
 
 import argparse
@@ -29,7 +29,7 @@ MODEL_STATE = {
     "model": None,
     "tokenizer": None,
     "model_id": "qwen3.8-27b",
-    "model_dir": r"C:\Users\E20141007\Desktop\Qwen 3.8-27b",
+    "model_dir": "",
     "default_max_tokens": 256,
     "history_turns": 6,
     "preserve_system": False,
@@ -198,8 +198,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--model-dir",
-        default=os.environ.get("LOCAL_MODEL_PATH", r"C:\Users\E20141007\Desktop\Qwen 3.8-27b"),
-        help="Path to the Hugging Face .safetensors model folder",
+        default=os.environ.get("LOCAL_MODEL_PATH", ""),
+        help="Path to the Hugging Face .safetensors model folder (or set LOCAL_MODEL_PATH)",
     )
     parser.add_argument("--model-id", default="qwen3.8-27b")
     parser.add_argument("--host", default="127.0.0.1")
@@ -212,6 +212,9 @@ def main():
     parser.add_argument("--offload-dir", default="./offload_cache")
     parser.add_argument("--lora-dir", default="", help="Optional PEFT LoRA adapter directory to load")
     args = parser.parse_args()
+
+    if not args.model_dir:
+        parser.error("--model-dir or LOCAL_MODEL_PATH environment variable is required.")
 
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer

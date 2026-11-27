@@ -228,7 +228,7 @@ export function getModelContextLimit(provider = '', model = ''): number {
     if (m.includes(prefix)) return limit;
   }
   const p = String(provider || '').toLowerCase();
-  if (['lmstudio', 'vllm', 'ollama', 'om'].includes(p)) return 16384;
+  if (['lmstudio', 'vllm', 'om'].includes(p)) return 16384;
   return 128000;
 }
 

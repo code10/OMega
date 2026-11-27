@@ -69,7 +69,7 @@ export const systemSkills: SkillDefinition[] = [
       properties: {
         provider: {
           type: 'string',
-          description: 'Optional provider name (gemini, openai, anthropic, ollama, lmstudio, vllm, om).'
+          description: 'Optional provider name (gemini, openai, anthropic, deepseek, kimi, qwen, glm, lmstudio, vllm, om).'
         }
       }
     },

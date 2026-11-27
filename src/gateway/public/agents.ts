@@ -115,7 +115,6 @@ export function initAgents() {
     { id: 'kimi', label: 'Kimi (Moonshot)' },
     { id: 'qwen', label: 'Qwen (Alibaba)' },
     { id: 'glm', label: 'GLM (Zhipu)' },
-    { id: 'ollama', label: 'Ollama (Local)' },
     { id: 'lmstudio', label: 'LM Studio (Local)' },
     { id: 'vllm', label: 'vLLM (Local)' },
     { id: 'om', label: 'OM Built-in' }

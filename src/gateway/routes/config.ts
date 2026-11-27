@@ -212,7 +212,7 @@ export async function handleConfigRoutes(ctx: ConfigRouteContext): Promise<boole
   if (pathname === '/api/routing' && req.method === 'GET') {
     const routingCfg = agent.router?.routingConfig || agent.config.routing || {};
     const providersCfg: Record<string, any> = agent.config.providers || {};
-    const localProviders = new Set(['om', 'mock', 'omega', 'lmstudio', 'vllm', 'ollama', 'local']);
+    const localProviders = new Set(['om', 'mock', 'omega', 'lmstudio', 'vllm', 'local']);
 
     const maskSecret = (val?: string) => {
       if (!val) return '';

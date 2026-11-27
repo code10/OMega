@@ -147,9 +147,8 @@ export function authenticateRequest(
 export function getRequiredRole(pathname: string, method = 'GET'): UserRole {
   const m = method.toUpperCase();
 
-  // Admin-only routes: config, system prompt, provider keys, git diffs, webhooks, skill creation, daemon, training, destructive resets
+  // Admin-only routes: system prompt, permissions, provider keys, git diffs, webhooks, skill creation, daemon, training, destructive resets
   if (
-    pathname.startsWith('/api/config') ||
     pathname === '/api/system-prompt' ||
     pathname === '/api/permissions' ||
     pathname === '/api/providers/keys' ||
@@ -161,9 +160,7 @@ export function getRequiredRole(pathname: string, method = 'GET'): UserRole {
     pathname.startsWith('/api/training') ||
     pathname.startsWith('/api/snapshots') ||
     pathname === '/api/clear' ||
-    pathname === '/api/sessions/reset-counter' ||
-    pathname === '/api/models/load' ||
-    pathname === '/api/models/unload'
+    pathname === '/api/sessions/reset-counter'
   ) {
     return 'admin';
   }

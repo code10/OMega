@@ -49,7 +49,7 @@ function hasLiveKey() {
     process.env.DEEPSEEK_API_KEY ||
     process.env.GLM_API_KEY ||
     process.env.VLLM_BASE_URL ||
-    process.env.OLLAMA_BASE_URL
+    process.env.LMSTUDIO_BASE_URL
   );
 }
 
