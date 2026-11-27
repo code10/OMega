@@ -17,15 +17,22 @@ export function handleSlashControl(agent: any, trimmedPrompt: string) {
     const targetModel = modelArg || (targetMode === 'local' ? (agent.config.providers?.om?.model || agent.config.providers?.mock?.model || 'om-turbo') : undefined);
 
     if (modelArg) {
-      if (/^gemini/i.test(modelArg)) targetProvider = 'gemini';
-      else if (/^(gpt|o1|o3|chatgpt)/i.test(modelArg)) targetProvider = 'openai';
-      else if (/^claude/i.test(modelArg)) targetProvider = 'anthropic';
-      else if (/^deepseek/i.test(modelArg)) targetProvider = 'deepseek';
-      else if (/^(kimi|moonshot)/i.test(modelArg)) targetProvider = 'kimi';
-      else if (/^(qwen|qwq)/i.test(modelArg)) targetProvider = 'qwen';
-      else if (/^glm/i.test(modelArg)) targetProvider = 'glm';
-      else if (/^(om-|om-v1|om-turbo|om-reasoning)/i.test(modelArg)) targetProvider = 'om';
-      else if (targetMode === 'local') targetProvider = 'vllm';
+      if (targetMode === 'local') {
+        if (/^(om-|om-v1|om-turbo|om-reasoning)/i.test(modelArg)) {
+          targetProvider = 'om';
+        } else {
+          targetProvider = 'vllm';
+        }
+      } else {
+        if (/^gemini/i.test(modelArg)) targetProvider = 'gemini';
+        else if (/^(gpt|o1|o3|chatgpt)/i.test(modelArg)) targetProvider = 'openai';
+        else if (/^claude/i.test(modelArg)) targetProvider = 'anthropic';
+        else if (/^deepseek/i.test(modelArg)) targetProvider = 'deepseek';
+        else if (/^(kimi|moonshot)/i.test(modelArg)) targetProvider = 'kimi';
+        else if (/^(qwen|qwq)/i.test(modelArg)) targetProvider = 'qwen';
+        else if (/^glm/i.test(modelArg)) targetProvider = 'glm';
+        else if (/^(om-|om-v1|om-turbo|om-reasoning)/i.test(modelArg)) targetProvider = 'om';
+      }
     }
 
     try {

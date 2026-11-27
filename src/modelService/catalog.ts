@@ -322,13 +322,18 @@ export async function listVLLMModels({ baseUrl = 'http://127.0.0.1:8000/v1' } = 
   return listLocalOpenAICompatModels('vllm', baseUrl, 'Local vLLM server model');
 }
 
-export function listLocalSafetensorsModels(options: Record<string, any> = {}): ModelCatalogEntry[] {
-  const dirPath = options.localModelPath || process.env.LOCAL_MODEL_PATH;
-  if (!dirPath || !fs.existsSync(dirPath)) return [];
+function normalizeLocalModelId(folderName: string): string {
+  return folderName.trim().toLowerCase().replace(/\s+/g, '-');
+}
+
+function inspectSafetensorsDir(dirPath: string): ModelCatalogEntry | null {
+  if (!dirPath || !fs.existsSync(dirPath)) return null;
   try {
+    const stat = fs.statSync(dirPath);
+    if (!stat.isDirectory()) return null;
     const files = fs.readdirSync(dirPath);
     const shardCount = files.filter((f) => f.endsWith('.safetensors')).length;
-    if (shardCount === 0) return [];
+    if (shardCount === 0) return null;
 
     let cfg: Record<string, any> = {};
     const cfgPath = path.join(dirPath, 'config.json');
@@ -337,28 +342,69 @@ export function listLocalSafetensorsModels(options: Record<string, any> = {}): M
     }
 
     const folderName = path.basename(dirPath);
-    const id = folderName.toLowerCase().replace(/\s+/g, '');
+    const id = normalizeLocalModelId(folderName);
     const arch = cfg.architectures?.[0] || cfg.model_type || 'safetensors';
     const maxPos = cfg.text_config?.max_position_embeddings || cfg.max_position_embeddings || 131072;
 
-    return [
-      {
-        id,
-        name: id,
-        displayName: `${folderName} (Safetensors)`,
-        description: `Local Hugging Face model (${shardCount} safetensors shards, ${arch}) at ${dirPath}`,
-        supportedGenerationMethods: ['generateContent'],
-        canGenerate: true,
-        inputTokenLimit: maxPos,
-        outputTokenLimit: 8192,
-        provider: 'vllm',
-        target: 'local',
-        localPath: dirPath
-      }
-    ];
+    return {
+      id,
+      name: id,
+      displayName: `${folderName} (Safetensors)`,
+      description: `Local Hugging Face model (${shardCount} safetensors shards, ${arch}) at ${dirPath}`,
+      supportedGenerationMethods: ['generateContent'],
+      canGenerate: true,
+      inputTokenLimit: maxPos,
+      outputTokenLimit: 8192,
+      provider: 'vllm',
+      target: 'local',
+      localPath: dirPath
+    };
   } catch {
-    return [];
+    return null;
   }
+}
+
+export function listLocalSafetensorsModels(options: Record<string, any> = {}): ModelCatalogEntry[] {
+  const seen = new Map<string, ModelCatalogEntry>();
+  const addDir = (dirPath?: string, explicitId?: string) => {
+    if (!dirPath) return;
+    const entry = inspectSafetensorsDir(dirPath);
+    if (!entry) return;
+    if (explicitId) {
+      entry.id = explicitId;
+      entry.name = explicitId;
+    }
+    if (!seen.has(entry.id)) {
+      seen.set(entry.id, entry);
+    }
+  };
+
+  // 1. Explicit single model path (LOCAL_MODEL_PATH)
+  const singlePath = options.localModelPath || process.env.LOCAL_MODEL_PATH;
+  addDir(singlePath);
+
+  // 2. Explicit map in config.providers.vllm.localModels (id -> path)
+  const localModelsMap = options.config?.providers?.vllm?.localModels;
+  if (localModelsMap && typeof localModelsMap === 'object') {
+    for (const [id, dirPath] of Object.entries(localModelsMap)) {
+      if (typeof dirPath === 'string') addDir(dirPath, id);
+    }
+  }
+
+  // 3. Scan directory of model folders (LOCAL_MODELS_DIR or options.modelsDir / options.localModelsDir)
+  const modelsRoot = options.localModelsDir || options.modelsDir || process.env.LOCAL_MODELS_DIR;
+  if (modelsRoot && fs.existsSync(modelsRoot)) {
+    try {
+      for (const dirent of fs.readdirSync(modelsRoot, { withFileTypes: true })) {
+        if (!dirent.isDirectory() || dirent.name.startsWith('.')) continue;
+        addDir(path.join(modelsRoot, dirent.name));
+      }
+    } catch {
+      // Ignore unreadable parent directories
+    }
+  }
+
+  return Array.from(seen.values());
 }
 
 export function listOMModels(): ModelCatalogEntry[] {

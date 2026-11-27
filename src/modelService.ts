@@ -81,10 +81,18 @@ export class ModelService {
           baseUrl: options.baseUrl || config.providers?.lmstudio?.baseUrl || process.env.LMSTUDIO_BASE_URL || 'http://127.0.0.1:1234/v1'
         });
 
-      case 'vllm':
-        return ModelService.listVLLMModels({
+      case 'vllm': {
+        const remote = await ModelService.listVLLMModels({
           baseUrl: options.baseUrl || config.providers?.vllm?.baseUrl || process.env.VLLM_BASE_URL || 'http://127.0.0.1:8000/v1'
         });
+        const localDirs = ModelService.listLocalSafetensorsModels({ ...options, config });
+        const byId = new Map<string, ModelCatalogEntry>();
+        for (const m of remote) byId.set(m.id, m);
+        for (const m of localDirs) {
+          if (!byId.has(m.id)) byId.set(m.id, m);
+        }
+        return Array.from(byId.values());
+      }
 
       case 'om':
       case 'omega':
@@ -233,9 +241,16 @@ export class ModelService {
       }
 
       const results = await Promise.allSettled(tasks);
+      const seenKeys = new Set(models.map((m) => `${m.provider}:${m.id}`));
       for (const r of results) {
         if (r.status === 'fulfilled' && Array.isArray(r.value)) {
-          models.push(...r.value);
+          for (const entry of r.value) {
+            const key = `${entry.provider}:${entry.id}`;
+            if (!seenKeys.has(key)) {
+              seenKeys.add(key);
+              models.push(entry);
+            }
+          }
         }
       }
 

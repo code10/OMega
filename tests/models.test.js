@@ -183,5 +183,33 @@ test('ModelService and ListModels command verification', async (t) => {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
   });
+
+  await t.test('Multi-model local safetensors discovery and /local model switching', async () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'omega-local-models-'));
+    try {
+      for (const folder of ['Gemma 3-4b', 'Gemma 4-E2B', 'Gemma 4-E4B', 'Qwen 3.8-27b']) {
+        const dir = path.join(tmpRoot, folder);
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, 'model.safetensors'), 'stub');
+        fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ model_type: 'gemma' }));
+      }
+      const discovered = ModelService.listLocalSafetensorsModels({ localModelsDir: tmpRoot });
+      const ids = discovered.map((m) => m.id);
+      assert.ok(ids.includes('gemma-3-4b'));
+      assert.ok(ids.includes('gemma-4-e2b'));
+      assert.ok(ids.includes('gemma-4-e4b'));
+      assert.ok(ids.includes('qwen-3.8-27b'));
+
+      const agent = new OMAgent({ rootDir: tmpRoot, provider: 'vllm', model: 'gemma-3-4b' });
+      for (const localModel of ['gemma-4-e2b', 'gemma-4-e4b', 'qwen-3.8-27b']) {
+        const res = await agent.run(`/local ${localModel}`);
+        assert.equal(res.success, true);
+        assert.equal(agent.config.provider, 'vllm');
+        assert.equal(agent.config.model, localModel);
+      }
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
 });
 
