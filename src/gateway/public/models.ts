@@ -440,17 +440,31 @@ export function initModels(deps: ModelsDeps) {
     }
     const hw = cachedHardware;
     const badgeClass = hw.hasGpu ? 'hw-gpu' : 'hw-cpu';
+    const accel = String(hw.accelerator || (hw.hasGpu ? 'gpu' : 'cpu')).toUpperCase();
+    const ramRounded = hw.totalRamGb ? Math.round(hw.totalRamGb) : 0;
     const badgeText = hw.hasGpu
-      ? (hw.unifiedMemory ? `UNIFIED ${hw.totalVramGb} GB` : `GPU · ${hw.totalVramGb} GB VRAM`)
-      : `CPU ONLY · ${hw.totalRamGb} GB RAM`;
+      ? (hw.unifiedMemory ? `${accel} · ${hw.totalVramGb} GB UNIFIED` : `${accel} · ${hw.totalVramGb} GB VRAM`)
+      : `CPU ONLY · ${ramRounded} GB RAM`;
+
+    const details = hw.hasGpu
+      ? [
+          Array.isArray(hw.gpuNames) && hw.gpuNames.length > 0 ? hw.gpuNames.join(', ') : hw.cpuModel,
+          ramRounded ? `${ramRounded} GB RAM` : '',
+          hw.logicalCores ? `${hw.logicalCores} Threads` : ''
+        ].filter(Boolean).join(' · ')
+      : [
+          hw.cpuModel || 'Host CPU',
+          hw.logicalCores ? `${hw.logicalCores} Threads` : ''
+        ].filter(Boolean).join(' · ');
+
     modelsHardwareBanner.hidden = false;
     modelsHardwareBanner.innerHTML = `
       <div class="models-hw-left">
         <span class="models-hw-badge ${badgeClass}">${escapeHtml(badgeText)}</span>
-        <span class="models-hw-summary">${escapeHtml(hw.summary || hw.tierLabel || '')}</span>
+        <span class="models-hw-summary">${escapeHtml(details)}</span>
       </div>
       <div class="models-hw-right">
-        <span class="models-hw-meta">Recommended local max: <b>~${escapeHtml(String(hw.recommendedMaxParamsB))}B</b></span>
+        <span class="models-hw-meta">Max local model: <b>~${escapeHtml(String(hw.recommendedMaxParamsB))}B</b></span>
       </div>
     `;
   }
