@@ -28,7 +28,8 @@ export { saveCheckpoint, loadCheckpoint, listCheckpoints, forkCheckpoint } from 
 export { OMEvalRunner } from './eval.js';
 export type { EvalRegressionThresholds, EvalBaselineComparison } from './eval.js';
 export { OMSystemOne } from './systemOne.js';
-export { collectDeviceSpecs } from './deviceSpecs.js';
+export { collectDeviceSpecs, classifyHardwareProfile, detectSystemHardware } from './deviceSpecs.js';
+export type { DeviceSpecsSnapshot, GpuInfo, NpuInfo, HardwareProfile, HardwareTier, HardwareAccelerator } from './deviceSpecs.js';
 export { OMSelfImprover } from './selfImprove.js';
 export { OMSelfHealer } from './selfHeal.js';
 export { OMTrainingPipeline } from './training.js';

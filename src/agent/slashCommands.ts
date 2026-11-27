@@ -20,8 +20,10 @@ export function handleSlashControl(agent: any, trimmedPrompt: string) {
       if (targetMode === 'local') {
         if (/^(om-|om-v1|om-turbo|om-reasoning)/i.test(modelArg)) {
           targetProvider = 'om';
+        } else if (agent.config.provider === 'vllm' || agent.config.provider === 'lmstudio') {
+          targetProvider = agent.config.provider;
         } else {
-          targetProvider = 'vllm';
+          targetProvider = 'local';
         }
       } else {
         if (/^gemini/i.test(modelArg)) targetProvider = 'gemini';

@@ -48,7 +48,7 @@ export async function executeAgentRun(
       agent.answers = [...resumeCp.answers];
     }
     const lastRole = agent.history[agent.history.length - 1]?.role;
-    if (prompt && prompt !== resumeCp.prompt && lastRole === 'assistant') {
+    if (prompt && lastRole === 'assistant' && (prompt !== resumeCp.prompt || resumeCp.status === 'completed')) {
       agent.history.push({ role: 'user', content: effectivePrompt });
     }
   } else {

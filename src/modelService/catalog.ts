@@ -1,6 +1,18 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { loadConfig } from '../config.js';
+import type { HardwareProfile } from '../deviceSpecs.js';
+
+export interface ModelHardwareFit {
+  status: 'optimal' | 'fits' | 'tight' | 'unsupported';
+  mode: 'gpu' | 'cpu' | 'unified' | 'simulator';
+  estimatedVramGb?: number;
+  estimatedRamGb?: number;
+  paramsB?: number;
+  quantization?: string;
+  reason: string;
+}
 
 export interface ModelCatalogEntry {
   id: string;
@@ -18,6 +30,9 @@ export interface ModelCatalogEntry {
   provider: string;
   target: 'cloud' | 'local';
   localPath?: string;
+  hardwareFit?: ModelHardwareFit;
+  recommended?: boolean;
+  installed?: boolean;
 }
 
 const COMPAT_SPECS: Record<
@@ -332,8 +347,21 @@ function inspectSafetensorsDir(dirPath: string): ModelCatalogEntry | null {
     const stat = fs.statSync(dirPath);
     if (!stat.isDirectory()) return null;
     const files = fs.readdirSync(dirPath);
-    const shardCount = files.filter((f) => f.endsWith('.safetensors')).length;
-    if (shardCount === 0) return null;
+    const shardFiles = files.filter((f) => f.endsWith('.safetensors'));
+    const onnxFiles = files.filter((f) => f.endsWith('.onnx'));
+    const onnxSubDir = path.join(dirPath, 'onnx');
+    const hasSubOnnx = fs.existsSync(onnxSubDir) && fs.statSync(onnxSubDir).isDirectory()
+      && fs.readdirSync(onnxSubDir).some((f) => f.endsWith('.onnx'));
+    const isOnnx = onnxFiles.length > 0 || hasSubOnnx;
+    const shardCount = shardFiles.length;
+    if (shardCount === 0 && !isOnnx) return null;
+
+    let totalWeightBytes = 0;
+    for (const f of [...shardFiles, ...onnxFiles]) {
+      try {
+        totalWeightBytes += fs.statSync(path.join(dirPath, f)).size;
+      } catch {}
+    }
 
     let cfg: Record<string, any> = {};
     const cfgPath = path.join(dirPath, 'config.json');
@@ -343,25 +371,52 @@ function inspectSafetensorsDir(dirPath: string): ModelCatalogEntry | null {
 
     const folderName = path.basename(dirPath);
     const id = normalizeLocalModelId(folderName);
-    const arch = cfg.architectures?.[0] || cfg.model_type || 'safetensors';
+    const arch = cfg.architectures?.[0] || cfg.model_type || (isOnnx ? 'onnx' : 'safetensors');
     const maxPos = cfg.text_config?.max_position_embeddings || cfg.max_position_embeddings || 131072;
+    const weightGb = totalWeightBytes > 0 ? Math.round((totalWeightBytes / (1024 ** 3)) * 10) / 10 : 0;
+    const sizeNote = weightGb > 0 ? `, ${weightGb} GB on disk` : '';
+    const formatNote = isOnnx ? 'ONNX in-process' : `${shardCount} safetensors shard${shardCount === 1 ? '' : 's'}`;
 
     return {
       id,
       name: id,
-      displayName: `${folderName} (Safetensors)`,
-      description: `Local Hugging Face model (${shardCount} safetensors shards, ${arch}) at ${dirPath}`,
+      displayName: `${folderName} (Local)`,
+      description: `Installed local model (${formatNote}${sizeNote}, ${arch}) — direct zero-port execution at ${dirPath}`,
       supportedGenerationMethods: ['generateContent'],
       canGenerate: true,
       inputTokenLimit: maxPos,
       outputTokenLimit: 8192,
-      provider: 'vllm',
+      provider: 'local',
       target: 'local',
-      localPath: dirPath
+      localPath: dirPath,
+      installed: true
     };
   } catch {
     return null;
   }
+}
+
+function getDefaultLocalModelScanRoots(): string[] {
+  const home = os.homedir();
+  const candidates = [
+    path.join(home, 'Desktop'),
+    path.join(home, 'models'),
+    path.join(home, 'Documents', 'models'),
+    path.join(home, '.lmstudio', 'models'),
+    path.join(home, '.cache', 'lm-studio', 'models'),
+    path.join(process.cwd(), 'models')
+  ];
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  for (const dir of candidates) {
+    const resolved = path.resolve(dir);
+    const key = resolved.toLowerCase();
+    if (!seen.has(key) && fs.existsSync(resolved)) {
+      seen.add(key);
+      unique.push(resolved);
+    }
+  }
+  return unique;
 }
 
 export function listLocalSafetensorsModels(options: Record<string, any> = {}): ModelCatalogEntry[] {
@@ -379,6 +434,18 @@ export function listLocalSafetensorsModels(options: Record<string, any> = {}): M
     }
   };
 
+  const scanRoot = (rootDir?: string) => {
+    if (!rootDir || !fs.existsSync(rootDir)) return;
+    try {
+      for (const dirent of fs.readdirSync(rootDir, { withFileTypes: true })) {
+        if (!dirent.isDirectory() || dirent.name.startsWith('.') || dirent.name === 'node_modules') continue;
+        addDir(path.join(rootDir, dirent.name));
+      }
+    } catch {
+      // Ignore unreadable parent directories
+    }
+  };
+
   // 1. Explicit single model path (LOCAL_MODEL_PATH)
   const singlePath = options.localModelPath || process.env.LOCAL_MODEL_PATH;
   addDir(singlePath);
@@ -391,16 +458,17 @@ export function listLocalSafetensorsModels(options: Record<string, any> = {}): M
     }
   }
 
-  // 3. Scan directory of model folders (LOCAL_MODELS_DIR or options.modelsDir / options.localModelsDir)
-  const modelsRoot = options.localModelsDir || options.modelsDir || process.env.LOCAL_MODELS_DIR;
-  if (modelsRoot && fs.existsSync(modelsRoot)) {
-    try {
-      for (const dirent of fs.readdirSync(modelsRoot, { withFileTypes: true })) {
-        if (!dirent.isDirectory() || dirent.name.startsWith('.')) continue;
-        addDir(path.join(modelsRoot, dirent.name));
+  // 3. Scan configured directory of model folders (LOCAL_MODELS_DIR or options.modelsDir / options.localModelsDir)
+  const explicitModelsRoot = options.localModelsDir || options.modelsDir;
+  if (explicitModelsRoot) {
+    scanRoot(explicitModelsRoot);
+  } else {
+    scanRoot(process.env.LOCAL_MODELS_DIR);
+    // 4. Auto-scan current PC's common model locations unless explicitly disabled
+    if (options.autoScanHost !== false) {
+      for (const rootDir of getDefaultLocalModelScanRoots()) {
+        scanRoot(rootDir);
       }
-    } catch {
-      // Ignore unreadable parent directories
     }
   }
 
@@ -419,7 +487,8 @@ export function listOMModels(): ModelCatalogEntry[] {
       inputTokenLimit: 128000,
       outputTokenLimit: 4096,
       provider: 'om',
-      target: 'local'
+      target: 'local',
+      installed: true
     },
     {
       id: 'om-turbo',
@@ -431,7 +500,8 @@ export function listOMModels(): ModelCatalogEntry[] {
       inputTokenLimit: 128000,
       outputTokenLimit: 4096,
       provider: 'om',
-      target: 'local'
+      target: 'local',
+      installed: true
     },
     {
       id: 'om-reasoning',
@@ -443,9 +513,502 @@ export function listOMModels(): ModelCatalogEntry[] {
       inputTokenLimit: 128000,
       outputTokenLimit: 8192,
       provider: 'om',
-      target: 'local'
+      target: 'local',
+      installed: true
     }
   ];
+}
+
+interface CuratedLocalModelSpec {
+  id: string;
+  displayName: string;
+  description: string;
+  paramsB: number;
+  quantization: string;
+  estimatedVramGb: number;
+  estimatedRamGb: number;
+  inputTokenLimit: number;
+  outputTokenLimit: number;
+  cpuFriendly: boolean;
+}
+
+const CURATED_LOCAL_MODELS: CuratedLocalModelSpec[] = [
+  // Ultra-lightweight (CPU-only & low RAM)
+  {
+    id: 'llama-3.2-1b-instruct',
+    displayName: 'Llama 3.2 1B Instruct',
+    description: 'Ultra-lightweight 1B local model optimized for fast CPU-only inference.',
+    paramsB: 1,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 1.0,
+    estimatedRamGb: 2.0,
+    inputTokenLimit: 131072,
+    outputTokenLimit: 4096,
+    cpuFriendly: true
+  },
+  {
+    id: 'gemma-3-1b-it',
+    displayName: 'Gemma 3 1B',
+    description: 'Compact Google Gemma 3 model for low-RAM and CPU-only laptops.',
+    paramsB: 1,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 1.0,
+    estimatedRamGb: 2.0,
+    inputTokenLimit: 32768,
+    outputTokenLimit: 4096,
+    cpuFriendly: true
+  },
+  {
+    id: 'qwen2.5-1.5b-instruct',
+    displayName: 'Qwen 2.5 1.5B Instruct',
+    description: 'Fast 1.5B general & coding assistant that runs smoothly on CPU.',
+    paramsB: 1.5,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 1.3,
+    estimatedRamGb: 2.5,
+    inputTokenLimit: 32768,
+    outputTokenLimit: 4096,
+    cpuFriendly: true
+  },
+  {
+    id: 'qwen2.5-3b-instruct',
+    displayName: 'Qwen 2.5 3B Instruct',
+    description: 'Balanced 3B local model for CPU-only PCs with 8 GB+ RAM or entry GPUs.',
+    paramsB: 3,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 2.3,
+    estimatedRamGb: 4.0,
+    inputTokenLimit: 32768,
+    outputTokenLimit: 4096,
+    cpuFriendly: true
+  },
+  {
+    id: 'llama-3.2-3b-instruct',
+    displayName: 'Llama 3.2 3B Instruct',
+    description: 'Capable 3B instruction-following model suited for CPU or 4 GB GPUs.',
+    paramsB: 3,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 2.4,
+    estimatedRamGb: 4.2,
+    inputTokenLimit: 131072,
+    outputTokenLimit: 4096,
+    cpuFriendly: true
+  },
+  {
+    id: 'phi-4-mini-instruct',
+    displayName: 'Phi-4 Mini (3.8B)',
+    description: 'Strong reasoning and coding in a compact 3.8B footprint for CPU/entry GPU.',
+    paramsB: 3.8,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 2.8,
+    estimatedRamGb: 5.0,
+    inputTokenLimit: 131072,
+    outputTokenLimit: 4096,
+    cpuFriendly: true
+  },
+  // Entry GPU (4-6 GB VRAM) / 16 GB+ CPU
+  {
+    id: 'gemma-3-4b-it',
+    displayName: 'Gemma 3 4B',
+    description: 'Efficient 4B model ideal for 4-6 GB GPUs or 16 GB+ RAM CPU systems.',
+    paramsB: 4,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 3.2,
+    estimatedRamGb: 5.5,
+    inputTokenLimit: 131072,
+    outputTokenLimit: 8192,
+    cpuFriendly: true
+  },
+  {
+    id: 'qwen2.5-coder-7b-instruct',
+    displayName: 'Qwen 2.5 Coder 7B',
+    description: 'Dedicated 7B local coding model for 6-8 GB GPUs or 16-32 GB RAM CPUs.',
+    paramsB: 7,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 5.0,
+    estimatedRamGb: 8.0,
+    inputTokenLimit: 131072,
+    outputTokenLimit: 8192,
+    cpuFriendly: true
+  },
+  {
+    id: 'deepseek-r1-distill-qwen-7b',
+    displayName: 'DeepSeek R1 Distill 7B',
+    description: 'Local chain-of-thought reasoning model distilled into 7B parameters.',
+    paramsB: 7,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 5.0,
+    estimatedRamGb: 8.0,
+    inputTokenLimit: 131072,
+    outputTokenLimit: 8192,
+    cpuFriendly: true
+  },
+  {
+    id: 'llama-3.1-8b-instruct',
+    displayName: 'Llama 3.1 8B Instruct',
+    description: 'Versatile 8B local model with strong tool calling for 8 GB+ GPUs.',
+    paramsB: 8,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 5.5,
+    estimatedRamGb: 9.0,
+    inputTokenLimit: 131072,
+    outputTokenLimit: 8192,
+    cpuFriendly: true
+  },
+  // Mid-Range GPU (8-16 GB VRAM)
+  {
+    id: 'gemma-3-12b-it',
+    displayName: 'Gemma 3 12B',
+    description: 'High-quality 12B local model tailored for 10-16 GB VRAM GPUs.',
+    paramsB: 12,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 8.2,
+    estimatedRamGb: 13.0,
+    inputTokenLimit: 131072,
+    outputTokenLimit: 8192,
+    cpuFriendly: false
+  },
+  {
+    id: 'qwen2.5-coder-14b-instruct',
+    displayName: 'Qwen 2.5 Coder 14B',
+    description: 'Strong 14B local software engineering model for 12-16 GB VRAM GPUs.',
+    paramsB: 14,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 9.5,
+    estimatedRamGb: 15.0,
+    inputTokenLimit: 131072,
+    outputTokenLimit: 8192,
+    cpuFriendly: false
+  },
+  {
+    id: 'deepseek-r1-distill-qwen-14b',
+    displayName: 'DeepSeek R1 Distill 14B',
+    description: 'Deep local reasoning 14B model suited for 12-16 GB VRAM GPUs.',
+    paramsB: 14,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 9.5,
+    estimatedRamGb: 15.0,
+    inputTokenLimit: 131072,
+    outputTokenLimit: 8192,
+    cpuFriendly: false
+  },
+  {
+    id: 'phi-4-14b',
+    displayName: 'Phi-4 14B',
+    description: 'High-accuracy 14B reasoning & STEM model for 12-16 GB VRAM GPUs.',
+    paramsB: 14,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 9.5,
+    estimatedRamGb: 15.0,
+    inputTokenLimit: 16384,
+    outputTokenLimit: 4096,
+    cpuFriendly: false
+  },
+  // High-VRAM GPU (16-32 GB VRAM)
+  {
+    id: 'mistral-small-24b-instruct',
+    displayName: 'Mistral Small 24B',
+    description: 'Fast 24B local model with strong tool calling for 16-24 GB VRAM GPUs.',
+    paramsB: 24,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 15.5,
+    estimatedRamGb: 24.0,
+    inputTokenLimit: 32768,
+    outputTokenLimit: 8192,
+    cpuFriendly: false
+  },
+  {
+    id: 'gemma-3-27b-it',
+    displayName: 'Gemma 3 27B',
+    description: 'Flagship local Gemma 3 27B model for 24 GB+ VRAM GPUs.',
+    paramsB: 27,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 17.5,
+    estimatedRamGb: 28.0,
+    inputTokenLimit: 131072,
+    outputTokenLimit: 8192,
+    cpuFriendly: false
+  },
+  {
+    id: 'qwen3-coder-30b-a3b',
+    displayName: 'Qwen 3 Coder 30B-A3B (MoE)',
+    description: 'High-throughput 30B MoE coding model (3B active) for 24 GB+ VRAM GPUs.',
+    paramsB: 30,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 19.0,
+    estimatedRamGb: 30.0,
+    inputTokenLimit: 131072,
+    outputTokenLimit: 8192,
+    cpuFriendly: false
+  },
+  {
+    id: 'qwen2.5-coder-32b-instruct',
+    displayName: 'Qwen 2.5 Coder 32B',
+    description: 'Top-tier 32B local coding & architecture model for 24 GB+ VRAM GPUs.',
+    paramsB: 32,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 20.5,
+    estimatedRamGb: 32.0,
+    inputTokenLimit: 131072,
+    outputTokenLimit: 8192,
+    cpuFriendly: false
+  },
+  {
+    id: 'deepseek-r1-distill-qwen-32b',
+    displayName: 'DeepSeek R1 Distill 32B',
+    description: 'Frontier-class local 32B reasoning model for 24 GB+ VRAM GPUs.',
+    paramsB: 32,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 20.5,
+    estimatedRamGb: 32.0,
+    inputTokenLimit: 131072,
+    outputTokenLimit: 8192,
+    cpuFriendly: false
+  },
+  // Workstation / Multi-GPU / High Unified Memory (48-80+ GB VRAM)
+  {
+    id: 'llama-3.3-70b-instruct',
+    displayName: 'Llama 3.3 70B Instruct',
+    description: 'Workstation-class 70B local model for 48-80 GB VRAM or 64 GB+ unified memory.',
+    paramsB: 70,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 42.0,
+    estimatedRamGb: 64.0,
+    inputTokenLimit: 131072,
+    outputTokenLimit: 8192,
+    cpuFriendly: false
+  },
+  {
+    id: 'deepseek-r1-distill-llama-70b',
+    displayName: 'DeepSeek R1 Distill 70B',
+    description: 'Heavyweight 70B local reasoning model for multi-GPU or 48-80 GB VRAM workstations.',
+    paramsB: 70,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 42.0,
+    estimatedRamGb: 64.0,
+    inputTokenLimit: 131072,
+    outputTokenLimit: 8192,
+    cpuFriendly: false
+  },
+  {
+    id: 'qwen2.5-72b-instruct',
+    displayName: 'Qwen 2.5 72B Instruct',
+    description: 'Flagship 72B local generalist & coding model for 48-80 GB+ VRAM workstations.',
+    paramsB: 72,
+    quantization: 'Q4_K_M',
+    estimatedVramGb: 44.0,
+    estimatedRamGb: 68.0,
+    inputTokenLimit: 131072,
+    outputTokenLimit: 8192,
+    cpuFriendly: false
+  }
+];
+
+export function estimateModelParamsB(idOrName: string): number | null {
+  const s = String(idOrName || '').toLowerCase();
+  const explicitMatch = s.match(/(?:^|[-_/\s])e?(\d+(?:\.\d+)?)b(?=$|[-_/\s.])/i);
+  if (explicitMatch) {
+    const val = Number(explicitMatch[1]);
+    if (Number.isFinite(val) && val > 0 && val <= 1000) return val;
+  }
+  if (/\bmini\b/i.test(s)) return 3.8;
+  if (/\btiny\b/i.test(s)) return 1.1;
+  return null;
+}
+
+/**
+ * Evaluate how well a local model fits the detected host hardware (CPU-only vs GPU VRAM).
+ */
+export function evaluateModelHardwareFit(
+  model: {
+    id: string;
+    provider?: string;
+    paramsB?: number;
+    estimatedVramGb?: number;
+    estimatedRamGb?: number;
+    quantization?: string;
+  },
+  hardware: HardwareProfile
+): ModelHardwareFit {
+  const prov = (model.provider || '').toLowerCase();
+  if (prov === 'om' || prov === 'mock' || prov === 'omega') {
+    return {
+      status: 'optimal',
+      mode: 'simulator',
+      estimatedRamGb: 0.1,
+      reason: 'Built-in local simulator — runs on any CPU or GPU'
+    };
+  }
+
+  const paramsB = model.paramsB ?? estimateModelParamsB(model.id) ?? 7;
+  const quantization = model.quantization || 'Q4_K_M';
+  const estVramGb = model.estimatedVramGb ?? Math.round((paramsB * 0.65 + 0.5) * 10) / 10;
+  const estRamGb = model.estimatedRamGb ?? Math.round((paramsB * 0.78 + 1.5) * 10) / 10;
+
+  if (hardware.hasGpu) {
+    const mode = hardware.unifiedMemory ? 'unified' : 'gpu';
+    const memLabel = hardware.unifiedMemory ? 'unified memory' : 'VRAM';
+    const vram = hardware.totalVramGb;
+
+    if (estVramGb <= vram * 0.85) {
+      const isSweetSpot = paramsB >= hardware.recommendedMaxParamsB * 0.35 || vram <= 8;
+      return {
+        status: isSweetSpot ? 'optimal' : 'fits',
+        mode,
+        estimatedVramGb: estVramGb,
+        estimatedRamGb: estRamGb,
+        paramsB,
+        quantization,
+        reason: `${isSweetSpot ? 'Optimal' : 'Fits comfortably'} in ${vram} GB ${memLabel} (~${estVramGb} GB ${quantization})`
+      };
+    }
+
+    if (estVramGb <= vram * 0.98) {
+      return {
+        status: 'tight',
+        mode,
+        estimatedVramGb: estVramGb,
+        estimatedRamGb: estRamGb,
+        paramsB,
+        quantization,
+        reason: `Tight fit in ${vram} GB ${memLabel} (~${estVramGb} GB ${quantization}; use shorter context)`
+      };
+    }
+
+    if (estRamGb <= hardware.totalRamGb * 0.72 && paramsB <= 14) {
+      return {
+        status: 'tight',
+        mode: 'cpu',
+        estimatedVramGb: estVramGb,
+        estimatedRamGb: estRamGb,
+        paramsB,
+        quantization,
+        reason: `Exceeds ${vram} GB ${memLabel} — requires CPU/RAM offload (~${estRamGb} GB of ${hardware.totalRamGb} GB RAM)`
+      };
+    }
+
+    return {
+      status: 'unsupported',
+      mode,
+      estimatedVramGb: estVramGb,
+      estimatedRamGb: estRamGb,
+      paramsB,
+      quantization,
+      reason: `Requires ~${estVramGb} GB ${memLabel}; detected ${vram} GB`
+    };
+  }
+
+  // CPU-only path
+  const ram = hardware.totalRamGb;
+  if (paramsB <= hardware.recommendedMaxParamsB && estRamGb <= ram * 0.65) {
+    return {
+      status: 'optimal',
+      mode: 'cpu',
+      estimatedVramGb: estVramGb,
+      estimatedRamGb: estRamGb,
+      paramsB,
+      quantization,
+      reason: `Optimal for CPU-only (${ram} GB RAM · ~${estRamGb} GB ${quantization})`
+    };
+  }
+
+  if (estRamGb <= ram * 0.75 && paramsB <= 14) {
+    return {
+      status: 'fits',
+      mode: 'cpu',
+      estimatedVramGb: estVramGb,
+      estimatedRamGb: estRamGb,
+      paramsB,
+      quantization,
+      reason: `Runs on CPU (${ram} GB RAM · ~${estRamGb} GB ${quantization})`
+    };
+  }
+
+  if (estRamGb <= ram * 0.88 && paramsB <= 14) {
+    return {
+      status: 'tight',
+      mode: 'cpu',
+      estimatedVramGb: estVramGb,
+      estimatedRamGb: estRamGb,
+      paramsB,
+      quantization,
+      reason: `Tight on CPU RAM (~${estRamGb} GB of ${ram} GB RAM; slower token/s)`
+    };
+  }
+
+  return {
+    status: 'unsupported',
+    mode: 'cpu',
+    estimatedVramGb: estVramGb,
+    estimatedRamGb: estRamGb,
+    paramsB,
+    quantization,
+    reason: `Too large for CPU-only ${ram} GB RAM (needs ~${estRamGb} GB RAM or ${estVramGb} GB GPU VRAM)`
+  };
+}
+
+/**
+ * List curated local models matched to the detected system's hardware capabilities.
+ */
+export function listHardwareMatchedLocalModels(
+  hardware: HardwareProfile,
+  options: { includeTight?: boolean; includeUnsupported?: boolean } = {}
+): ModelCatalogEntry[] {
+  const defaultProvider = hardware.recommendedRuntime === 'vllm' ? 'vllm' : 'lmstudio';
+  const includeTight = options.includeTight === true;
+  const includeUnsupported = options.includeUnsupported === true;
+
+  const entries: ModelCatalogEntry[] = [];
+  for (const spec of CURATED_LOCAL_MODELS) {
+    const fit = evaluateModelHardwareFit(
+      {
+        id: spec.id,
+        provider: defaultProvider,
+        paramsB: spec.paramsB,
+        estimatedVramGb: spec.estimatedVramGb,
+        estimatedRamGb: spec.estimatedRamGb,
+        quantization: spec.quantization
+      },
+      hardware
+    );
+
+    if (fit.status === 'unsupported' && !includeUnsupported) continue;
+    if (fit.status === 'tight' && !includeTight && !includeUnsupported) continue;
+
+    entries.push({
+      id: spec.id,
+      name: spec.id,
+      displayName: spec.displayName,
+      description: spec.description,
+      supportedGenerationMethods: ['generateContent'],
+      canGenerate: true,
+      inputTokenLimit: spec.inputTokenLimit,
+      outputTokenLimit: spec.outputTokenLimit,
+      provider: defaultProvider,
+      target: 'local',
+      hardwareFit: fit,
+      recommended: fit.status === 'optimal',
+      installed: false
+    });
+  }
+
+  // Sort: optimal first (larger capable models first for GPUs, or best-sized for CPU), then fits, then tight
+  const rankStatus: Record<ModelHardwareFit['status'], number> = {
+    optimal: 0,
+    fits: 1,
+    tight: 2,
+    unsupported: 3
+  };
+  entries.sort((a, b) => {
+    const sa = rankStatus[a.hardwareFit?.status || 'unsupported'];
+    const sb = rankStatus[b.hardwareFit?.status || 'unsupported'];
+    if (sa !== sb) return sa - sb;
+    const pa = a.hardwareFit?.paramsB || 0;
+    const pb = b.hardwareFit?.paramsB || 0;
+    return pb - pa;
+  });
+
+  return entries;
 }
 
 export async function listCompatCloudModels(

@@ -1,36 +1,139 @@
 import { loadConfig } from './config.js';
+import { detectSystemHardware, type HardwareProfile } from './deviceSpecs.js';
 import {
+  evaluateModelHardwareFit,
   listAnthropicModels as listAnthropicCatalog,
   listCompatCloudModels as listCompatCloudCatalog,
   listGeminiModels as listGeminiCatalog,
+  listHardwareMatchedLocalModels,
   listLMStudioModels as listLMStudioCatalog,
   listLocalSafetensorsModels as listLocalSafetensorsCatalog,
   listOMModels as listOMCatalog,
   listOpenAIModels as listOpenAICatalog,
   listVLLMModels as listVLLMCatalog,
-  type ModelCatalogEntry
+  type ModelCatalogEntry,
+  type ModelHardwareFit
 } from './modelService/catalog.js';
 
-export type { ModelCatalogEntry };
+export type { ModelCatalogEntry, ModelHardwareFit };
+export { evaluateModelHardwareFit, listHardwareMatchedLocalModels };
 
 /**
  * Service to inspect, discover, and list available LLM models from providers,
  * implementing ModelService.ListModels (e.g. for Google Gemini v1beta REST API)
- * as well as other supported providers (OpenAI, Anthropic, vLLM, LM Studio, OMega).
+ * as well as other supported providers (OpenAI, Anthropic, vLLM, LM Studio, OMega)
+ * and hardware-aware local model discovery.
  */
 export class ModelService {
   config: Record<string, any>;
   private static _catalogCache = new Map<string, { at: number; models: ModelCatalogEntry[] }>();
   private static _inFlightCatalog = new Map<string, Promise<ModelCatalogEntry[]>>();
+  private static _hardwareCache: { at: number; profile: HardwareProfile } | null = null;
   private static readonly CATALOG_TTL_MS = 30000;
 
   constructor(config: Record<string, any> = {}) {
     this.config = config;
   }
 
+  static async getHardwareProfile(options: { refresh?: boolean; hardwareProfile?: HardwareProfile } = {}): Promise<HardwareProfile> {
+    if (options.hardwareProfile) return options.hardwareProfile;
+    if (!options.refresh && ModelService._hardwareCache && Date.now() - ModelService._hardwareCache.at < ModelService.CATALOG_TTL_MS) {
+      return ModelService._hardwareCache.profile;
+    }
+    const profile = await detectSystemHardware();
+    ModelService._hardwareCache = { at: Date.now(), profile };
+    return profile;
+  }
+
+  static async listLocalModels(options: Record<string, any> = {}): Promise<ModelCatalogEntry[]> {
+    const config = options.config || loadConfig();
+    const hardware = await ModelService.getHardwareProfile({
+      refresh: options.refresh,
+      hardwareProfile: options.hardwareProfile
+    });
+
+    const annotate = (m: ModelCatalogEntry, installed: boolean): ModelCatalogEntry => ({
+      ...m,
+      target: 'local',
+      installed: m.installed ?? installed,
+      hardwareFit: m.hardwareFit || evaluateModelHardwareFit(m, hardware)
+    });
+
+    const safetensorsModels = ModelService.listLocalSafetensorsModels({ ...options, config }).map((m) => annotate(m, true));
+
+    const [lmStudioRes, vllmRes] = await Promise.allSettled([
+      (async () => {
+        const lmUrl = options.lmStudioBaseUrl || config.providers?.lmstudio?.baseUrl || process.env.LMSTUDIO_BASE_URL || 'http://127.0.0.1:1234/v1';
+        return (await ModelService.listLMStudioModels({ baseUrl: lmUrl })).map((m) => annotate(m, true));
+      })(),
+      (async () => {
+        const vllmUrl = options.vllmBaseUrl || config.providers?.vllm?.baseUrl || process.env.VLLM_BASE_URL || 'http://127.0.0.1:8000/v1';
+        return (await ModelService.listVLLMModels({ baseUrl: vllmUrl })).map((m) => annotate(m, true));
+      })()
+    ]);
+
+    const discovered: ModelCatalogEntry[] = [
+      ...(lmStudioRes.status === 'fulfilled' ? lmStudioRes.value : []),
+      ...(vllmRes.status === 'fulfilled' ? vllmRes.value : []),
+      ...safetensorsModels
+    ];
+
+    // Filter discovered local models by detected system hardware unless includeUnsupported is explicitly set.
+    // On CPU-only or low-VRAM PCs, models that exceed the machine's RAM/VRAM are excluded;
+    // on high-VRAM GPUs, larger installed models are included and marked optimal/fits.
+    const includeUnsupported = options.includeUnsupported === true;
+    const rankStatus: Record<ModelHardwareFit['status'], number> = {
+      optimal: 0,
+      fits: 1,
+      tight: 2,
+      unsupported: 3
+    };
+    const compatibleDiscovered = discovered
+      .filter((m) => includeUnsupported || m.hardwareFit?.status !== 'unsupported')
+      .sort((a, b) => {
+        const sa = rankStatus[a.hardwareFit?.status || 'unsupported'];
+        const sb = rankStatus[b.hardwareFit?.status || 'unsupported'];
+        if (sa !== sb) return sa - sb;
+        return (b.hardwareFit?.paramsB || 0) - (a.hardwareFit?.paramsB || 0);
+      });
+
+    const result: ModelCatalogEntry[] = [];
+    const seenIds = new Set<string>();
+
+    // 1. Actually installed / running local models on this PC that fit the detected hardware
+    for (const m of compatibleDiscovered) {
+      const idKey = m.id.toLowerCase();
+      if (!seenIds.has(idKey)) {
+        seenIds.add(idKey);
+        result.push(m);
+      }
+    }
+
+    // 2. Optional: include curated hardware-matched suggestions ONLY when explicitly requested
+    if (options.includeRecommended === true) {
+      const hardwareMatched = listHardwareMatchedLocalModels(hardware, {
+        includeTight: Boolean(options.includeTight),
+        includeUnsupported
+      });
+      for (const m of hardwareMatched) {
+        const idKey = m.id.toLowerCase();
+        if (!seenIds.has(idKey)) {
+          seenIds.add(idKey);
+          result.push(m);
+        }
+      }
+    }
+
+    return result;
+  }
+
   static async listModels(options: Record<string, any> = {}) {
     const config = options.config || loadConfig();
     const providerName = (options.provider || config.provider || 'gemini').toLowerCase();
+
+    if (providerName === 'local') {
+      return ModelService.listLocalModels({ ...options, config });
+    }
 
     if (providerName === 'all' || options.all || options.scope) {
       return ModelService.listAllModels(options);
@@ -148,7 +251,15 @@ export class ModelService {
 
   static async listAllModels(options: Record<string, any> = {}) {
     const scope = options.scope === 'cloud' || options.scope === 'local' ? options.scope : 'all';
-    const hasCustomEndpoint = Boolean(options.apiKey || options.lmStudioBaseUrl || options.vllmBaseUrl || options.modelsDir);
+    const hasCustomEndpoint = Boolean(
+      options.apiKey ||
+      options.lmStudioBaseUrl ||
+      options.vllmBaseUrl ||
+      options.modelsDir ||
+      options.hardwareProfile ||
+      options.includeTight ||
+      options.includeUnsupported
+    );
     const useCache = !options.refresh && !hasCustomEndpoint;
 
     if (useCache) {
@@ -168,25 +279,7 @@ export class ModelService {
       const tasks: Array<Promise<ModelCatalogEntry[]>> = [];
 
       if (scope !== 'cloud') {
-        models.push(...ModelService.listOMModels(), ...ModelService.listLocalSafetensorsModels(options));
-        tasks.push(
-          (async () => {
-            try {
-              const lmUrl = options.lmStudioBaseUrl || config.providers?.lmstudio?.baseUrl || process.env.LMSTUDIO_BASE_URL || 'http://127.0.0.1:1234/v1';
-              return await ModelService.listLMStudioModels({ baseUrl: lmUrl });
-            } catch {
-              return [];
-            }
-          })(),
-          (async () => {
-            try {
-              const vllmUrl = options.vllmBaseUrl || config.providers?.vllm?.baseUrl || process.env.VLLM_BASE_URL || 'http://127.0.0.1:8000/v1';
-              return await ModelService.listVLLMModels({ baseUrl: vllmUrl });
-            } catch {
-              return [];
-            }
-          })()
-        );
+        tasks.push(ModelService.listLocalModels({ ...options, config }));
       }
 
       if (scope !== 'local') {

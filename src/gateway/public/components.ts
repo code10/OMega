@@ -163,6 +163,17 @@ export interface ModelCardViewModel {
   description?: string;
   inputTokenLimit?: number;
   outputTokenLimit?: number;
+  installed?: boolean;
+  recommended?: boolean;
+  hardwareFit?: {
+    status: 'optimal' | 'fits' | 'tight' | 'unsupported';
+    mode: 'gpu' | 'cpu' | 'unified' | 'simulator';
+    estimatedVramGb?: number;
+    estimatedRamGb?: number;
+    paramsB?: number;
+    quantization?: string;
+    reason?: string;
+  };
 }
 
 export function renderModelCardHtml(m: ModelCardViewModel, isCurrent: boolean): string {
@@ -173,13 +184,34 @@ export function renderModelCardHtml(m: ModelCardViewModel, isCurrent: boolean): 
     limits = [inTok, outTok].filter(Boolean).map((t) => `<span class="model-tag">${escapeHtml(t)}</span>`).join('');
   }
 
+  let fitTags = '';
+  if (m.installed && m.provider !== 'om') {
+    fitTags += `<span class="model-tag model-fit-installed">Installed</span>`;
+  }
+  if (m.hardwareFit && m.hardwareFit.mode !== 'simulator') {
+    const st = m.hardwareFit.status;
+    const statusLabel = st === 'optimal' ? 'Optimal Fit' : st === 'fits' ? 'Fits Hardware' : st === 'tight' ? 'Tight Fit' : 'Exceeds Hardware';
+    fitTags += `<span class="model-tag model-fit-${escapeHtml(st)}">${escapeHtml(statusLabel)}</span>`;
+    if (m.hardwareFit.mode === 'cpu' && m.hardwareFit.estimatedRamGb) {
+      fitTags += `<span class="model-tag">~${escapeHtml(String(m.hardwareFit.estimatedRamGb))}GB RAM</span>`;
+    } else if (m.hardwareFit.estimatedVramGb) {
+      fitTags += `<span class="model-tag">~${escapeHtml(String(m.hardwareFit.estimatedVramGb))}GB VRAM</span>`;
+    }
+  }
+
   const p = (m.provider || 'gemini').toLowerCase();
   let provBadge = p.toUpperCase();
   if (p === 'gemini' || p === 'google') provBadge = 'GEMINI';
   else if (p === 'om' || p === 'mock' || p === 'omega') provBadge = 'OMEGA';
   else if (p === 'openai') provBadge = 'GPT';
   else if (p === 'anthropic') provBadge = 'CLAUDE';
-  else if (p === 'vllm') provBadge = 'LOCAL';
+  else if (p === 'local') provBadge = 'LOCAL';
+  else if (p === 'vllm') provBadge = 'VLLM';
+  else if (p === 'lmstudio') provBadge = 'LM STUDIO';
+
+  const fitNoteHtml = m.hardwareFit?.reason && m.hardwareFit.mode !== 'simulator'
+    ? `<div class="model-card-fit-note">${escapeHtml(m.hardwareFit.reason)}</div>`
+    : '';
 
   return `
     <div class="model-card-top">
@@ -188,9 +220,11 @@ export function renderModelCardHtml(m: ModelCardViewModel, isCurrent: boolean): 
     </div>
     <div class="model-card-tags">
       <span class="model-tag" style="color:var(--accent-primary); font-weight:600;">${escapeHtml(m.id)}</span>
+      ${fitTags}
       ${limits}
     </div>
     <div class="model-card-desc">${escapeHtml(m.description || 'General-purpose reasoning language model.')}</div>
+    ${fitNoteHtml}
     <div class="model-card-actions">
       <button class="btn-load-model ${isCurrent ? 'loaded' : ''}">
         ${isCurrent ? '● Active' : 'Load Model'}

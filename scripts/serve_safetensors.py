@@ -118,11 +118,25 @@ def _discover_local_models() -> Dict[str, str]:
             pass
 
     # 4. Scan models_root directory for any subfolder containing .safetensors
-    models_root = MODEL_STATE["models_root"]
-    if models_root and os.path.isdir(models_root):
+    scan_roots: List[str] = []
+    if MODEL_STATE["models_root"]:
+        scan_roots.append(MODEL_STATE["models_root"])
+    home_dir = os.path.expanduser("~")
+    for default_root in (
+        os.path.join(home_dir, "Desktop"),
+        os.path.join(home_dir, "models"),
+        os.path.join(home_dir, "Documents", "models"),
+        os.path.join(os.getcwd(), "models"),
+    ):
+        if os.path.isdir(default_root) and default_root not in scan_roots:
+            scan_roots.append(default_root)
+
+    for root_dir in scan_roots:
+        if not root_dir or not os.path.isdir(root_dir):
+            continue
         try:
-            for entry in sorted(os.scandir(models_root), key=lambda e: e.name.lower()):
-                if entry.is_dir() and not entry.name.startswith("."):
+            for entry in sorted(os.scandir(root_dir), key=lambda e: e.name.lower()):
+                if entry.is_dir() and not entry.name.startswith(".") and entry.name != "node_modules":
                     register(entry.path)
         except OSError:
             pass

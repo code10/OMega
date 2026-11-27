@@ -101,6 +101,7 @@ export function loadConfig(overrides: OMAgentOptions = {}): OMConfig {
     kimi: fileConfig.providers?.kimi?.model || 'kimi-k2-0711-preview',
     qwen: fileConfig.providers?.qwen?.model || 'qwen-plus',
     glm: fileConfig.providers?.glm?.model || 'glm-4.5-flash',
+    local: fileConfig.providers?.local?.model || 'auto',
     vllm: process.env.VLLM_MODEL || fileConfig.providers?.vllm?.model || 'default',
     lmstudio: process.env.LMSTUDIO_MODEL || fileConfig.providers?.lmstudio?.model || 'local-model',
     om: (fileConfig.providers?.om?.model || fileConfig.providers?.mock?.model || 'om-turbo').replace(/^om-mock-/, 'om-')

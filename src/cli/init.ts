@@ -50,17 +50,19 @@ export async function runInitCommand(options: Record<string, any> = {}) {
 # Never commit your .env file to version control!
 # ============================================================================
 
-# Active Provider: auto | gemini | openai | anthropic | vllm | lmstudio | om
+# Active Provider: auto | local | gemini | openai | anthropic | deepseek | kimi | qwen | glm | vllm | lmstudio
 OM_PROVIDER=auto
+# OM_MODEL=auto
 
 # Cloud Provider API Keys
 GEMINI_API_KEY=
 OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
 
-# Local Model Endpoints
+# Optional Local Model Overrides (auto-scanned on any PC when left unset)
+# LOCAL_MODEL_PATH=/path/to/local-model
+# LOCAL_MODELS_DIR=/path/to/models-folder
 VLLM_BASE_URL=http://127.0.0.1:8000/v1
-VLLM_MODEL=default
 LMSTUDIO_BASE_URL=http://127.0.0.1:1234/v1
 
 # Web Dashboard Port
@@ -90,7 +92,7 @@ OM_GATEWAY_PORT=3000
     name: 'OMega Agent',
     version: '1.0.0',
     provider: 'auto',
-    model: 'om-turbo',
+    model: 'auto',
     systemPrompt: 'You are OM, a fast, proactive, and capable local-first AI agent. Use your tools proactively to inspect files, execute commands, remember facts, and accomplish tasks step-by-step.',
     maxSteps: 15,
     temperature: 0.2,
@@ -104,8 +106,7 @@ OM_GATEWAY_PORT=3000
       fallbackChain: [
         { provider: 'gemini', model: 'gemini-3.5-flash' },
         { provider: 'openai', model: 'gpt-4o' },
-        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
-        { provider: 'om', model: 'om-reasoning' }
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' }
       ]
     },
     security: {

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ModelService } from '../dist/modelService.js';
+import { classifyHardwareProfile, detectSystemHardware } from '../dist/deviceSpecs.js';
 import { OMAgent } from '../dist/agent.js';
 import { SkillRegistry } from '../dist/skills/index.js';
 import { OMProvider } from '../dist/providers/omega.js';
@@ -207,6 +208,144 @@ test('ModelService and ListModels command verification', async (t) => {
         assert.equal(agent.config.provider, 'vllm');
         assert.equal(agent.config.model, localModel);
       }
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  await t.test('Hardware detection classifies CPU-only, mid GPU, high-VRAM GPU, and workstation tiers accurately', async () => {
+    const cpuOnly = classifyHardwareProfile({
+      system: { platform: 'win32', arch: 'x64' },
+      cpu: { model: 'Intel Core i5-12400', logicalCores: 12 },
+      ram: { totalGb: 8, freeGb: 4.5 },
+      gpus: [{ name: 'Microsoft Basic Display Adapter', vendor: 'Microsoft', vramTotalMb: 0, vramUsedMb: null, vramFreeMb: null, utilizationPct: null, temperatureC: null, driverVersion: null, cudaCapable: false }]
+    });
+    assert.equal(cpuOnly.tier, 'cpu-only');
+    assert.equal(cpuOnly.hasGpu, false);
+    assert.equal(cpuOnly.accelerator, 'cpu');
+    assert.equal(cpuOnly.recommendedMaxParamsB, 3);
+
+    const midGpu = classifyHardwareProfile({
+      system: { platform: 'win32', arch: 'x64' },
+      cpu: { model: 'AMD Ryzen 7 5800X', logicalCores: 16 },
+      ram: { totalGb: 32, freeGb: 20 },
+      gpus: [{ name: 'NVIDIA GeForce RTX 3060', vendor: 'NVIDIA', vramTotalMb: 12288, vramUsedMb: 500, vramFreeMb: 11788, utilizationPct: 5, temperatureC: 42, driverVersion: '555.0', cudaCapable: true }]
+    });
+    assert.equal(midGpu.tier, 'gpu-mid');
+    assert.equal(midGpu.hasGpu, true);
+    assert.equal(midGpu.accelerator, 'cuda');
+    assert.equal(midGpu.totalVramGb, 12);
+    assert.equal(midGpu.recommendedMaxParamsB, 14);
+
+    const highGpu = classifyHardwareProfile({
+      system: { platform: 'linux', arch: 'x64' },
+      cpu: { model: 'AMD Ryzen 9 7950X', logicalCores: 32 },
+      ram: { totalGb: 64, freeGb: 48 },
+      gpus: [{ name: 'NVIDIA GeForce RTX 4090', vendor: 'NVIDIA', vramTotalMb: 24576, vramUsedMb: 1000, vramFreeMb: 23576, utilizationPct: 2, temperatureC: 38, driverVersion: '560.0', cudaCapable: true }]
+    });
+    assert.equal(highGpu.tier, 'gpu-high');
+    assert.equal(highGpu.totalVramGb, 24);
+    assert.equal(highGpu.recommendedRuntime, 'vllm');
+    assert.equal(highGpu.recommendedMaxParamsB, 32);
+
+    const workstation = classifyHardwareProfile({
+      system: { platform: 'linux', arch: 'x64' },
+      cpu: { model: 'AMD EPYC 9654', logicalCores: 64 },
+      ram: { totalGb: 256, freeGb: 200 },
+      gpus: [{ name: 'NVIDIA A100 80GB PCIe', vendor: 'NVIDIA', vramTotalMb: 81920, vramUsedMb: 0, vramFreeMb: 81920, utilizationPct: 0, temperatureC: 35, driverVersion: '560.0', cudaCapable: true }]
+    });
+    assert.equal(workstation.tier, 'gpu-workstation');
+    assert.equal(workstation.totalVramGb, 80);
+    assert.equal(workstation.recommendedMaxParamsB, 72);
+
+    const appleSilicon = classifyHardwareProfile({
+      system: { platform: 'darwin', arch: 'arm64' },
+      cpu: { model: 'Apple M3 Max', logicalCores: 16 },
+      ram: { totalGb: 64, freeGb: 40 },
+      gpus: [{ name: 'Apple M3 Max', vendor: 'Apple', vramTotalMb: 49152, vramUsedMb: null, vramFreeMb: null, utilizationPct: null, temperatureC: null, driverVersion: null, cudaCapable: false, unifiedMemory: true }]
+    });
+    assert.equal(appleSilicon.tier, 'gpu-workstation');
+    assert.equal(appleSilicon.accelerator, 'metal');
+    assert.equal(appleSilicon.unifiedMemory, true);
+  });
+
+  await t.test('ModelService.listModels({ provider: "local" }) only lists installed models on this PC filtered by CPU-only vs high-VRAM GPU', async () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'omega-hw-local-'));
+    try {
+      for (const folder of ['Qwen 2.5-3b', 'Gemma 3-4b', 'Qwen 3.8-27b', 'Llama 3.3-70b']) {
+        const dir = path.join(tmpRoot, folder);
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, 'model.safetensors'), 'stub');
+        fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ model_type: 'llama' }));
+      }
+
+      const cpuOnly = classifyHardwareProfile({
+        system: { platform: 'win32', arch: 'x64' },
+        cpu: { model: 'Intel Core i5', logicalCores: 8 },
+        ram: { totalGb: 8, freeGb: 4 },
+        gpus: []
+      });
+      const highVram = classifyHardwareProfile({
+        system: { platform: 'linux', arch: 'x64' },
+        cpu: { model: 'AMD EPYC', logicalCores: 32 },
+        ram: { totalGb: 128, freeGb: 100 },
+        gpus: [{ name: 'NVIDIA A100 80GB', vendor: 'NVIDIA', vramTotalMb: 81920, vramUsedMb: 0, vramFreeMb: 81920, utilizationPct: 0, temperatureC: 35, driverVersion: '560.0', cudaCapable: true }]
+      });
+
+      const cpuModels = await ModelService.listModels({
+        provider: 'local',
+        hardwareProfile: cpuOnly,
+        localModelsDir: tmpRoot,
+        lmStudioBaseUrl: 'http://127.0.0.1:54321/v1',
+        vllmBaseUrl: 'http://127.0.0.1:54322/v1'
+      });
+      assert.ok(cpuModels.every((m) => m.target === 'local' && m.installed === true));
+      assert.ok(cpuModels.some((m) => m.id === 'qwen-2.5-3b' && m.hardwareFit?.mode === 'cpu'));
+      assert.equal(cpuModels.some((m) => m.id === 'qwen-3.8-27b'), false, 'CPU-only 8GB should not list installed 27B models');
+      assert.equal(cpuModels.some((m) => m.id === 'llama-3.3-70b'), false, 'CPU-only 8GB should not list installed 70B models');
+      assert.equal(cpuModels.some((m) => m.id === 'phi-4-mini-instruct'), false, 'Should not list uninstalled curated placeholders by default');
+
+      const gpuModels = await ModelService.listModels({
+        provider: 'local',
+        hardwareProfile: highVram,
+        localModelsDir: tmpRoot,
+        lmStudioBaseUrl: 'http://127.0.0.1:54321/v1',
+        vllmBaseUrl: 'http://127.0.0.1:54322/v1'
+      });
+      assert.ok(gpuModels.every((m) => m.installed === true));
+      assert.ok(gpuModels.some((m) => m.id === 'llama-3.3-70b' && m.hardwareFit?.status === 'optimal'));
+      assert.ok(gpuModels.some((m) => m.id === 'qwen-3.8-27b' && m.provider === 'local'));
+      assert.ok(gpuModels.some((m) => m.id === 'gemma-3-4b' && m.provider === 'local'));
+
+      // Zero-port LocalDirectProvider does not require any HTTP baseUrl/port
+      const localProv = createProvider({ provider: 'local', model: 'gemma-3-4b' });
+      assert.equal(localProv.name, 'local');
+      assert.equal(localProv.baseUrl, undefined);
+
+      // ModelRouter must never silently latency-balance a real local model onto the OM simulator
+      const { ModelRouter } = await import('../dist/providers/index.js');
+      const router = new ModelRouter({
+        routing: {
+          enabled: true,
+          strategy: 'latency',
+          balancePrimary: true,
+          fallbackChain: [{ provider: 'om', model: 'om-reasoning' }]
+        }
+      });
+      router.providerMetrics.set('local/gemma-3-4b', { ewmaLatencyMs: 12000, ewmaTtftMs: 5000 });
+      router.providerMetrics.set('om/om-reasoning', { ewmaLatencyMs: 1, ewmaTtftMs: 1 });
+      assert.equal(router._selectBalancedTarget(localProv, 'local', 'gemma-3-4b'), null);
+
+      // Live host detection & list_models skill integration
+      const liveHw = await detectSystemHardware();
+      assert.ok(liveHw.tier);
+      assert.ok(liveHw.totalRamGb > 0);
+      const registry = new SkillRegistry();
+      const skillRes = await registry.execute('list_models', { provider: 'local' });
+      assert.equal(skillRes.success, true);
+      assert.ok(skillRes.hardware && skillRes.hardware.tier);
+      assert.ok(skillRes.count > 0);
+      assert.ok(skillRes.models.every((m) => m.hardwareFit && m.installed === true));
     } finally {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }

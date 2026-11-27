@@ -335,7 +335,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (viewTitle) viewTitle.textContent = TAB_NAMES[tab] || 'OM Agent Studio';
 
     const tabLoaders: Record<string, () => void> = {
-      chat: loadSessions,
+      chat: () => {
+        void loadSessions();
+        requestAnimationFrame(() => scrollToBottom());
+      },
       agents: loadAgents,
       automations: loadAutomations,
       models: loadModels,
@@ -471,11 +474,7 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (rawProv === 'om' || rawProv === 'mock' || rawProv === 'omega') prov = 'OMEGA';
     else prov = rawProv.toUpperCase();
 
-    let mod = data.model || 'gemini-3.5-flash';
-    if (mod === 'om-mock-turbo') mod = 'om-turbo';
-    if (mod === 'om-mock-v1') mod = 'om-v1';
-    if (mod === 'om-mock-reasoning') mod = 'om-reasoning';
-    if (mod.startsWith('om-mock-')) mod = mod.replace('om-mock-', 'om-');
+    const mod = data.model || 'local';
     const target = data.target || (isLocalProviderName(rawProv) ? 'local' : 'cloud');
 
     topLoadedModel.textContent = mod;
@@ -1033,12 +1032,33 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   if (attachFileInput) {
+    const IMAGE_EXT_RE = /\.(png|jpe?g|webp|gif|bmp|avif)$/i;
+    const BINARY_EXT_RE = /\.(pdf|zip|tar|gz|7z|rar|exe|dll|bin|mp3|mp4|wav|mov|avi|ico|woff2?|ttf|eot|safetensors|onnx|gguf)$/i;
+    const readAsDataUrl = (file: File): Promise<string> =>
+      new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+      });
+
     attachFileInput.addEventListener('change', async (e) => {
       const input = e.target as HTMLInputElement;
       const files = Array.from(input.files || []);
       for (const file of files) {
+        const isImage = (file.type && file.type.startsWith('image/')) || IMAGE_EXT_RE.test(file.name);
+        const isBinary = isImage || BINARY_EXT_RE.test(file.name);
         let content = '';
-        if (file.size < 2 * 1024 * 1024) {
+        let data = '';
+        const mimeType = file.type || (isImage ? 'image/png' : 'application/octet-stream');
+
+        if (isImage && file.size < 10 * 1024 * 1024) {
+          try {
+            const dataUrl = await readAsDataUrl(file);
+            const commaIdx = dataUrl.indexOf(',');
+            data = commaIdx !== -1 ? dataUrl.slice(commaIdx + 1) : dataUrl;
+          } catch (_) { }
+        } else if (!isBinary && file.size < 512 * 1024) {
           try {
             content = await file.text();
           } catch (_) { }
@@ -1047,8 +1067,10 @@ document.addEventListener('DOMContentLoaded', () => {
           id: Math.random().toString(36).slice(2, 9),
           name: file.name,
           size: file.size,
-          type: file.type,
+          type: mimeType,
           isFolder: false,
+          isImage,
+          data,
           content
         });
       }
@@ -1518,25 +1540,42 @@ document.addEventListener('DOMContentLoaded', () => {
       fallbacks: []
     };
 
-    // Format prompt with attachments
+    // Format prompt with text attachments and send binary/image attachments separately
     let fullPrompt = text;
+    const multimodalAttachments: Array<{ name: string; mimeType: string; data: string }> = [];
     if (currentAttachments.length > 0) {
-      let attText = 'Attached file(s) and context:\n';
+      const textParts: string[] = [];
       currentAttachments.forEach((att) => {
-        if (att.content) {
-          attText += `\n--- [FILE: ${att.name}] ---\n${att.content}\n--- [END OF ${att.name}] ---\n`;
+        if (att.isImage && att.data) {
+          multimodalAttachments.push({
+            name: att.name,
+            mimeType: att.type || 'image/png',
+            data: att.data
+          });
+          textParts.push(`- [Image attached: ${att.name} (${formatBytes(att.size)})]`);
+        } else if (att.content) {
+          textParts.push(`--- [FILE: ${att.name}] ---\n${att.content}\n--- [END OF ${att.name}] ---`);
         } else {
-          attText += `\n- ${att.name} (${formatBytes(att.size)})\n`;
+          textParts.push(`- ${att.name} (${formatBytes(att.size)})`);
         }
       });
-      fullPrompt = (attText + '\n' + (text || 'Please inspect the attached files.')).trim();
+      if (textParts.length > 0) {
+        const attText = `Attached file(s) and context:\n${textParts.join('\n')}`;
+        fullPrompt = (attText + '\n\n' + (text || 'Please inspect the attached files.')).trim();
+      }
     }
 
     try {
       const response = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: fullPrompt, effort: currentEffort, worktree: currentWorktree, planMode: currentPlanMode }),
+        body: JSON.stringify({
+          prompt: fullPrompt,
+          ...(multimodalAttachments.length > 0 ? { attachments: multimodalAttachments } : {}),
+          effort: currentEffort,
+          worktree: currentWorktree,
+          planMode: currentPlanMode
+        }),
         signal: activeStreamAbortController?.signal
       });
 
@@ -2116,9 +2155,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!promptVal || !arenaResultsBox) return;
     const parseTarget = (raw: string) => {
       const [provider, ...rest] = raw.trim().split('/');
-      return { provider: provider || 'om', model: rest.join('/') || 'om-turbo' };
+      return { provider: provider || 'local', model: rest.join('/') || 'auto' };
     };
-    const targets = [parseTarget(arenaTargetA?.value || 'om/om-turbo'), parseTarget(arenaTargetB?.value || 'om/om-reasoning')];
+    const targets = [parseTarget(arenaTargetA?.value || 'local/auto'), parseTarget(arenaTargetB?.value || 'gemini/gemini-3.5-flash')];
     arenaCompareBtn.disabled = true;
     arenaResultsBox.innerHTML = `<div class="activity-empty">Running side-by-side model comparison...</div>`;
     try {

@@ -19,16 +19,13 @@ export function bindCollapsibleToggle(
 
 export function isLocalProviderName(providerName: string): boolean {
   const p = (providerName || '').toLowerCase();
-  return ['lmstudio', 'vllm', 'om', 'omega', 'mock'].includes(p);
+  return ['local', 'lmstudio', 'vllm', 'om', 'omega', 'mock'].includes(p);
 }
 
 export const MODEL_LIMITS_MAP: Record<string, { input: number; output: number; displayName: string }> = {
-  'om-v1': { input: 128000, output: 4096, displayName: 'OM v1' },
-  'om-turbo': { input: 128000, output: 4096, displayName: 'OM Turbo' },
-  'om-reasoning': { input: 128000, output: 8192, displayName: 'OM Reasoning' },
-  'om-mock-v1': { input: 128000, output: 4096, displayName: 'OM v1' },
-  'om-mock-turbo': { input: 128000, output: 4096, displayName: 'OM Turbo' },
-  'om-mock-reasoning': { input: 128000, output: 8192, displayName: 'OM Reasoning' },
+  'gemma-3-4b': { input: 131072, output: 8192, displayName: 'Gemma 3 4B' },
+  'gemma-3-12b': { input: 131072, output: 8192, displayName: 'Gemma 3 12B' },
+  'gemma-3-27b': { input: 131072, output: 8192, displayName: 'Gemma 3 27B' },
   'gemini-3.8-flash': { input: 1048576, output: 65536, displayName: 'Gemini 3.8 Flash' },
   'gemini-3.5-flash': { input: 1048576, output: 65536, displayName: 'Gemini 3.5 Flash' },
   'gemini-3.5-flash-lite': { input: 1048576, output: 65536, displayName: 'Gemini 3.5 Flash Lite' },

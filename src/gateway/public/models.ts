@@ -79,9 +79,12 @@ export function initModels(deps: ModelsDeps) {
   } = deps;
 
   let cachedModels: any[] = [];
+  let cachedHardware: any = null;
   let activeModelScope = 'all';
   let currentProviderFilter = 'all';
   let serverContextUsage: ContextUsageSnapshot | null = null;
+
+  const modelsHardwareBanner = document.getElementById('modelsHardwareBanner');
 
   const usageStatusDot = document.getElementById('usageStatusDot');
   const usageDraftBadge = document.getElementById('usageDraftBadge');
@@ -168,6 +171,9 @@ export function initModels(deps: ModelsDeps) {
       const isCurrent = m.id.toLowerCase() === currentModel;
       const target = m.target || (isLocalProviderName(m.provider) ? 'local' : 'cloud');
       const provUpper = (m.provider && (m.provider.toLowerCase() === 'gemini' || m.provider.toLowerCase() === 'google')) ? 'GEMINI' : (m.provider === 'mock' || m.provider === 'omega' ? 'OMEGA' : (m.provider || '').toUpperCase());
+      const fitMeta = m.hardwareFit && m.hardwareFit.mode !== 'simulator'
+        ? ` • ${m.hardwareFit.status.toUpperCase()}${m.hardwareFit.estimatedVramGb && m.hardwareFit.mode !== 'cpu' ? ` (~${m.hardwareFit.estimatedVramGb}GB VRAM)` : m.hardwareFit.estimatedRamGb ? ` (~${m.hardwareFit.estimatedRamGb}GB RAM)` : ''}`
+        : '';
       const item = document.createElement('div');
       item.className = `dropdown-model-item ${isCurrent ? 'current' : ''}`;
       item.innerHTML = `
@@ -176,7 +182,7 @@ export function initModels(deps: ModelsDeps) {
             <span class="dropdown-item-title">${escapeHtml(m.id)}</span>
             <span class="model-item-target ${target}">${target.toUpperCase()}</span>
           </div>
-          <span class="dropdown-item-sub">${escapeHtml(m.displayName || provUpper)} • ${escapeHtml(provUpper)}</span>
+          <span class="dropdown-item-sub">${escapeHtml(m.displayName || provUpper)} • ${escapeHtml(provUpper)}${escapeHtml(fitMeta)}</span>
         </div>
         ${isCurrent ? '<span class="dropdown-item-pill">ACTIVE</span>' : ''}
       `;
@@ -199,7 +205,7 @@ export function initModels(deps: ModelsDeps) {
   function updateModelUsageBar() {
     if (!modelUsageBar) return;
 
-    const currentModelId = ((inputModelTag && inputModelTag.textContent) || (topLoadedModel && topLoadedModel.textContent) || 'om-v1').trim();
+    const currentModelId = ((inputModelTag && inputModelTag.textContent) || (topLoadedModel && topLoadedModel.textContent) || 'local').trim();
     const modelLower = currentModelId.toLowerCase();
     const modelMeta =
       (cachedModels || []).find((m: any) => m.id && m.id.toLowerCase() === modelLower) ||
@@ -219,12 +225,17 @@ export function initModels(deps: ModelsDeps) {
       draftChars += (promptInput.value || '').length;
     }
     const attachedFiles = getAttachedFiles();
+    let imageAttachmentTokens = 0;
     if (Array.isArray(attachedFiles)) {
       attachedFiles.forEach((f) => {
-        draftChars += (f.content || '').length || (f.size || 0);
+        if (f.isImage) {
+          imageAttachmentTokens += 258;
+        } else {
+          draftChars += (f.content || '').length;
+        }
       });
     }
-    const draftTokens = draftChars > 0 ? Math.ceil(draftChars / 4) : 0;
+    const draftTokens = (draftChars > 0 ? Math.ceil(draftChars / 4) : 0) + imageAttachmentTokens;
 
     // Prefer accurate backend context telemetry (provider API usage or BPE tokenizer over system + tools + history).
     // Fall back to clean message text only when backend telemetry has not arrived yet.
@@ -357,32 +368,30 @@ export function initModels(deps: ModelsDeps) {
     try {
       const res = await fetch('/api/models');
       const data = await res.json();
+      if (data.hardware) {
+        cachedHardware = data.hardware;
+      }
       if (data.success && Array.isArray(data.models)) {
-        cachedModels = data.models.map((m: any) => {
-          let id = m.id;
-          if (id && id.startsWith('om-mock-')) id = id.replace('om-mock-', 'om-');
-          let displayName = m.displayName || id;
-          if (displayName.toLowerCase().includes('mock')) {
-            displayName = displayName.replace(/\s*Mock\s*/gi, ' ').replace(/\s+/g, ' ').trim();
-          }
-          if (displayName.includes('Simulator')) {
-            displayName = displayName.replace(/\s*Simulator\s*/g, ' ').replace(/\s+/g, ' ').trim();
-          }
-          if (id === 'om-v1') displayName = 'OM v1';
-          if (id === 'om-turbo') displayName = 'OM Turbo';
-          if (id === 'om-reasoning') displayName = 'OM Reasoning';
-          let provider = m.provider || data.provider || 'gemini';
-          if (provider.toLowerCase() === 'google') provider = 'gemini';
-          if (provider.toLowerCase() === 'omega' || provider.toLowerCase() === 'mock') provider = 'om';
-          const target = m.target || (isLocalProviderName(provider) ? 'local' : 'cloud');
-          return {
-            ...m,
-            id,
-            displayName,
-            provider,
-            target
-          };
-        });
+        cachedModels = data.models
+          .filter((m: any) => {
+            const p = String(m.provider || '').toLowerCase();
+            const id = String(m.id || '').toLowerCase();
+            return !['om', 'mock', 'omega'].includes(p) && !/^om-(?:mock-)?(?:v1|turbo|reasoning)$/.test(id);
+          })
+          .map((m: any) => {
+            const id = m.id;
+            const displayName = m.displayName || id;
+            let provider = m.provider || data.provider || 'gemini';
+            if (provider.toLowerCase() === 'google') provider = 'gemini';
+            const target = m.target || (isLocalProviderName(provider) ? 'local' : 'cloud');
+            return {
+              ...m,
+              id,
+              displayName,
+              provider,
+              target
+            };
+          });
       }
     } catch (_) { }
     updateModelUsageBar();
@@ -398,6 +407,14 @@ export function initModels(deps: ModelsDeps) {
       });
       if (res.ok) {
         const data = await res.json();
+        if (isLocalProviderName(data.provider || provider) && (data.model || model)) {
+          try {
+            localStorage.setItem('omega.lastLocalModel', JSON.stringify({
+              provider: data.provider || provider,
+              id: data.model || model
+            }));
+          } catch (_) { }
+        }
         applyStatusToUI(data);
         if (getActiveTab() === 'models') renderFullModelsGrid();
       } else {
@@ -415,14 +432,40 @@ export function initModels(deps: ModelsDeps) {
     renderLegacyModelsTable();
   }
 
+  function renderHardwareBanner() {
+    if (!modelsHardwareBanner) return;
+    if (!cachedHardware) {
+      modelsHardwareBanner.hidden = true;
+      return;
+    }
+    const hw = cachedHardware;
+    const badgeClass = hw.hasGpu ? 'hw-gpu' : 'hw-cpu';
+    const badgeText = hw.hasGpu
+      ? (hw.unifiedMemory ? `UNIFIED ${hw.totalVramGb} GB` : `GPU · ${hw.totalVramGb} GB VRAM`)
+      : `CPU ONLY · ${hw.totalRamGb} GB RAM`;
+    modelsHardwareBanner.hidden = false;
+    modelsHardwareBanner.innerHTML = `
+      <div class="models-hw-left">
+        <span class="models-hw-badge ${badgeClass}">${escapeHtml(badgeText)}</span>
+        <span class="models-hw-summary">${escapeHtml(hw.summary || hw.tierLabel || '')}</span>
+      </div>
+      <div class="models-hw-right">
+        <span class="models-hw-meta">Recommended local max: <b>~${escapeHtml(String(hw.recommendedMaxParamsB))}B</b></span>
+      </div>
+    `;
+  }
+
   function renderFullModelsGrid() {
     if (!fullModelsGrid) return;
+    renderHardwareBanner();
     const query = (modelsFilterInput?.value || '').trim().toLowerCase();
     const activeModel = (topLoadedModel.textContent || '').trim().toLowerCase();
 
     const filtered = cachedModels.filter((m) => {
       const p = (m.provider || 'gemini').toLowerCase();
+      const target = m.target || (isLocalProviderName(p) ? 'local' : 'cloud');
       const provMatch = currentProviderFilter === 'all' || (
+        (currentProviderFilter === 'local' && target === 'local') ||
         p === currentProviderFilter.toLowerCase() ||
         ((currentProviderFilter === 'gemini' || currentProviderFilter === 'google') && (p === 'gemini' || p === 'google')) ||
         ((currentProviderFilter === 'om' || currentProviderFilter === 'mock' || currentProviderFilter === 'omega') && (p === 'om' || p === 'mock' || p === 'omega'))
@@ -509,7 +552,14 @@ export function initModels(deps: ModelsDeps) {
       const currentTarget = inputModelTargetPill?.dataset.target || 'local';
       if (currentTarget !== 'local') {
         const localModels = cachedModels.filter((m) => m.target === 'local');
-        const targetModel = localModels[0] || { provider: 'om', id: 'om-v1' };
+        let lastLocal: { provider: string; id: string } | null = null;
+        try {
+          const saved = JSON.parse(localStorage.getItem('omega.lastLocalModel') || 'null');
+          if (saved && saved.id && localModels.some((m) => m.id.toLowerCase() === String(saved.id).toLowerCase())) {
+            lastLocal = saved;
+          }
+        } catch (_) { }
+        const targetModel = lastLocal || localModels[0] || { provider: 'local', id: 'auto' };
         await switchActiveModel(targetModel.provider, targetModel.id);
       }
       toggleModelDropdown();

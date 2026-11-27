@@ -115,9 +115,9 @@ export function initAgents() {
     { id: 'kimi', label: 'Kimi (Moonshot)' },
     { id: 'qwen', label: 'Qwen (Alibaba)' },
     { id: 'glm', label: 'GLM (Zhipu)' },
+    { id: 'local', label: 'Local (Zero-Port)' },
     { id: 'lmstudio', label: 'LM Studio (Local)' },
-    { id: 'vllm', label: 'vLLM (Local)' },
-    { id: 'om', label: 'OM Built-in' }
+    { id: 'vllm', label: 'vLLM (Local)' }
   ];
 
   function populateModelSelect(
@@ -1251,6 +1251,23 @@ export function initAgents() {
         const kindChip = isDetached ? 'Detached Worker' : 'Chat Checkpoint';
         const isActiveRunning = isAlive || statusRaw === 'running';
 
+        const answersList = Array.isArray(s.answers) ? s.answers : [];
+        const turnPrompts: string[] = [];
+        for (const ans of answersList) {
+          const p = String(ans?.prompt || '').trim();
+          if (p) turnPrompts.push(p);
+        }
+        const latestPrompt = String(s.prompt || '').trim();
+        if (latestPrompt && !turnPrompts.some((p) => p === latestPrompt)) {
+          turnPrompts.push(latestPrompt);
+        }
+        const turnsCount = turnPrompts.length;
+        const promptPreviewHtml = turnsCount > 1
+          ? `<div class="agent-card-desc">${turnPrompts
+              .map((p, idx) => `<div><strong>${idx + 1}.</strong> ${escapeHtml(p.slice(0, 120))}</div>`)
+              .join('')}</div>`
+          : `<p class="agent-card-desc">${escapeHtml((turnPrompts[0] || s.prompt || '').slice(0, 140))}</p>`;
+
         return `
           <div class="agent-card">
             <div class="agent-card-header">
@@ -1260,9 +1277,10 @@ export function initAgents() {
               </div>
               <span class="agent-card-meta">${escapeHtml(stepInfo)} · ${escapeHtml(tokInfo)}</span>
             </div>
-            <p class="agent-card-desc">${escapeHtml((s.prompt || '').slice(0, 140))}</p>
+            ${promptPreviewHtml}
             <div class="agent-card-chips">
               ${renderChip(kindChip)}
+              ${turnsCount > 1 ? renderChip(`${turnsCount} turns`, 'accent') : ''}
               ${renderChip(wsMode)}
               ${isDetached && s.pid ? renderChip(`PID ${s.pid}`) : ''}
               ${s.swarmId ? renderChip(s.swarmId, 'accent') : ''}

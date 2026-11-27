@@ -2,6 +2,7 @@
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { OMAgent } from '../dist/agent.js';
+import { ModelService } from '../dist/modelService.js';
 import { startGateway } from '../dist/gateway/server.js';
 import { runInitCommand } from '../dist/cli/init.js';
 import { SessionReplay } from '../dist/replay.js';
@@ -103,9 +104,9 @@ function printHelp() {
   const commands = [
     ['/help', 'Show this help message'],
     ['/cloud [model]', 'Switch inference to cloud models (Gemini, GPT, Claude)'],
-    ['/local [model]', 'Switch inference to local models (vLLM, LM Studio, OM)'],
-    ['/provider [name] [model]', 'View or switch active provider (gemini, openai, anthropic, vllm, lmstudio, om)'],
-    ['/models [provider]', 'List available models (e.g. Gemini, Gpt)'],
+    ['/local [model]', 'Switch inference to local models (direct zero-port, vLLM, LM Studio)'],
+    ['/provider [name] [model]', 'View or switch active provider (local, gemini, openai, anthropic, vllm, lmstudio)'],
+    ['/models [provider]', 'List available models (e.g. local, all, gemini, gpt)'],
     ['/model <name>', 'Switch the active model for the current provider'],
     ['/skills', 'List all registered skills and signatures'],
     ['/memory', 'Display contents of long-term MEMORY.md'],
@@ -114,7 +115,7 @@ function printHelp() {
     ['/new', 'Start a brand new conversation session'],
     ['/undo [runId]', 'Rollback workspace file changes from the last (or given) run'],
     ['/fork <step>', 'Fork current session from a specific step into a new branch'],
-    ['/compare <prompt>', 'Compare active model vs local om-turbo on the same prompt'],
+    ['/compare <prompt>', 'Compare active model vs local model on the same prompt'],
     ['/distill', 'Distill daily journals & sessions into long-term memory'],
     ['/gateway', 'Launch the OM Web UI Gateway dashboard'],
     ['/exit', 'Exit OM']
@@ -129,7 +130,14 @@ async function handleListModels(agent, providerName) {
   const displayProvider = (targetProvider === 'openai' || targetProvider === 'chatgpt') ? 'gpt' : targetProvider;
   console.log(`\n${C.skyBlue}> Querying available models for ${C.bold}${displayProvider}${C.reset}...`);
   try {
-    const models = await agent.listModels(targetProvider);
+    const isHardwareAware = targetProvider === 'local' || targetProvider === 'all';
+    const hardware = isHardwareAware ? await ModelService.getHardwareProfile() : null;
+    const models = await agent.listModels(targetProvider, hardware ? { hardwareProfile: hardware } : {});
+    if (hardware) {
+      const hwIcon = hardware.hasGpu ? `${C.green}GPU${C.reset}` : `${C.yellow}CPU${C.reset}`;
+      console.log(`\n${C.bold}Detected System Hardware [${hwIcon}${C.bold}]:${C.reset} ${hardware.summary}`);
+      console.log(`${C.dim}  Recommended max local size: ~${hardware.recommendedMaxParamsB}B (${hardware.recommendedRuntime})${C.reset}`);
+    }
     if (!models || models.length === 0) {
       console.log(`\n${C.yellow}! No models returned for provider '${displayProvider}'.${C.reset}\n`);
       return;
@@ -145,6 +153,13 @@ async function handleListModels(agent, providerName) {
         m.id.toLowerCase() === activeModel.replace(/^models\//, '')
       );
       const activeBadge = isCurrent ? ` ${C.green}${C.bold}[ACTIVE]${C.reset}` : '';
+      const installedBadge = m.installed && m.provider !== 'om' ? ` ${C.cyan}[INSTALLED]${C.reset}` : '';
+      let fitBadge = '';
+      if (m.hardwareFit) {
+        const st = m.hardwareFit.status;
+        const color = st === 'optimal' ? C.green : st === 'fits' ? C.cyan : st === 'tight' ? C.yellow : C.red;
+        fitBadge = ` ${color}[${st.toUpperCase()}]${C.reset}`;
+      }
       const idStr = `${C.bold}${C.skyBlue}${m.id.padEnd(34)}${C.reset}`;
       const nameStr = m.displayName && m.displayName !== m.id ? `${C.reset}${m.displayName}` : '';
 
@@ -156,8 +171,10 @@ async function handleListModels(agent, providerName) {
         if (parts) limits = ` ${C.dim}(${parts})${C.reset}`;
       }
 
-      console.log(`  * ${idStr} ${nameStr}${limits}${activeBadge}`);
-      if (m.description) {
+      console.log(`  * ${idStr} ${nameStr}${limits}${installedBadge}${fitBadge}${activeBadge}`);
+      if (m.hardwareFit?.reason) {
+        console.log(`    ${C.dim}${m.hardwareFit.reason}${C.reset}`);
+      } else if (m.description) {
         const desc = m.description.length > 90 ? m.description.slice(0, 87) + '...' : m.description;
         console.log(`    ${C.dim}${desc}${C.reset}`);
       }
@@ -202,7 +219,7 @@ Usage:
   npx omega-harness init [dir] Scaffold a new OMega project, template skills, and secure .env
   om                           Start interactive agent REPL
   om "<instruction>"           Run single task and exit
-  om models [provider]         List available models (e.g. Gemini, Gpt)
+  om models [provider]         List available models (e.g. local, all, gemini, gpt)
   om gateway                   Start OM Web UI Gateway dashboard
   om service <action>          Manage 24/7 native OS service (install|uninstall|status)
   om --help                    Show this help
@@ -537,7 +554,7 @@ Usage:
         const cmpPrompt = trimmed.slice('/compare '.length).trim();
         const cmp = await SessionReplay.compareModels(agent.options, cmpPrompt, [
           { provider: agent.config.provider, model: agent.config.model },
-          { provider: 'om', model: 'om-turbo' }
+          { provider: 'local', model: 'auto' }
         ]);
         console.log(`\n${C.bold}Model Comparison:${C.reset}`);
         for (const r of cmp.results) {

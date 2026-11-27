@@ -63,34 +63,48 @@ export const systemSkills: SkillDefinition[] = [
 
   {
     name: 'list_models',
-    description: 'List available models for the active or specified provider.',
+    description: 'List available models for the active or specified provider, including hardware-aware local models (use provider="local" to detect CPU/GPU VRAM and list compatible local models).',
     parameters: {
       type: 'object',
       properties: {
         provider: {
           type: 'string',
-          description: 'Optional provider name (gemini, openai, anthropic, deepseek, kimi, qwen, glm, lmstudio, vllm, om).'
+          description: 'Optional provider name (local, all, gemini, openai, anthropic, deepseek, kimi, qwen, glm, lmstudio, vllm, om).'
+        },
+        includeTight: {
+          type: 'boolean',
+          description: 'When listing local models, also include tight-fit models.'
         }
       }
     },
     execute: async (args: Record<string, unknown> = {}, context: SkillContext = {}) => {
       const rawProv = String(args.provider || context?.config?.provider || 'gemini').toLowerCase();
       const provider = (rawProv === 'mock' || rawProv === 'omega') ? 'om' : rawProv;
+      const includeHardware = provider === 'local' || provider === 'all';
+      const hardware = includeHardware ? await ModelService.getHardwareProfile() : undefined;
       const models = await ModelService.listModels({
         provider,
-        config: context?.config
+        config: context?.config,
+        hardwareProfile: hardware,
+        includeTight: Boolean(args.includeTight)
       });
       return {
         success: true,
         provider,
+        ...(hardware ? { hardware } : {}),
         count: models.length,
         models: models.map((m) => ({
           id: m.id,
           name: m.name,
           displayName: m.displayName,
           description: m.description,
+          provider: m.provider,
+          target: m.target,
           inputTokenLimit: m.inputTokenLimit,
-          outputTokenLimit: m.outputTokenLimit
+          outputTokenLimit: m.outputTokenLimit,
+          ...(m.installed !== undefined ? { installed: m.installed } : {}),
+          ...(m.recommended !== undefined ? { recommended: m.recommended } : {}),
+          ...(m.hardwareFit ? { hardwareFit: m.hardwareFit } : {})
         }))
       };
     }

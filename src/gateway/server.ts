@@ -782,6 +782,20 @@ ${prompt && prompt.trim() ? prompt.trim() : `Execute procedure for ${cleanName}.
       } else {
         console.log('');
       }
+      if (
+        port !== 0 &&
+        agent.config.provider === 'local' &&
+        typeof (agent.provider as any)?.warmup === 'function'
+      ) {
+        const lastLocalLabel =
+          (agent.config.model && agent.config.model !== 'auto' ? agent.config.model : null) ||
+          agent.config.providers?.local?.model ||
+          'auto';
+        console.log(`[OMega Local] Pre-warming last local model (${lastLocalLabel}) in background...`);
+        (agent.provider as any).warmup()
+          .then((resolvedId?: string) => console.log(`[OMega Local] Model '${resolvedId || lastLocalLabel}' ready in memory.`))
+          .catch(() => {});
+      }
       resolve({ server, agent, agentManager, url, port: actualPort, host, authToken });
     });
   });

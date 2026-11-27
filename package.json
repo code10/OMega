@@ -12,6 +12,7 @@
   "files": [
     "dist/",
     "bin/",
+    "scripts/local_worker.py",
     "skills/",
     "om.config.json",
     "README.md"

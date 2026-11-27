@@ -2,6 +2,7 @@ import { OMProvider } from './omega.js';
 import { OpenAIProvider } from './openai.js';
 import { AnthropicProvider } from './anthropic.js';
 import { GeminiProvider } from './gemini.js';
+import { LocalDirectProvider } from './localDirect.js';
 import { ModelRouter } from './router.js';
 
 interface OpenAICompatSpec {
@@ -110,6 +111,8 @@ export function createProvider(config: Record<string, any> = {}) {
     case 'gemini':
     case 'google':
       return new GeminiProvider(getOptions('gemini'));
+    case 'local':
+      return new LocalDirectProvider(getOptions('local'));
     case 'om':
     case 'omega':
     case 'mock':
@@ -123,5 +126,6 @@ export {
   OpenAIProvider,
   AnthropicProvider,
   GeminiProvider,
+  LocalDirectProvider,
   ModelRouter
 };

@@ -85,7 +85,8 @@ test('OM Gateway Server API endpoints', async (t) => {
     assert.equal(data.provider, 'om');
     assert.ok(Array.isArray(data.models));
     assert.ok(data.count >= 3);
-    assert.ok(data.models.some((m) => m.id === 'om-v1' || m.id === 'om-mock-v1'));
+    assert.ok(data.hardware && typeof data.hardware.tier === 'string');
+    assert.equal(data.models.some((m) => m.id === 'om-v1' || m.id === 'om-turbo' || m.id === 'om-reasoning'), false);
   });
 
   await t.test('GET /api/sessions and /api/system-prompt support LM Studio studio controls', async () => {

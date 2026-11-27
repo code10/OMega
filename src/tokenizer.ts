@@ -241,17 +241,27 @@ export function encodeTokens(text: unknown): number[] {
   return defaultTokenizer.encode(str);
 }
 
+const DATA_URI_RE = /data:[a-z0-9.+-]+\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]{128,}/gi;
+
 /**
  * Count BPE tokens for a string or JSON-serializable value, with optional model factor.
+ * Embedded base64 media payloads are counted at ~258 vision tokens rather than raw base64 text.
  */
 export function countTokens(text: unknown, model = ''): number {
   if (!text) return 0;
-  const str = typeof text === 'string' ? text : JSON.stringify(text);
+  let str = typeof text === 'string' ? text : JSON.stringify(text);
   if (str.length === 0) return 0;
-  const baseCount = defaultTokenizer.count(str);
+  let mediaTokens = 0;
+  if (str.includes(';base64,')) {
+    str = str.replace(DATA_URI_RE, () => {
+      mediaTokens += 258;
+      return '';
+    });
+  }
+  const baseCount = str.length > 0 ? defaultTokenizer.count(str) : 0;
   const m = String(model || '').toLowerCase();
   const modelFactor = m.includes('claude') ? 1.04 : 1.0;
-  return Math.ceil(baseCount * modelFactor);
+  return Math.ceil(baseCount * modelFactor) + mediaTokens;
 }
 
 /**

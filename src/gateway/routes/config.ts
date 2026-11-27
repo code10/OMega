@@ -4,6 +4,7 @@ import type http from 'node:http';
 import { readJsonBody, sendJson } from '../httpUtils.js';
 import { saveConfigPatch } from '../../config.js';
 import { collectDeviceSpecs } from '../../deviceSpecs.js';
+import { ModelService } from '../../modelService.js';
 
 export interface ConfigRouteContext {
   req: http.IncomingMessage;
@@ -32,11 +33,38 @@ export async function handleConfigRoutes(ctx: ConfigRouteContext): Promise<boole
     }
     try {
       sessionManager.setProvider(provider, model);
+      const isDirectLocal = agent.config.provider === 'local';
+      if (isDirectLocal && agent.config.model && agent.config.model !== 'auto') {
+        agent.config.providers = {
+          ...agent.config.providers,
+          local: {
+            ...agent.config.providers?.local,
+            model: agent.config.model
+          }
+        };
+      }
       if (persistConfig) {
-        saveConfigPatch(
-          { provider: agent.config.provider, model: agent.config.model },
-          agent.config.rootDir
-        );
+        const patch: Record<string, any> = {
+          provider: agent.config.provider,
+          model: agent.config.model
+        };
+        if (isDirectLocal && agent.config.model && agent.config.model !== 'auto') {
+          patch.providers = {
+            ...agent.config.providers,
+            local: {
+              ...agent.config.providers?.local,
+              model: agent.config.model
+            }
+          };
+        }
+        saveConfigPatch(patch, agent.config.rootDir);
+      }
+      if (isDirectLocal && typeof (agent.provider as any)?.warmup === 'function') {
+        (agent.provider as any).warmup()
+          .then((warmedId?: string) => {
+            if (warmedId) console.log(`[OMega Local] Model '${warmedId}' ready in memory.`);
+          })
+          .catch(() => {});
       }
       sendJson(res, 200, {
         success: true,
@@ -62,14 +90,20 @@ export async function handleConfigRoutes(ctx: ConfigRouteContext): Promise<boole
       const providerParam = url.searchParams.get('provider');
       const scopeParam = url.searchParams.get('scope'); // 'cloud' | 'local' | 'all'
       const refresh = url.searchParams.get('refresh') === '1' || url.searchParams.get('refresh') === 'true';
+      const includeTight = url.searchParams.get('includeTight') === '1' || url.searchParams.get('includeTight') === 'true';
+      const includeUnsupported = url.searchParams.get('includeUnsupported') === '1' || url.searchParams.get('includeUnsupported') === 'true';
       const targetProvider = providerParam || 'all';
-      const models = await agent.listModels(targetProvider, { scope: scopeParam, refresh });
+      const [models, hardware] = await Promise.all([
+        agent.listModels(targetProvider, { scope: scopeParam, refresh, includeTight, includeUnsupported }),
+        ModelService.getHardwareProfile({ refresh })
+      ]);
 
       sendJson(res, 200, {
         success: true,
         provider: agent.config.provider,
         model: agent.config.model,
         target: agent._getTarget(),
+        hardware,
         count: models.length,
         models
       });
@@ -248,7 +282,7 @@ export async function handleConfigRoutes(ctx: ConfigRouteContext): Promise<boole
     });
 
     const providerNames = Array.from(
-      new Set(['gemini', 'openai', 'anthropic', 'vllm', 'om', ...Object.keys(providersCfg)])
+      new Set(['gemini', 'openai', 'anthropic', 'local', 'vllm', ...Object.keys(providersCfg)])
     );
     const providers = providerNames.map((id) => {
       const cfg = providersCfg[id] || {};

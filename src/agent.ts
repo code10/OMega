@@ -51,7 +51,7 @@ const PROVIDER_ALIASES: Record<string, string> = {
   mock: 'om',
   omega: 'om'
 };
-const SUPPORTED_PROVIDERS = new Set(['gemini', 'openai', 'anthropic', 'deepseek', 'kimi', 'qwen', 'glm', 'lmstudio', 'vllm', 'om']);
+const SUPPORTED_PROVIDERS = new Set(['gemini', 'openai', 'anthropic', 'deepseek', 'kimi', 'qwen', 'glm', 'local', 'lmstudio', 'vllm', 'om']);
 const MAX_TOOL_OUTPUT_CHARS = 48000;
 
 export class OMAgent extends EventEmitter {
@@ -208,7 +208,7 @@ export class OMAgent extends EventEmitter {
   setProvider(providerName: string, modelOverride?: string, persist = true) {
     const pName = OMAgent.normalizeProvider(providerName);
     if (!SUPPORTED_PROVIDERS.has(pName)) {
-      throw new Error(`Unknown provider '${providerName}'. Supported providers: gemini, openai (gpt), anthropic (claude), deepseek, kimi (moonshot), qwen (dashscope), glm (zhipu), lmstudio, vllm, om.`);
+      throw new Error(`Unknown provider '${providerName}'. Supported providers: local, gemini, openai (gpt), anthropic (claude), deepseek, kimi (moonshot), qwen (dashscope), glm (zhipu), lmstudio, vllm.`);
     }
 
     const credCheck = this.checkProviderCredentials(pName);
@@ -224,6 +224,7 @@ export class OMAgent extends EventEmitter {
       kimi: this.config.providers?.kimi?.model || 'kimi-k2-0711-preview',
       qwen: this.config.providers?.qwen?.model || 'qwen-plus',
       glm: this.config.providers?.glm?.model || 'glm-4.5-flash',
+      local: this.config.providers?.local?.model || 'auto',
       lmstudio: process.env.LMSTUDIO_MODEL || this.config.providers?.lmstudio?.model || 'local-model',
       vllm: process.env.VLLM_MODEL || this.config.providers?.vllm?.model || 'default',
       om: this.config.providers?.om?.model || this.config.providers?.mock?.model || 'om-turbo'

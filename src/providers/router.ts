@@ -456,7 +456,7 @@ export class ModelRouter {
    */
   static isLocalProvider(providerName?: string) {
     const p = (providerName || '').toLowerCase();
-    return ['lmstudio', 'vllm', 'om', 'omega', 'mock'].includes(p);
+    return ['local', 'lmstudio', 'vllm', 'om', 'omega', 'mock'].includes(p);
   }
 
   /**
@@ -612,6 +612,9 @@ export class ModelRouter {
    * Select the best starting target from [primary, ...healthyFallbacks] when load balancing or RPM spillover is enabled.
    */
   _selectBalancedTarget(primaryProvider: any, primaryName: string, primaryModel: string) {
+    // Never silently load-balance a user-selected local model onto another model or the built-in OM simulator
+    if (ModelRouter.isLocalProvider(primaryName)) return null;
+
     const strategy = String(this.routingConfig.strategy || 'priority').toLowerCase();
     const rpmGuardEnabled = Boolean(this.routingConfig.rpmGuard?.enabled);
     const shouldBalance =
@@ -951,6 +954,7 @@ export class ModelRouter {
       dashscope: this.config.providers?.qwen?.model || 'qwen-plus',
       glm: this.config.providers?.glm?.model || 'glm-4.5-flash',
       zhipu: this.config.providers?.glm?.model || 'glm-4.5-flash',
+      local: this.config.providers?.local?.model || 'auto',
       lmstudio: this.config.providers?.lmstudio?.model || 'local-model',
       vllm: this.config.providers?.vllm?.model || 'default',
       om: this.config.providers?.om?.model || this.config.providers?.mock?.model || 'om-reasoning',
